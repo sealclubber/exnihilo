@@ -1,0 +1,15 @@
+{
+  "name": "@worldsim/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@worldsim/core": "0.1.0",
+    "better-sqlite3": "^13.2.0",
+    "fastify": "^5.12.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6"
+  }
+}
