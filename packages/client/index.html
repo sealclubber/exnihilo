@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>World Sim</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1 id="world-name">World Sim</h1>
+      <span id="world-date"></span>
+      <span id="status" role="status"></span>
+    </header>
+    <main>
+      <div id="map">
+        <canvas id="canvas" aria-label="World map"></canvas>
+        <div id="tooltip" hidden></div>
+        <div id="controls">
+          <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
+          <button id="zoom-reset" type="button" title="Show the whole map" aria-label="Show the whole map">&#8962;</button>
+        </div>
+        <ul id="legend" aria-label="Legend">
+          <li><span class="swatch road"></span>Road</li>
+          <li><span class="swatch trail"></span>Trail</li>
+          <li><span class="swatch sea-route"></span>Sea route</li>
+          <li><span class="swatch river"></span>River</li>
+        </ul>
+      </div>
+      <aside id="panel" aria-live="polite">
+        <p class="hint">Drag to pan, scroll to zoom. Click a settlement to see its brief.</p>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
