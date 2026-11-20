@@ -1,7 +1,7 @@
 # World Sim
 
 A persistent world explored from a world map down to a street. This repository
-holds the first three phases:
+holds the first four phases:
 
 1. An importer that turns an Azgaar's Fantasy Map Generator (AFMG) export into
    our own world format, a server that stores and serves it, and a browser
@@ -13,19 +13,24 @@ holds the first three phases:
 3. A city's first geometry: a street graph, the water, and a lot for every
    building, laid out simply and shown as a town map with walking paths.
 
+4. Daily life: every resident has a plan for every day and a position at every
+   moment, shown on the town map under a clock that can be sped up, slowed,
+   paused and set.
+
 The briefs for this work are [worldsim-phase1-gameplan.md](worldsim-phase1-gameplan.md),
 [worldsim-phase2-gameplan.md](worldsim-phase2-gameplan.md),
 [worldsim-phase2_5-gameplan.md](worldsim-phase2_5-gameplan.md) (a patch that makes
-households, working ages and workplaces hang together) and
-[worldsim-phase3-gameplan.md](worldsim-phase3-gameplan.md).
+households, working ages and workplaces hang together),
+[worldsim-phase3-gameplan.md](worldsim-phase3-gameplan.md) and
+[worldsim-phase4-gameplan.md](worldsim-phase4-gameplan.md).
 
 ## Layout
 
 | Path | Holds |
 | --- | --- |
-| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, and the layout format, generator and path function. Pure code: no disk, network, clock or unseeded randomness. |
-| `packages/server` | SQLite storage, the pack loader, the import and generate commands, and the HTTP API. |
-| `packages/client` | The browser viewer, city inspector and town map. Uses `core` for types only. |
+| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, the layout format, generator and path function, and daily life (calendar, day plans, whereabouts). Pure code: no disk, network, clock or unseeded randomness. |
+| `packages/server` | SQLite storage, the pack loader, the import, generate and day commands, the world clock, and the HTTP API. |
+| `packages/client` | The browser viewer, city inspector and living town map. Uses `core` for types only. |
 | `packs/medieval` | The first setting pack: every occupation, building and number the generator uses. |
 | `fixtures/afmg` | The Lomia export, used by the tests. |
 
@@ -63,6 +68,8 @@ npm run server
 
 The API listens on port 3001 on every network interface. Set `PORT`, `HOST`,
 `WORLDSIM_DB` or `WORLDSIM_PACK` (the setting pack folder) to change that.
+The server starts with the world clock paused where it was last left; stop it
+with Ctrl-C so the clock is stored on the way out.
 
 | Request | Returns |
 | --- | --- |
@@ -81,6 +88,27 @@ The API listens on port 3001 on every network interface. Set `PORT`, `HOST`,
 | `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas and a summary |
 | `GET .../layout/path?from=<lot>&to=<lot>` | The shortest walking path between two lots: the segments in order, the length in metres, and the line walked |
 
+**The clock and daily life**
+
+| Request | Returns |
+| --- | --- |
+| `GET /api/clock` | The world clock: game time, rate, whether it is running, and the rates on offer |
+| `POST /api/clock/run`, `/pause` | Starts or stops the clock |
+| `POST /api/clock/rate` with `{"rate": 30}` | Sets the rate, in game seconds per real second, to one of the pack's presets |
+| `POST /api/clock/time` with `{"gameTime": 86400}` | Sets the game time, forward or back |
+| WebSocket `/api/clock/stream` | The clock's state on connecting, then again after every change |
+| `GET .../life/trips?from=&to=` | The trips under way in a window of game time, optionally only those through a region (`minX`, `minY`, `maxX`, `maxY`) |
+| `GET .../life/people/<id>/plan?day=` | A person's plan for a day, by default the clock's day |
+| `GET .../life/people/<id>/now` | Where a person is and what they are doing |
+| `GET .../life/buildings/<id>/occupants` | Who is inside a building |
+| `GET .../life/households/<id>/now` | What each member of a household is doing |
+| `GET .../life/summary?day=` | A day hour by hour: people asleep, at home, at work, visiting and travelling |
+
+"Now" is the clock's game time unless the request gives `time=`. The server
+sends trips, not positions: the viewer moves each dot along its trip's line by
+the clock, so motion is smooth at any rate. Viewers learn of clock changes
+over the WebSocket.
+
 Paged lists take `offset` and `limit` (50 by default, 500 at most) and answer
 with `total`, `offset`, `limit` and `items`. They can be filtered:
 
@@ -91,8 +119,9 @@ with `total`, `offset`, `limit` and `items`. They can be filtered:
 | buildings | `district`, `occupation`, `category`, `kind`, `type` |
 
 A city is generated the first time it is asked for and the last few are kept
-in memory, each with its layout once that has been asked for. Nothing
-generated is written to the world store.
+in memory, each with its layout and its daily life once those have been asked
+for. Nothing generated is written to the world store: the clock is the only
+state kept there besides the imported world.
 
 ## Open the viewer
 
@@ -123,6 +152,17 @@ Clicking a lot shows its building; choosing a household or a building in the
 lists outlines its lot. **Path** shows the shortest walking path between two
 lots you pick, with its length.
 
+**The living town.** Above the map is the world clock: the day's name, whether
+it is a rest day, and the time, with the map darkened at night. **Run** and
+**Pause** start and stop it; the rate buttons set how fast game time passes
+(1× is real time, 30× is a game day in 48 real minutes, 3,600× a game day in
+24 real seconds); **Morning**, **Midday** and **Evening** jump to the next
+sunrise, midday or sunset. Residents out on the streets are moving dots, with
+a count of how many there are. Clicking a dot opens that person: who they are,
+what they are doing now, and today's plan as a timeline, with **Follow on the
+map** to keep the map centred on them. Clicking a lot also shows who is inside
+now, and the household view shows what each member is doing now.
+
 The viewer looks for the API on port 3001 of the host it was loaded from. If
 the server is somewhere else, say where when starting the viewer:
 
@@ -152,6 +192,17 @@ Options: `--seed <number>` replaces the settlement's own seed, `--out <folder>`
 changes where the files go, `--db` and `--pack` choose the world file and the
 pack. The same brief, pack and seed always give the same bytes.
 
+## Print a settlement's day
+
+```sh
+npm run day -- settlement-641 --day 2
+```
+
+This prints the day as text: for each hour the average number of people
+asleep, at home, at work, visiting and travelling, the trips begun, and the
+busiest street segments. `--day` defaults to 1; `--db` and `--pack` choose the
+world file and the pack. Nothing is stored.
+
 ## The setting pack
 
 Everything setting-specific lives in `packs/medieval`, as hand-editable YAML.
@@ -161,14 +212,18 @@ numbers.
 | File | Holds |
 | --- | --- |
 | `pack.yaml` | The pack's name and version, the status tiers, the apprentice age and label, and a few household settings |
+| `calendar.yaml` | The days of the week and which are rest days, the days in a year, sunrise and sunset |
+| `time.yaml` | The clock's rate presets and the default rate |
+| `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default |
+| `visits.yaml` | Each kind of visit: who makes it, on which days, how likely, when, for how long, and to which building types |
 | `categories.yaml` | The seven workforce categories and their base shares |
 | `modifiers.yaml` | Multipliers on category shares by size group and condition |
-| `occupations.yaml` | Every job: category, workplace or employer, weight, status, specialty tags, minimum population, and who may hold it (`minAge`, `maxAge`, `sexes`, `apprenticeUntil`) |
+| `occupations.yaml` | Every job: category, workplace or employer, weight, status, specialty tags, minimum population, who may hold it (`minAge`, `maxAge`, `sexes`, `apprenticeUntil`), and its `shift` |
 | `specialties.yaml` | How specialty tags fill the trade category, and which tags are ignored |
 | `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district |
 | `dwellings.yaml` | Housing types by status tier |
 | `landmarks.yaml` | The buildings and fixed posts that flags and status add |
-| `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, and occupations of its own |
+| `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations) |
 | `cultures.yaml` | Which species each culture belongs to |
 | `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside |
 | `layout.yaml` | Every length behind a town's layout: street widths, block dimensions, lot sizes by building type, the river's width, density limits |
@@ -244,6 +299,64 @@ generator can replace it without touching anything that reads a layout.
 walked in order, the length in metres from entrance to entrance, and the line
 walked. `createPathFinder(layout)` does the same for many queries.
 
+## Daily life
+
+`packages/core/src/life` gives every resident a plan for every day and a
+position at every moment. It rests on one idea: **a resident's whereabouts
+are a pure function of game time. Nothing is stepped forward tick by tick.**
+
+- **Game time** is a number of game seconds since the start of day 1. A day is
+  24 hours. `core` never reads a clock; game time is always an argument.
+- **A day plan** is an ordered list of activities that covers one person's day
+  from midnight to midnight: sleep, at home, work, visit and travel. It is
+  derived from the person, the day number, the city, the layout, the pack and
+  a seed, with a random stream of its own per person and day, so it never
+  depends on which other plans were computed or in what order.
+- **A trip** is a path, a departure time and a walking speed, so the position
+  at any moment during it is arithmetic.
+
+So `where is this person at time t` has one answer, computed on demand, for
+any `t`. The clock's rate does not matter to the simulation: a game day can
+take 24 real hours or a few seconds, and the clock can be paused or set to any
+time, forward or back, without anything going wrong.
+
+**How a plan is made.** Each person has a *personal day* that runs from the
+middle of one sleep to the middle of the next, placed so that it holds their
+whole shift even when the shift crosses midnight. Within it they sleep, wake,
+perhaps go to work, perhaps make a visit or two, come home and sleep. A
+personal day depends only on the person and its number and always begins and
+ends asleep at home, so days join without a seam; a calendar day's plan is the
+midnight-to-midnight slice across the personal days that overlap it.
+
+- **Work.** Everyone in the workforce works their occupation's shift on work
+  days, arriving at its start give or take a personal habit (the same every
+  day) and a smaller daily variation. On rest days only shifts marked as
+  worked on rest days are worked, by the share of each occupation the shift
+  gives, taking turns. Someone whose workplace is their own home has no
+  commute.
+- **Visits** come from the pack: a market stop for those keeping house, a
+  drink after work, worship on rest days, errands. A destination is chosen
+  among buildings of an allowed type, favouring nearer ones; with none in the
+  settlement, the visit does not happen.
+- **Sleep** is at home, at the species' usual hours, moved but not shortened
+  to fit the shift: the night watch sleeps by day.
+- **Trips** follow the path function between two lots' entrances and take the
+  path's length divided by the person's walking speed, however long that is.
+
+The queries, all on the object `createLife({ city, layout, pack })` returns:
+`plan(personId, day)`, `whereabouts(personId, time)`, `occupants(buildingId,
+time)`, `trips(from, to, region?)`, `daySummary(day)` and `segmentLoads(day)`.
+Every rule a plan must satisfy is in `life/invariants.ts`.
+
+The module reads the layout format and uses the path function, and nothing
+from the layout generator.
+
+**The clock** lives in the server (`packages/server/src/clock.ts`). Its state
+is a game time, a rate and whether it is running; the current game time is
+computed from an anchor and the rate, and every change re-anchors, so game
+time never jumps unless it is set. It is stored in the world store whenever it
+is paused, re-anchored or set and on shutdown, and restored paused.
+
 To use another pack, copy the folder, edit it, and point `WORLDSIM_PACK` or
 `--pack` at the copy.
 
@@ -264,7 +377,10 @@ pack edits), `pack.test.ts` (the pack and its validation) and
 employer households) and `baseline.test.ts` (counts that must not move);
 phase 3's are in `layout-invariants.test.ts` (the format's rules, on layouts
 built by hand), `layout-geometry.test.ts`, `layout.test.ts` (the generator and
-the path function on single settlements) and `lomia-cities.test.ts`.
+the path function on single settlements) and `lomia-cities.test.ts`; phase 4's
+are in `calendar.test.ts`, `life.test.ts` (plans, whereabouts, behaviour,
+determinism, pack edits and cost) and, in the server and client packages,
+`clock.test.ts` and `life-api.test.ts`.
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
 and checks every invariant on each. With generator version 2 it takes about 9
@@ -275,3 +391,15 @@ largest settlement at 47,603 people, takes about 0.13 seconds.
 Laying out all 682 settlements, 526,006 lots, takes about 5 seconds more,
 again including the generator's own check of every layout invariant. No
 settlement takes longer than 0.1 seconds; Pombal's 8,413 lots take about that.
+
+Planning one day for all 9,607 residents of Badanos takes about 0.12 seconds,
+against a target of 3. Pombal's 47,603 residents take about 1.1 seconds for
+the first day, which includes preparing the path tables for its layout, and
+about 0.3 seconds for each day after. Planning one day for every one of
+Lomia's 2,935,089 residents takes about 28 seconds.
+
+One of the gameplan's behaviour thresholds does not hold everywhere. At 03:00
+at least 95% of residents are asleep at home in 666 of the 682 settlements,
+Badanos and Vereceldo among them; in the 16 forts the figure is about 90%,
+because the night watch, which is at work then, is a tenth of a fort's
+people. The test checks Badanos and Vereceldo.

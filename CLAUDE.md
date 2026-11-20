@@ -19,6 +19,7 @@ current phase before starting, and the README for how things run today.
 | Start the API server | `npm run server` |
 | Start the viewer | `npm run client` |
 | Generate one city | `npm run generate -- <settlement id>` |
+| Print a settlement's day | `npm run day -- <settlement id> --day <number>` |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -27,9 +28,9 @@ the server. Run `npm run check` before calling any task done.
 
 | Path | Holds | May depend on |
 | --- | --- | --- |
-| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator | Nothing in this repository |
-| `packages/server` | SQLite storage, pack loader, commands, HTTP API | `core` |
-| `packages/client` | Browser viewer, city inspector and town map | `core`, for types only |
+| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator, daily life | Nothing in this repository |
+| `packages/server` | SQLite storage, pack loader, commands, world clock, HTTP API | `core` |
+| `packages/client` | Browser viewer, city inspector and living town map | `core`, for types only |
 | `packs/medieval` | The first setting pack, as YAML | n/a |
 | `fixtures/afmg/lomia.json` | The Lomia export used by every test | n/a |
 
@@ -74,6 +75,22 @@ enforce them. Do not weaken that test to make a change pass.
     angles, rectangles or a grid. The current generator (`layout/grid.ts`) is
     deliberately regular and will be replaced; the format will not.
 
+13. **Nothing is stepped.** A resident's whereabouts are a pure function of
+    game time: a day plan is derived from the person, the day number, the
+    city, the layout, the pack and a seed, and a position is a plan plus a
+    game time. There is no tick that moves people. If you find yourself
+    updating a position from the previous position, stop.
+14. **No day-to-day state.** Nothing about a resident accumulates. A plan's
+    random stream comes from the seed, the person's ID and the day number, so
+    it never depends on which other plans were computed, or in what order.
+15. **`core` never reads a clock.** Game time is always an argument. The
+    world clock lives in `server`, and is the only state stored besides the
+    imported world.
+16. **The client stays thin.** It moves dots along the trips it was sent and
+    shows a clock. It does not plan, choose or decide.
+17. **`life` reads the layout format and the path function**, and nothing
+    from the layout generator.
+
 ## The layout format
 
 A layout belongs to one settlement. Coordinates are metres, origin at the town
@@ -106,7 +123,10 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - **Invariants.** Every rule a generated city must satisfy goes in
   `packages/core/src/city/invariants.ts`, and every rule a layout must satisfy
   in `packages/core/src/layout/invariants.ts`. Each generator runs them on its
-  own output; tests run them on every settlement in Lomia.
+  own output; tests run them on every settlement in Lomia. Every rule a day
+  plan must satisfy goes in `packages/core/src/life/invariants.ts`.
+- **Game time** is a number of game seconds since the start of day 1; day
+  numbers count from 1. Times of day in pack files are written `"HH:MM"`.
 - **Errors name their subject.** A failure says which settlement, field or
   pack entry caused it and what to change.
 - **Tests come with the code**, in the same change.
@@ -131,7 +151,8 @@ centre, x east and y south; bearings are degrees clockwise from north.
 
 ## Later phases, for orientation
 
-NPC movement and daily life on the street graph, a layout generator that makes
+An avatar in the town, encounters and conversation between residents, needs
+and state that carry from day to day, a layout generator that makes
 natural-looking towns, building footprints, history generated backward from
 the present, persistence of changes, and LLM conversations. Do not build ahead for
 these, but do not make choices that block them: records need stable IDs, and
