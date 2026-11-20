@@ -496,7 +496,7 @@ export function importAfmg(source: unknown): ImportResult {
         ...(state.fullName !== undefined && { fullName: state.fullName }),
       },
       ...(province && { province: { id: province.id, name: province.name, fullName: province.fullName } }),
-      culture: { id: culture.id, name: culture.name },
+      culture: { id: culture.id, name: culture.name, nameBase: culture.nameBase },
       religion: { id: religion.id, name: religion.name },
       flags: {
         capital: rec.flag('capital', 'required'),

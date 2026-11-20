@@ -70,7 +70,11 @@ const brief: SettlementBrief = {
   sizeGroup: 'town',
   state: { id: 'state-1', name: 'Testia', fullName: 'Kingdom of Testia' },
   province: { id: 'province-1', name: 'Test', fullName: 'Test Shire' },
-  culture: { id: 'culture-1', name: 'Testish' },
+  culture: {
+    id: 'culture-1',
+    name: 'Testish',
+    nameBase: { name: 'English', minLength: 4, maxLength: 9, doubledLetters: 'lt', multiWordRate: 0, sampleNames: ['Abing'] },
+  },
   religion: { id: 'religion-1', name: 'Testism' },
   flags: { capital: true, port: false, citadel: false, walls: true, plaza: false, temple: false, shantyTown: false },
   isProvinceSeat: true,

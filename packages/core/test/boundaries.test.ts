@@ -40,10 +40,11 @@ describe('package boundaries', () => {
     expect(names).toContain(join('client', 'index.html'));
   });
 
+  // "pack" alone is not checked: since phase 2 it also means a setting pack.
   it('keeps AFMG structures and field names inside the importer', () => {
     const outside = shipped.filter((path) => !relative(PACKAGES, path).startsWith(IMPORTER));
     const afmgNames =
-      /\b(pack|burgs?|nameBases|populationRate|urbanization|searoutes|formName|campaigns|haven|harbor|mapName|biomesData)\b|\bgrid\.cells\b|\.(burg|pop|feature)\b/;
+      /\bpack\.(cells|vertices|features|biomes|burgs|states|provinces|religions|rivers|goods|markers|markets|deals|routes|zones)\b|\b(burgs?|nameBases|populationRate|urbanization|searoutes|formName|campaigns|haven|harbor|mapName|biomesData)\b|\bgrid\.cells\b|\.(burg|pop|feature)\b(?!\()/;
     expect(offenders(outside, afmgNames)).toEqual([]);
   });
 

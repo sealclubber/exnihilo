@@ -80,7 +80,8 @@ describe('the Badanos brief', () => {
     expect(badanos.state).toEqual({ id: 'state-4', name: 'Monzia', fullName: 'Monzian Empire' });
     expect(badanos.province).toEqual({ id: 'province-24', name: 'Badanos', fullName: 'Badanos County' });
     expect(badanos.isProvinceSeat).toBe(true);
-    expect(badanos.culture).toEqual({ id: 'culture-8', name: 'Vengrian' });
+    expect(badanos.culture).toMatchObject({ id: 'culture-8', name: 'Vengrian' });
+    expect(badanos.culture.nameBase).toEqual(world.cultures.find((culture) => culture.id === 'culture-8')!.nameBase);
     expect(badanos.religion).toEqual({ id: 'religion-14', name: 'Klakkrova Pantheon' });
   });
 

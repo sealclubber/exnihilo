@@ -226,7 +226,8 @@ export const SettlementBriefSchema = z.strictObject({
   sizeGroup: SizeGroupSchema,
   state: z.strictObject({ id: StateIdSchema, name: text, fullName: text.optional() }),
   province: z.strictObject({ id: ProvinceIdSchema, name: text, fullName: text }).optional(),
-  culture: z.strictObject({ id: CultureIdSchema, name: text }),
+  /** Carries the name base so that names can be generated from the brief alone. */
+  culture: z.strictObject({ id: CultureIdSchema, name: text, nameBase: NameBaseSchema }),
   religion: z.strictObject({ id: ReligionIdSchema, name: text }),
   flags: SettlementFlagsSchema,
   isProvinceSeat: z.boolean(),
