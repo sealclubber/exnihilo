@@ -1,0 +1,176 @@
+import { describe, expect, it } from 'vitest';
+import { CATEGORY_IDS, PackError, allOccupations, parsePack } from '../src/index.ts';
+import { loadPack, readPackFiles } from '../../server/src/pack-loader.ts';
+import { lomiaWorld, medievalPack, rawMedievalPack } from './pack.ts';
+
+describe('the medieval pack', () => {
+  const pack = medievalPack();
+
+  it('loads and names itself', () => {
+    expect(pack.pack.name).toBe('medieval');
+    expect(pack.pack.version).toBe('0.1.0');
+  });
+
+  it('has the seven categories with the base shares', () => {
+    expect(Object.fromEntries(pack.categories.map((category) => [category.id, category.share]))).toEqual({
+      food: 15,
+      utilities: 10,
+      services: 20,
+      construction: 10,
+      military: 5,
+      luxury: 5,
+      trade: 35,
+    });
+  });
+
+  it('has the starting modifiers', () => {
+    expect(pack.modifiers).toEqual({
+      sizeGroups: {
+        village: { food: 4, trade: 0.4, services: 0.6, luxury: 0.2 },
+        fort: { military: 6, trade: 0.3, luxury: 0.2 },
+      },
+      conditions: {
+        citadel: { military: 2 },
+        walls: { military: 1.3, construction: 1.2 },
+        temple: { services: 1.2 },
+        port: { trade: 1.3 },
+        capital: { services: 1.5, luxury: 2, military: 1.5 },
+        provinceSeat: { services: 1.2 },
+      },
+    });
+  });
+
+  it('is roughly the intended size', () => {
+    expect(allOccupations(pack).length).toBeGreaterThanOrEqual(80);
+    expect(allOccupations(pack).length).toBeLessThanOrEqual(125);
+    expect(pack.workplaces.length).toBeGreaterThanOrEqual(30);
+    expect(pack.workplaces.length).toBeLessThanOrEqual(55);
+  });
+
+  it('has occupations in every category', () => {
+    for (const category of CATEGORY_IDS) {
+      expect(pack.occupations.filter((occupation) => occupation.category === category).length, category).toBeGreaterThan(2);
+    }
+  });
+
+  it('handles every specialty tag found in Lomia, with occupations or by ignoring it', () => {
+    const tags = new Set(lomiaWorld().settlements.flatMap((brief) => brief.specialtyTags));
+    expect(tags.size).toBe(49);
+    for (const tag of tags) {
+      const treatment = pack.specialties.tags[tag];
+      expect(treatment, tag).toBeDefined();
+      const carried = pack.occupations.some((occupation) => occupation.specialties?.includes(tag));
+      expect(Boolean(treatment?.ignore) || carried, tag).toBe(true);
+    }
+  });
+
+  it('ignores only the tags its comment lists for review', () => {
+    const ignored = Object.entries(pack.specialties.tags)
+      .filter(([, treatment]) => treatment.ignore)
+      .map(([tag]) => tag);
+    expect(ignored).toEqual(['slaves']);
+  });
+
+  it('includes the dwarf test species, with a runesmith nobody else has', () => {
+    expect(Object.keys(pack.species)).toEqual(['human', 'dwarf']);
+    const dwarf = pack.species.dwarf!;
+    expect(dwarf.occupations?.map((occupation) => occupation.id)).toEqual(['runesmith']);
+    expect(dwarf.multipliers.occupations).toMatchObject({ mason: expect.any(Number), miner: expect.any(Number) });
+    expect(dwarf.multipliers.occupations!.mason).toBeGreaterThan(1);
+    expect(pack.occupations.some((occupation) => occupation.id === 'runesmith')).toBe(false);
+  });
+
+  it('maps every Lomia culture to human by default', () => {
+    expect(pack.cultures.default).toBe('human');
+    for (const culture of lomiaWorld().cultures.filter((entry) => !entry.isPlaceholder)) {
+      expect(pack.cultures.cultures[culture.name], culture.name).toBe('human');
+    }
+  });
+});
+
+describe('pack validation', () => {
+  const problemsOf = (edit: (raw: any) => void): string[] => {
+    const raw = rawMedievalPack();
+    edit(raw);
+    try {
+      parsePack(raw);
+    } catch (error) {
+      expect(error).toBeInstanceOf(PackError);
+      return (error as PackError).problems;
+    }
+    throw new Error('the pack was accepted');
+  };
+
+  it('accepts the unedited files', () => {
+    expect(() => parsePack(rawMedievalPack())).not.toThrow();
+  });
+
+  it('rejects a share table that cannot be scaled to 100%', () => {
+    const problems = problemsOf((raw) => raw.categories.forEach((category: any) => (category.share = 0)));
+    expect(problems.join('\n')).toMatch(/categories: the shares cannot be scaled to 100%/);
+  });
+
+  it('rejects a negative share, naming the file and the entry', () => {
+    const problems = problemsOf((raw) => (raw.categories[2].share = -5));
+    expect(problems[0]).toMatch(/^categories at 2\.share/);
+  });
+
+  it('rejects an occupation naming a missing workplace type', () => {
+    const problems = problemsOf((raw) => (raw.occupations.find((entry: any) => entry.id === 'baker').workplace = 'bakehouse'));
+    expect(problems).toEqual(['occupations: "baker" names the workplace type "bakehouse", which does not exist']);
+  });
+
+  const cases: Array<[string, (raw: any) => void, RegExp]> = [
+    ['a missing category', (raw) => raw.categories.splice(0, 1), /categories: "food" must be listed exactly once/],
+    ['a category listed twice', (raw) => raw.categories.push({ ...raw.categories[0] }), /"food" must be listed exactly once, but is listed 2 times/],
+    ['an unknown category on an occupation', (raw) => (raw.occupations[0].category = 'farming'), /^occupations at 0\.category/],
+    ['an unknown status tier', (raw) => (raw.occupations[0].status = 'rich'), /"baker" names the status tier "rich"/],
+    ['a duplicated occupation', (raw) => raw.occupations.push({ ...raw.occupations[0] }), /occupations: "baker" is defined more than once/],
+    ['a building type defined twice', (raw) => raw.dwellings.push({ ...raw.dwellings[0], id: 'bakery' }), /building type "bakery" is defined more than once/],
+    ['a workplace in an unknown district kind', (raw) => (raw.workplaces[0].district = 'suburb'), /workplaces: "bakery" names the district kind "suburb"/],
+    ['a workplace with no capacity', (raw) => (raw.workplaces[0].capacity = 0), /^workplaces at 0\.capacity/],
+    ['a tier with no dwelling', (raw) => (raw.dwellings = raw.dwellings.filter((type: any) => type.status !== 'noble')), /no dwelling type exists for the status tier "noble"/],
+    ['a post for an occupation that does not exist', (raw) => (raw.landmarks[0].posts[0].occupation = 'warlord'), /"citadel" has a post for the occupation "warlord"/],
+    ['a post occupation given a weight', (raw) => (raw.occupations.find((entry: any) => entry.id === 'castellan').weight = 2), /"castellan" works at the landmark "citadel".*weight must be 0/],
+    ['a landmark with an unknown condition', (raw) => (raw.landmarks[0].when = 'harbour'), /^landmarks at 0\.when/],
+    ['an occupation with a tag that is not listed', (raw) => (raw.occupations.find((entry: any) => entry.id === 'tanner').specialties = ['hides']), /"tanner" carries the specialty tag "hides"/],
+    ['a used tag that no occupation carries', (raw) => (raw.specialties.tags.slaves = {}), /the tag "slaves" is not ignored, but no occupation/],
+    ['too few rank weights', (raw) => (raw.specialties.maxTags = 5), /rankWeights has 3 entries but maxTags is 5/],
+    ['a category left with no general occupation', (raw) => (raw.occupations = raw.occupations.filter((entry: any) => entry.category !== 'luxury')), /the category "luxury" has no occupation/],
+    ['a culture mapped to a missing species', (raw) => (raw.cultures.cultures.Norse = 'elf'), /cultures: "Norse" names the species "elf"/],
+    ['a default species that is missing', (raw) => (raw.cultures.default = 'elf'), /the default names the species "elf"/],
+    ['a multiplier for an unknown occupation', (raw) => (raw.species.dwarf.multipliers.occupations.wizard = 2), /"dwarf" has a multiplier for the occupation "wizard"/],
+    ['a probability above one', (raw) => (raw.species.human.workforce.share = 1.4), /^species at human\.workforce\.share/],
+    ['an inverted age range', (raw) => (raw.species.human.workforce.workingAges = { min: 60, max: 13 }), /^species at human\.workforce\.workingAges/],
+    ['a district name pattern with an unknown word', (raw) => raw.districts.kinds[0].names.push('{colour} Gate'), /name pattern "\{colour\} Gate"/],
+    ['a first district kind with a condition', (raw) => Object.assign(raw.districts.kinds[0], { when: 'port', weight: undefined }), /the first kind must have a weight and no condition/],
+    ['a file that holds the wrong kind of thing', (raw) => (raw.workplaces = 'bakery'), /^workplaces: /],
+    ['a missing file', (raw) => delete raw.districts, /^districts: /],
+    ['a setting the format does not define', (raw) => (raw.pack.households.luck = 0.5), /^pack at households/],
+  ];
+  it.each(cases)('rejects %s', (_, edit, expected) => {
+    expect(problemsOf(edit).join('\n')).toMatch(expected);
+  });
+
+  it('reports every problem at once, not just the first', () => {
+    const problems = problemsOf((raw) => {
+      raw.occupations[0].workplace = 'nowhere';
+      raw.occupations[1].status = 'rich';
+      raw.cultures.default = 'elf';
+    });
+    expect(problems).toHaveLength(3);
+  });
+
+  it('accepts a version written as a number', () => {
+    const raw = rawMedievalPack();
+    raw.pack.version = 2;
+    expect(parsePack(raw).pack.version).toBe('2');
+  });
+});
+
+describe('loading a pack from disk', () => {
+  it('fails with a message naming the folder when a file is missing', () => {
+    expect(() => loadPack('/nonexistent/pack')).toThrow(PackError);
+    expect(() => readPackFiles('/nonexistent/pack')).toThrow(/\/nonexistent\/pack\/pack\.yaml cannot be read/);
+  });
+});
