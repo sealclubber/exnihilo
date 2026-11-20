@@ -8,6 +8,7 @@ import {
   importAfmg,
 } from '@worldsim/core';
 import { loadLomia } from '../../core/test/fixture.ts';
+import { medievalPack } from '../../core/test/pack.ts';
 import { buildApp } from '../src/app.ts';
 import { WorldStore } from '../src/storage.ts';
 
@@ -18,7 +19,7 @@ beforeAll(async () => {
   const imported = importAfmg(loadLomia());
   const store = new WorldStore(':memory:');
   store.save(imported.world, imported.report);
-  app = buildApp(store.loadWorld(), store.loadReport());
+  app = buildApp(store.loadWorld(), store.loadReport(), medievalPack());
   store.close();
   await app.ready();
 });

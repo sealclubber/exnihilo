@@ -15,7 +15,8 @@
     "import": "node packages/server/src/cli.ts",
     "server": "node packages/server/src/main.ts",
     "client": "npm run dev -w @worldsim/client",
-    "client:build": "npm run build -w @worldsim/client"
+    "client:build": "npm run build -w @worldsim/client",
+    "generate": "node packages/server/src/generate-cli.ts"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

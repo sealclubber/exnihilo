@@ -19,3 +19,4 @@ export {
 export { checkCity, WORKFORCE_SHARE_LIMITS } from './city/invariants.ts';
 export { nameBaseNames, type NameGenerator, type NameGeneratorFactory } from './city/names.ts';
 export { createRng, stepRng, apportion, shuffle, weightedPicker, type Rng } from './city/random.ts';
+export { describeCity, packLabels } from './city/report.ts';
