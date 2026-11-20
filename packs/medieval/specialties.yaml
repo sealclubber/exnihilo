@@ -1,0 +1,68 @@
+# How a settlement's specialty tags shape its trade category.
+#
+# A brief lists the goods a settlement is known for, largest first. Ignored
+# tags are dropped, then at most `maxTags` of the rest are used. Occupations
+# carrying a used tag share `tradeShare` of the trade category's ordinary
+# slots, split between the tags by `rankWeights`; general trade occupations
+# (those with no tags, such as merchant and carter) share the remainder.
+
+maxTags: 3
+rankWeights: [3, 2, 1]
+tradeShare: 0.75
+
+# Every tag found in a world must be listed here. A tag is either served by
+# the occupations that carry it in occupations.yaml, or marked `ignore: true`.
+#
+# IGNORED TAGS, for review:
+#   slaves  - one settlement in Lomia. No occupations were written for a slave
+#             trade; say if this setting should have one.
+tags:
+  amber: {}
+  arms: {}
+  artillery: {}
+  barrels: {}
+  beer: {}
+  boats: {}
+  books: {}
+  boots: {}
+  bronze: {}
+  candles: {}
+  cattle: {}
+  ceramics: {}
+  cheese: {}
+  cloth: {}
+  coal: {}
+  coins: {}
+  dates: {}
+  fish: {}
+  furs: {}
+  garments: {}
+  gemstones: {}
+  glass: {}
+  gunpowder: {}
+  harnesses: {}
+  horses: {}
+  incense: {}
+  ink: {}
+  ivory: {}
+  jewelry: {}
+  leather: {}
+  liquor: {}
+  marble: {}
+  oil: {}
+  paper: {}
+  perfume: {}
+  preserved food: {}
+  ropes: {}
+  sails: {}
+  saltpeter: {}
+  silver: {}
+  slaves: {ignore: true, note: No occupations written for a slave trade}
+  soap: {}
+  spices: {}
+  sugar: {}
+  tar: {}
+  tin: {}
+  tools: {}
+  vinegar: {}
+  wine: {}

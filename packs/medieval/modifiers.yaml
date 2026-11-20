@@ -1,0 +1,16 @@
+# Multipliers on category shares. Every entry that matches a settlement is
+# applied, then the shares are scaled back to 100%.
+
+# By size group: village, town, city, fort, capital.
+sizeGroups:
+  village: {food: 4, trade: 0.4, services: 0.6, luxury: 0.2}
+  fort: {military: 6, trade: 0.3, luxury: 0.2}
+
+# By condition: capital, port, citadel, walls, plaza, temple, shantyTown, provinceSeat.
+conditions:
+  citadel: {military: 2}
+  walls: {military: 1.3, construction: 1.2}
+  temple: {services: 1.2}
+  port: {trade: 1.3}
+  capital: {services: 1.5, luxury: 2, military: 1.5}
+  provinceSeat: {services: 1.2}

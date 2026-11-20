@@ -1,0 +1,73 @@
+# Every building type that people work in, apart from landmarks.
+#
+#   capacity           workers one building holds; more buildings are made as needed
+#   proprietorLivesIn  true: the first household head working in the building lives
+#                      there with their household, and it counts as their home
+#   district           the kind of district (districts.yaml) the building prefers
+
+# --- Food
+- {id: bakery, name: Bakery, capacity: 4, proprietorLivesIn: true, district: craft}
+- {id: butchery, name: Butcher's shop, capacity: 3, proprietorLivesIn: true, district: craft}
+- {id: brewery, name: Brewery, capacity: 6, proprietorLivesIn: false, district: craft}
+- {id: tavern, name: Tavern, capacity: 5, proprietorLivesIn: true, district: centre}
+- {id: mill, name: Mill, capacity: 4, proprietorLivesIn: true, district: outskirts}
+- {id: market-stall, name: Market stall, capacity: 2, proprietorLivesIn: false, district: centre}
+- {id: farmstead, name: Farmstead, capacity: 6, proprietorLivesIn: true, district: outskirts}
+- {id: dairy, name: Dairy, capacity: 4, proprietorLivesIn: true, district: outskirts}
+- {id: general-shop, name: Shop, capacity: 2, proprietorLivesIn: true, district: centre}
+
+# --- Utilities
+- {id: town-yard, name: Town yard, capacity: 10, proprietorLivesIn: false, district: outskirts}
+- {id: woodyard, name: Woodyard, capacity: 6, proprietorLivesIn: false, district: outskirts}
+- {id: carters-yard, name: Carters' yard, capacity: 12, proprietorLivesIn: false, district: outskirts}
+- {id: stockyard, name: Stockyard and stables, capacity: 6, proprietorLivesIn: false, district: outskirts}
+
+# --- Services
+- {id: great-house, name: Great house, capacity: 8, proprietorLivesIn: false, district: upper}
+- {id: laundry, name: Laundry, capacity: 6, proprietorLivesIn: false, district: lower}
+- {id: healers-house, name: Healer's house, capacity: 2, proprietorLivesIn: true, district: centre}
+- {id: tailors-shop, name: Tailor's shop, capacity: 3, proprietorLivesIn: true, district: centre}
+- {id: scribes-office, name: Scribes' office, capacity: 4, proprietorLivesIn: false, district: centre}
+- {id: chapel, name: Chapel, capacity: 3, proprietorLivesIn: false, district: centre}
+- {id: counting-house, name: Counting house, capacity: 3, proprietorLivesIn: true, district: centre}
+
+# --- Construction
+- {id: masons-yard, name: Masons' yard, capacity: 8, proprietorLivesIn: false, district: outskirts}
+- {id: carpenters-shop, name: Carpenter's shop, capacity: 5, proprietorLivesIn: true, district: craft}
+- {id: builders-yard, name: Builders' yard, capacity: 10, proprietorLivesIn: false, district: outskirts}
+- {id: kiln-yard, name: Kiln yard, capacity: 8, proprietorLivesIn: false, district: outskirts}
+
+# --- Military
+- {id: watch-house, name: Watch house, capacity: 10, proprietorLivesIn: false, district: centre}
+- {id: barracks, name: Barracks, capacity: 30, proprietorLivesIn: false, district: outskirts}
+
+# --- Luxury
+- {id: goldsmiths-shop, name: Goldsmith's shop, capacity: 3, proprietorLivesIn: true, district: centre}
+- {id: fine-shop, name: Fine goods shop, capacity: 2, proprietorLivesIn: true, district: centre}
+- {id: players-hall, name: Players' hall, capacity: 10, proprietorLivesIn: false, district: centre}
+- {id: studio, name: Studio, capacity: 2, proprietorLivesIn: true, district: craft}
+
+# --- Trade: general
+- {id: merchants-house, name: Merchant's house, capacity: 3, proprietorLivesIn: true, district: centre}
+- {id: warehouse, name: Warehouse, capacity: 12, proprietorLivesIn: false, district: harbour}
+
+# --- Trade: specialties
+- {id: tannery, name: Tannery, capacity: 8, proprietorLivesIn: false, district: outskirts}
+- {id: leather-shop, name: Leather shop, capacity: 3, proprietorLivesIn: true, district: craft}
+- {id: weaving-shed, name: Weaving shed, capacity: 8, proprietorLivesIn: false, district: craft}
+- {id: dye-works, name: Dye works, capacity: 6, proprietorLivesIn: false, district: outskirts}
+- {id: glassworks, name: Glassworks, capacity: 6, proprietorLivesIn: false, district: craft}
+- {id: forge, name: Forge, capacity: 4, proprietorLivesIn: true, district: craft}
+- {id: foundry, name: Foundry, capacity: 8, proprietorLivesIn: false, district: outskirts}
+- {id: rigging-loft, name: Sail and rope loft, capacity: 8, proprietorLivesIn: false, district: craft}
+- {id: cooperage, name: Cooperage, capacity: 4, proprietorLivesIn: true, district: craft}
+- {id: garment-workshop, name: Garment workshop, capacity: 8, proprietorLivesIn: false, district: craft}
+- {id: chandlery, name: Chandlery, capacity: 4, proprietorLivesIn: true, district: craft}
+- {id: press-house, name: Press house, capacity: 6, proprietorLivesIn: false, district: outskirts}
+- {id: boatyard, name: Boatyard, capacity: 12, proprietorLivesIn: false, district: harbour}
+- {id: paper-mill, name: Paper mill, capacity: 8, proprietorLivesIn: false, district: outskirts}
+- {id: powder-mill, name: Powder mill, capacity: 6, proprietorLivesIn: false, district: outskirts}
+- {id: distillery, name: Distillery, capacity: 5, proprietorLivesIn: false, district: craft}
+- {id: mint, name: Mint, capacity: 10, proprietorLivesIn: false, district: centre}
+- {id: mine, name: Mine, capacity: 20, proprietorLivesIn: false, district: outskirts}
+- {id: preserving-house, name: Preserving house, capacity: 8, proprietorLivesIn: false, district: outskirts}

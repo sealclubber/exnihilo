@@ -1,0 +1,18 @@
+# Which species each culture belongs to, by culture name.
+# A culture not listed here gets the default.
+
+default: human
+
+cultures:
+  Angshire: human
+  Astellian: human
+  Euskati: human
+  Luari: human
+  Norse: human
+  Portuzian: human
+  Shwazen: human
+  Slovan: human
+  Soumi: human
+  Tallian: human
+  Turchian: human
+  Vengrian: human

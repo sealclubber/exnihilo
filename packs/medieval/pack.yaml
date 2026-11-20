@@ -1,0 +1,25 @@
+# The medieval setting pack.
+#
+# Every number in this pack is a placeholder chosen to be plausible, meant to
+# be tuned by hand. The generator reads all of them from here; none is in code.
+# The server reads the pack when it starts, so restart it after an edit.
+
+name: medieval
+version: "0.1.0"
+
+# Status tiers, lowest first. Occupations, dwellings and districts refer to these IDs.
+statusTiers:
+  - {id: poor, name: Poor}
+  - {id: modest, name: Modest}
+  - {id: comfortable, name: Comfortable}
+  - {id: wealthy, name: Wealthy}
+  - {id: noble, name: Noble}
+
+households:
+  # Chance that a working member other than the head takes a free slot in the head's occupation.
+  followHeadOccupation: 0.35
+  # A household takes the tier of its head's occupation, shifted one tier up or down with these chances.
+  statusShiftUp: 0.08
+  statusShiftDown: 0.12
+  # The tier of a household in which nobody works.
+  statusWithoutWorker: poor

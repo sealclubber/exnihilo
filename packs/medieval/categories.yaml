@@ -1,0 +1,11 @@
+# The seven workforce categories and their base shares, in percent.
+# The IDs are fixed by the generator; the names and shares are yours to change.
+# Shares are scaled to 100% after modifiers, so they need not add up exactly.
+
+- {id: food, name: Food, share: 15}                  # preparing and selling food and drink
+- {id: utilities, name: Utilities, share: 10}        # keeping the town running: water, light, fuel, waste, carting
+- {id: services, name: Services, share: 20}          # work done for other residents, plus clergy and officials
+- {id: construction, name: Construction, share: 10}  # building and repair
+- {id: military, name: Military, share: 5}           # garrison and civic order
+- {id: luxury, name: Luxury, share: 5}               # goods and services beyond need
+- {id: trade, name: Trade, share: 35}                # goods made for sale elsewhere, and the people who move them

@@ -1,0 +1,88 @@
+# Per species: how households are made up, who works, and what they favour.
+
+human:
+  name: Human
+  household:
+    # Relative frequency of each household size.
+    sizes: {1: 9, 2: 17, 3: 18, 4: 19, 5: 15, 6: 11, 7: 6, 8: 3, 9: 2}
+    # Chance that a household of two or more has a partner for its head.
+    partnerProbability: 0.8
+    # Members beyond head and partner: relative frequency of each role.
+    otherRoles: {child: 72, elder: 10, lodger: 18}
+    maxElders: 2
+  ages:
+    # Age bands for heads and lodgers, with relative weights.
+    head:
+      - {min: 18, max: 24, weight: 12}
+      - {min: 25, max: 34, weight: 28}
+      - {min: 35, max: 44, weight: 26}
+      - {min: 45, max: 54, weight: 18}
+      - {min: 55, max: 64, weight: 11}
+      - {min: 65, max: 78, weight: 5}
+    lodger:
+      - {min: 14, max: 19, weight: 25}
+      - {min: 20, max: 29, weight: 40}
+      - {min: 30, max: 44, weight: 22}
+      - {min: 45, max: 64, weight: 13}
+    # A partner's age relative to the head's.
+    partnerGap: {min: -9, max: 5}
+    minPartnerAge: 16
+    # Children are aged from 0 up to the head's age minus parentMinAge, capped at childMaxAge.
+    parentMinAge: 18
+    childMaxAge: 22
+    # An elder's age relative to the head's.
+    elderGap: {min: 20, max: 34}
+    maxAge: 92
+  sexes:
+    headMaleShare: 0.82
+    maleShare: 0.5
+  workforce:
+    workingAges: {min: 13, max: 66}
+    # Share of all residents who are in the workforce. This is met exactly in
+    # every settlement: after the two rules below have been applied, people of
+    # working age are moved in or out of work until the count is right.
+    share: 0.46
+    # Share of people of working age who cannot work.
+    unableShare: 0.05
+    # Share of households of two or more in which one member keeps house.
+    keepingHouseShare: 0.72
+  multipliers: {}
+
+# A test species. No culture in the default mapping uses it.
+dwarf:
+  name: Dwarf
+  household:
+    sizes: {1: 12, 2: 16, 3: 20, 4: 20, 5: 14, 6: 10, 7: 5, 8: 3}
+    partnerProbability: 0.75
+    otherRoles: {child: 60, elder: 20, lodger: 20}
+    maxElders: 3
+  ages:
+    head:
+      - {min: 30, max: 49, weight: 20}
+      - {min: 50, max: 89, weight: 40}
+      - {min: 90, max: 129, weight: 28}
+      - {min: 130, max: 170, weight: 12}
+    lodger:
+      - {min: 25, max: 49, weight: 40}
+      - {min: 50, max: 99, weight: 45}
+      - {min: 100, max: 150, weight: 15}
+    partnerGap: {min: -20, max: 20}
+    minPartnerAge: 30
+    parentMinAge: 35
+    childMaxAge: 40
+    elderGap: {min: 40, max: 80}
+    maxAge: 220
+  sexes:
+    headMaleShare: 0.6
+    maleShare: 0.55
+  workforce:
+    workingAges: {min: 25, max: 160}
+    share: 0.52
+    unableShare: 0.04
+    keepingHouseShare: 0.6
+  multipliers:
+    categories: {construction: 1.4, trade: 1.1}
+    occupations: {mason: 3, miner: 3}
+  # Occupations only this species has.
+  occupations:
+    - {id: runesmith, name: Runesmith, category: luxury, workplace: forge, weight: 4, status: comfortable}

@@ -1,0 +1,67 @@
+# District kinds, their size, and how they are named.
+#
+# A settlement gets one district per `residentsPerDistrict` residents, at
+# least one. The first kind listed below is the one a single-district
+# settlement gets; further districts are shared out by `weight`. A kind with
+# `when` instead of `weight` adds exactly one district to settlements that
+# meet the condition, and takes only buildings that ask for it.
+#
+#   statuses  the status tiers whose dwellings the kind takes
+#   names     patterns; {settlement} is the settlement's name and any other
+#             {key} is filled from `words`
+
+residentsPerDistrict: 1500
+
+words:
+  direction: [North, South, East, West, Upper, Lower]
+  age: [Old, New]
+  feature: [Hill, Bridge, Gate, Well, Cross, Green, Bank, Ford, Mill, Elm]
+
+kinds:
+  - id: centre
+    name: Centre
+    weight: 2
+    statuses: [modest, comfortable]
+    names: ["Old Town", "{settlement} Cross", "High Street", "{age} Market", "{direction} Market", "{feature} Market"]
+
+  - id: craft
+    name: Craft quarter
+    weight: 3
+    statuses: [modest]
+    names: ["Smiths' Row", "Weavers' Lane", "Craftsmen's Quarter", "{direction} Workshops", "{feature} Lane", "{feature} Row"]
+
+  - id: common
+    name: Common quarter
+    weight: 4
+    statuses: [poor, modest]
+    names: ["{direction} Side", "{feature} Ward", "{direction} Ward", "{age} Houses", "{feature} Street"]
+
+  - id: upper
+    name: Upper quarter
+    weight: 1
+    statuses: [comfortable, wealthy, noble]
+    names: ["The Mount", "High Ward", "{direction} Gardens", "{feature} Court", "{feature} Heights"]
+
+  - id: lower
+    name: Lower quarter
+    weight: 3
+    statuses: [poor]
+    names: ["The Warrens", "Low Ward", "{direction} Rows", "{feature} Alley", "{feature} Bottoms"]
+
+  - id: outskirts
+    name: Outskirts
+    weight: 2
+    statuses: [poor, modest]
+    names: ["The Edge", "{direction} Fields", "{direction} Yards", "Outer {feature}", "{feature} End"]
+
+  - id: harbour
+    name: Harbour
+    when: port
+    statuses: [poor, modest]
+    names: ["Harbourside", "The Quays", "{direction} Wharf"]
+
+  - id: shanty
+    name: Shanty town
+    when: shantyTown
+    statuses: [poor]
+    names: ["Mudtown", "The Shambles", "{direction} Camp", "Tin Row"]

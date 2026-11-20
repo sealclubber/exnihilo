@@ -1,0 +1,152 @@
+# Every job.
+#
+#   id            lower-case, unique
+#   name          shown in the inspector
+#   category      food, utilities, services, construction, military, luxury or trade
+#   workplace     a type from workplaces.yaml, or a landmark from landmarks.yaml
+#   weight        relative share of the category's slots. An occupation that works
+#                 at a landmark is a fixed post: its weight is 0 and landmarks.yaml
+#                 says how many there are.
+#   status        a tier from pack.yaml
+#   specialties   optional, trade only: the specialty tags this job belongs to
+#   minPopulation optional: the job does not exist in smaller settlements
+
+# --- Food -------------------------------------------------------------------
+- {id: baker, name: Baker, category: food, workplace: bakery, weight: 14, status: modest}
+- {id: miller, name: Miller, category: food, workplace: mill, weight: 4, status: modest}
+- {id: butcher, name: Butcher, category: food, workplace: butchery, weight: 8, status: modest}
+- {id: brewer, name: Brewer, category: food, workplace: brewery, weight: 7, status: modest}
+- {id: tavern-keeper, name: Tavern keeper, category: food, workplace: tavern, weight: 5, status: modest}
+- {id: innkeeper, name: Innkeeper, category: food, workplace: tavern, weight: 2, status: comfortable, minPopulation: 500}
+- {id: tapster, name: Tapster, category: food, workplace: tavern, weight: 7, status: poor}
+- {id: cook, name: Cook, category: food, workplace: tavern, weight: 7, status: poor}
+- {id: grocer, name: Grocer, category: food, workplace: general-shop, weight: 6, status: modest}
+- {id: fishmonger, name: Fishmonger, category: food, workplace: market-stall, weight: 4, status: poor}
+- {id: market-gardener, name: Market gardener, category: food, workplace: farmstead, weight: 12, status: poor}
+- {id: farmhand, name: Farmhand, category: food, workplace: farmstead, weight: 14, status: poor}
+- {id: dairy-worker, name: Dairy worker, category: food, workplace: dairy, weight: 4, status: poor}
+
+# --- Utilities --------------------------------------------------------------
+- {id: water-carrier, name: Water carrier, category: utilities, workplace: town-yard, weight: 12, status: poor}
+- {id: night-soil-collector, name: Night-soil collector, category: utilities, workplace: town-yard, weight: 6, status: poor}
+- {id: street-sweeper, name: Street sweeper, category: utilities, workplace: town-yard, weight: 5, status: poor, minPopulation: 1000}
+- {id: lamplighter, name: Lamplighter, category: utilities, workplace: town-yard, weight: 3, status: poor, minPopulation: 2000}
+- {id: woodcutter, name: Woodcutter, category: utilities, workplace: woodyard, weight: 9, status: poor}
+- {id: fuel-seller, name: Fuel seller, category: utilities, workplace: woodyard, weight: 5, status: modest}
+- {id: ostler, name: Ostler, category: utilities, workplace: stockyard, weight: 6, status: poor}
+- {id: porter, name: Porter, category: utilities, workplace: carters-yard, weight: 10, status: poor}
+
+# --- Services ---------------------------------------------------------------
+- {id: servant, name: Servant, category: services, workplace: great-house, weight: 20, status: poor}
+- {id: launderer, name: Launderer, category: services, workplace: laundry, weight: 8, status: poor}
+- {id: barber, name: Barber, category: services, workplace: healers-house, weight: 4, status: modest}
+- {id: healer, name: Healer, category: services, workplace: healers-house, weight: 3, status: modest}
+- {id: midwife, name: Midwife, category: services, workplace: healers-house, weight: 3, status: modest}
+- {id: physician, name: Physician, category: services, workplace: healers-house, weight: 1, status: wealthy, minPopulation: 5000}
+- {id: apothecary, name: Apothecary, category: services, workplace: healers-house, weight: 2, status: comfortable, minPopulation: 2000}
+- {id: tailor, name: Tailor, category: services, workplace: tailors-shop, weight: 6, status: modest}
+- {id: cobbler, name: Cobbler, category: services, workplace: leather-shop, weight: 5, status: modest}
+- {id: scribe, name: Scribe, category: services, workplace: scribes-office, weight: 3, status: modest, minPopulation: 1000}
+- {id: clerk, name: Clerk, category: services, workplace: scribes-office, weight: 4, status: modest, minPopulation: 2000}
+- {id: priest, name: Priest, category: services, workplace: chapel, weight: 3, status: comfortable}
+- {id: sexton, name: Sexton, category: services, workplace: chapel, weight: 2, status: poor}
+- {id: moneylender, name: Moneylender, category: services, workplace: counting-house, weight: 1, status: wealthy, minPopulation: 3000}
+# Fixed posts
+- {id: provincial-official, name: Provincial official, category: services, workplace: province-hall, weight: 0, status: comfortable}
+- {id: provincial-clerk, name: Provincial clerk, category: services, workplace: province-hall, weight: 0, status: modest}
+- {id: high-priest, name: High priest, category: services, workplace: temple, weight: 0, status: wealthy}
+- {id: temple-priest, name: Temple priest, category: services, workplace: temple, weight: 0, status: comfortable}
+- {id: acolyte, name: Acolyte, category: services, workplace: temple, weight: 0, status: poor}
+- {id: market-warden, name: Market warden, category: services, workplace: market-square, weight: 0, status: modest}
+- {id: courtier, name: Courtier, category: services, workplace: palace, weight: 0, status: noble}
+- {id: palace-official, name: Palace official, category: services, workplace: palace, weight: 0, status: wealthy}
+- {id: harbourmaster, name: Harbourmaster, category: services, workplace: docks, weight: 0, status: comfortable}
+
+# --- Construction -----------------------------------------------------------
+- {id: mason, name: Mason, category: construction, workplace: masons-yard, weight: 10, status: modest}
+- {id: carpenter, name: Carpenter, category: construction, workplace: carpenters-shop, weight: 12, status: modest}
+- {id: joiner, name: Joiner, category: construction, workplace: carpenters-shop, weight: 5, status: modest}
+- {id: thatcher, name: Thatcher, category: construction, workplace: builders-yard, weight: 6, status: poor}
+- {id: plasterer, name: Plasterer, category: construction, workplace: builders-yard, weight: 4, status: poor}
+- {id: builders-labourer, name: Builder's labourer, category: construction, workplace: builders-yard, weight: 16, status: poor}
+- {id: master-builder, name: Master builder, category: construction, workplace: builders-yard, weight: 1, status: comfortable, minPopulation: 3000}
+- {id: brickmaker, name: Brickmaker, category: construction, workplace: kiln-yard, weight: 5, status: poor}
+- {id: sawyer, name: Sawyer, category: construction, workplace: woodyard, weight: 4, status: poor}
+
+# --- Military ---------------------------------------------------------------
+- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor}
+- {id: watch-sergeant, name: Watch sergeant, category: military, workplace: watch-house, weight: 2, status: modest}
+- {id: gaoler, name: Gaoler, category: military, workplace: watch-house, weight: 1, status: poor, minPopulation: 2000}
+- {id: soldier, name: Soldier, category: military, workplace: barracks, weight: 8, status: poor}
+- {id: officer, name: Officer, category: military, workplace: barracks, weight: 1, status: comfortable, minPopulation: 1000}
+# Fixed posts
+- {id: castellan, name: Castellan, category: military, workplace: citadel, weight: 0, status: wealthy}
+- {id: garrison-officer, name: Garrison officer, category: military, workplace: citadel, weight: 0, status: comfortable}
+- {id: garrison-soldier, name: Garrison soldier, category: military, workplace: citadel, weight: 0, status: poor}
+- {id: gate-guard, name: Gate guard, category: military, workplace: gatehouse, weight: 0, status: poor}
+- {id: palace-guard, name: Palace guard, category: military, workplace: palace, weight: 0, status: modest}
+
+# --- Luxury -----------------------------------------------------------------
+- {id: goldsmith, name: Goldsmith, category: luxury, workplace: goldsmiths-shop, weight: 3, status: comfortable}
+- {id: mercer, name: Mercer, category: luxury, workplace: fine-shop, weight: 4, status: comfortable}
+- {id: confectioner, name: Confectioner, category: luxury, workplace: fine-shop, weight: 3, status: modest}
+- {id: vintner, name: Vintner, category: luxury, workplace: fine-shop, weight: 3, status: comfortable}
+- {id: musician, name: Musician, category: luxury, workplace: players-hall, weight: 5, status: poor}
+- {id: player, name: Player, category: luxury, workplace: players-hall, weight: 3, status: poor, minPopulation: 3000}
+- {id: painter, name: Painter, category: luxury, workplace: studio, weight: 2, status: modest}
+
+# --- Trade: general ---------------------------------------------------------
+# Occupations without specialty tags. They share whatever the specialties leave.
+- {id: merchant, name: Merchant, category: trade, workplace: merchants-house, weight: 6, status: comfortable}
+- {id: broker, name: Broker, category: trade, workplace: merchants-house, weight: 1, status: wealthy, minPopulation: 3000}
+- {id: shopkeeper, name: Shopkeeper, category: trade, workplace: general-shop, weight: 8, status: modest}
+- {id: pedlar, name: Pedlar, category: trade, workplace: market-stall, weight: 5, status: poor}
+- {id: carter, name: Carter, category: trade, workplace: carters-yard, weight: 10, status: poor}
+- {id: drover, name: Drover, category: trade, workplace: carters-yard, weight: 3, status: poor}
+- {id: warehouseman, name: Warehouseman, category: trade, workplace: warehouse, weight: 5, status: poor}
+# Fixed post
+- {id: dock-worker, name: Dock worker, category: trade, workplace: docks, weight: 0, status: poor}
+
+# --- Trade: specialties -----------------------------------------------------
+# These exist only in settlements whose brief carries one of their tags.
+- {id: food-preserver, name: Food preserver, category: trade, workplace: preserving-house, weight: 3, status: poor, specialties: [preserved food]}
+- {id: fish-curer, name: Fish curer, category: trade, workplace: preserving-house, weight: 2, status: poor, specialties: [preserved food, fish]}
+- {id: miner, name: Miner, category: trade, workplace: mine, weight: 6, status: poor, specialties: [coal, tin, silver, saltpeter]}
+- {id: tanner, name: Tanner, category: trade, workplace: tannery, weight: 5, status: modest, specialties: [leather]}
+- {id: leatherworker, name: Leatherworker, category: trade, workplace: leather-shop, weight: 3, status: modest, specialties: [leather]}
+- {id: saddler, name: Saddler, category: trade, workplace: leather-shop, weight: 3, status: modest, specialties: [harnesses]}
+- {id: harness-maker, name: Harness maker, category: trade, workplace: leather-shop, weight: 4, status: modest, specialties: [harnesses]}
+- {id: bootmaker, name: Bootmaker, category: trade, workplace: leather-shop, weight: 4, status: modest, specialties: [boots]}
+- {id: furrier, name: Furrier, category: trade, workplace: leather-shop, weight: 2, status: comfortable, specialties: [furs]}
+- {id: weaver, name: Weaver, category: trade, workplace: weaving-shed, weight: 6, status: modest, specialties: [cloth]}
+- {id: spinner, name: Spinner, category: trade, workplace: weaving-shed, weight: 4, status: poor, specialties: [cloth]}
+- {id: dyer, name: Dyer, category: trade, workplace: dye-works, weight: 2, status: modest, specialties: [cloth]}
+- {id: ink-maker, name: Ink maker, category: trade, workplace: dye-works, weight: 2, status: modest, specialties: [ink]}
+- {id: glassblower, name: Glassblower, category: trade, workplace: glassworks, weight: 4, status: modest, specialties: [glass]}
+- {id: weaponsmith, name: Weaponsmith, category: trade, workplace: forge, weight: 4, status: modest, specialties: [arms]}
+- {id: armourer, name: Armourer, category: trade, workplace: forge, weight: 3, status: comfortable, specialties: [arms]}
+- {id: toolsmith, name: Toolsmith, category: trade, workplace: forge, weight: 4, status: modest, specialties: [tools]}
+- {id: bronze-founder, name: Bronze founder, category: trade, workplace: foundry, weight: 3, status: modest, specialties: [bronze, tin, artillery]}
+- {id: sailmaker, name: Sailmaker, category: trade, workplace: rigging-loft, weight: 4, status: modest, specialties: [sails]}
+- {id: ropemaker, name: Ropemaker, category: trade, workplace: rigging-loft, weight: 4, status: poor, specialties: [ropes]}
+- {id: maltster, name: Maltster, category: trade, workplace: brewery, weight: 3, status: modest, specialties: [beer, liquor]}
+- {id: distiller, name: Distiller, category: trade, workplace: distillery, weight: 3, status: modest, specialties: [liquor, vinegar]}
+- {id: soap-boiler, name: Soap boiler, category: trade, workplace: chandlery, weight: 3, status: poor, specialties: [soap]}
+- {id: chandler, name: Chandler, category: trade, workplace: chandlery, weight: 3, status: modest, specialties: [candles]}
+- {id: cheesemaker, name: Cheesemaker, category: trade, workplace: dairy, weight: 3, status: modest, specialties: [cheese]}
+- {id: potter, name: Potter, category: trade, workplace: kiln-yard, weight: 4, status: modest, specialties: [ceramics]}
+- {id: tar-burner, name: Tar burner, category: trade, workplace: kiln-yard, weight: 3, status: poor, specialties: [tar]}
+- {id: cooper, name: Cooper, category: trade, workplace: cooperage, weight: 4, status: modest, specialties: [barrels]}
+- {id: garment-maker, name: Garment maker, category: trade, workplace: garment-workshop, weight: 4, status: modest, specialties: [garments]}
+- {id: oil-presser, name: Oil presser, category: trade, workplace: press-house, weight: 3, status: poor, specialties: [oil]}
+- {id: winemaker, name: Winemaker, category: trade, workplace: press-house, weight: 3, status: modest, specialties: [wine]}
+- {id: shipwright, name: Shipwright, category: trade, workplace: boatyard, weight: 4, status: modest, specialties: [boats]}
+- {id: bookbinder, name: Bookbinder, category: trade, workplace: scribes-office, weight: 2, status: modest, specialties: [books]}
+- {id: papermaker, name: Papermaker, category: trade, workplace: paper-mill, weight: 3, status: modest, specialties: [paper]}
+- {id: powder-maker, name: Powder maker, category: trade, workplace: powder-mill, weight: 3, status: modest, specialties: [gunpowder, saltpeter]}
+- {id: perfumer, name: Perfumer, category: trade, workplace: fine-shop, weight: 2, status: comfortable, specialties: [perfume]}
+- {id: jeweller, name: Jeweller, category: trade, workplace: goldsmiths-shop, weight: 3, status: comfortable, specialties: [jewelry, gemstones, amber, ivory]}
+- {id: moneyer, name: Moneyer, category: trade, workplace: mint, weight: 3, status: comfortable, specialties: [coins, silver]}
+- {id: spice-merchant, name: Spice merchant, category: trade, workplace: merchants-house, weight: 2, status: wealthy, specialties: [spices, incense, sugar, dates]}
+- {id: stockman, name: Stockman, category: trade, workplace: stockyard, weight: 3, status: poor, specialties: [horses, cattle]}
+- {id: stonecutter, name: Stonecutter, category: trade, workplace: masons-yard, weight: 3, status: modest, specialties: [marble]}

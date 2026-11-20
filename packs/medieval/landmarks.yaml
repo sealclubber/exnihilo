@@ -1,0 +1,73 @@
+# Buildings that a flag or status adds, and the fixed posts they create.
+#
+#   when      capital, port, citadel, walls, plaza, temple, shantyTown or provinceSeat
+#   district  the kind of district the building prefers
+#   count     how many buildings: {fixed: n}, or {perThousand: x, min: a, max: b}
+#             which grows with the settlement's population
+#   posts     jobs that exist because the landmark does. Each takes a slot from
+#             its occupation's category, and is shared out among the buildings.
+#             The occupation must name this landmark as its workplace.
+
+- id: citadel
+  name: Citadel
+  when: citadel
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: castellan, count: {fixed: 1}}
+    - {occupation: garrison-officer, count: {perThousand: 0.5, min: 1}}
+    - {occupation: garrison-soldier, count: {perThousand: 8, min: 6}}
+
+- id: gatehouse
+  name: Gatehouse
+  when: walls
+  district: outskirts
+  count: {perThousand: 0.25, min: 2, max: 8}
+  posts:
+    - {occupation: gate-guard, count: {perThousand: 1.5, min: 4}}
+
+- id: temple
+  name: Temple
+  when: temple
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: high-priest, count: {fixed: 1}}
+    - {occupation: temple-priest, count: {perThousand: 0.6, min: 2}}
+    - {occupation: acolyte, count: {perThousand: 0.8, min: 2}}
+
+- id: docks
+  name: Docks
+  when: port
+  district: harbour
+  count: {perThousand: 0.3, min: 1, max: 6}
+  posts:
+    - {occupation: harbourmaster, count: {fixed: 1}}
+    - {occupation: dock-worker, count: {perThousand: 12, min: 6}}
+
+- id: market-square
+  name: Market square
+  when: plaza
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: market-warden, count: {perThousand: 0.3, min: 1}}
+
+- id: palace
+  name: Palace
+  when: capital
+  district: upper
+  count: {fixed: 1}
+  posts:
+    - {occupation: courtier, count: {perThousand: 0.4, min: 3}}
+    - {occupation: palace-official, count: {perThousand: 0.6, min: 4}}
+    - {occupation: palace-guard, count: {perThousand: 1, min: 6}}
+
+- id: province-hall
+  name: Provincial administration hall
+  when: provinceSeat
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: provincial-official, count: {perThousand: 0.5, min: 2}}
+    - {occupation: provincial-clerk, count: {perThousand: 0.5, min: 2}}
