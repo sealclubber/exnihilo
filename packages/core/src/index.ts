@@ -25,3 +25,8 @@ export * as geometry from './layout/geometry.ts';
 export { checkLayout, distanceToWater, BEARING_TOLERANCE } from './layout/invariants.ts';
 export { generateLayout, LayoutGenerationError, GRID_GENERATOR, type LayoutOptions } from './layout/grid.ts';
 export { createPathFinder, shortestPath, LayoutPathError, type PathFinder } from './layout/path.ts';
+export * from './life/records.ts';
+export * from './life/calendar.ts';
+export { createLife, walkingSpeed, tripDuration, dutyCount, LifeError, type LifeInputs, type SettlementLife } from './life/life.ts';
+export { createPlanChecker, type PlanChecker } from './life/invariants.ts';
+export { describeDay } from './life/report.ts';

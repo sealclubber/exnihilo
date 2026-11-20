@@ -1,0 +1,20 @@
+# The calendar: the week, the year and the daylight.
+# Times of day are written "HH:MM" on a 24-hour clock. All values are placeholders.
+
+# The days of the week in order. Game time starts at midnight on the first of
+# them. On a rest day only occupations whose shift is worked on rest days work
+# (see shifts.yaml).
+week:
+  - {name: Moonday, rest: false}
+  - {name: Tilsday, rest: false}
+  - {name: Midweek, rest: false}
+  - {name: Thunsday, rest: false}
+  - {name: Freeday, rest: false}
+  - {name: Marketday, rest: false}
+  - {name: Restday, rest: true}
+
+daysPerYear: 364
+
+# The same all year: seasons are not modelled.
+sunrise: "06:00"
+sunset: "19:00"

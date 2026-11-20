@@ -53,6 +53,26 @@ human:
     # Share of households of two or more in which one member keeps house.
     keepingHouseShare: 0.72
   multipliers: {}
+  # How the species lives its day. All placeholders.
+  life:
+    # Walking speed in metres per second, by age: each entry covers ages up to
+    # and including upToAge, and the last covers everyone older. A trip takes
+    # its path's length divided by this speed.
+    walkingSpeed:
+      - {upToAge: 12, metresPerSecond: 0.9}
+      - {upToAge: 59, metresPerSecond: 1.35}
+      - {metresPerSecond: 1.0}
+    # Usual sleeping hours. A worker's are moved, but not shortened, as far as
+    # their shift requires: someone on the night shift sleeps by day.
+    sleep: {from: "22:00", to: "06:00"}
+    # Each person has a habit that moves all their times earlier or later by up
+    # to personalMinutes, the same every day; each day moves each time again
+    # by up to dailyMinutes.
+    variation: {personalMinutes: 15, dailyMinutes: 5}
+    # The least time awake at home before leaving for work, and at home after
+    # work before sleep.
+    minutesBeforeLeaving: 45
+    minutesBeforeBed: 60
 
 # A test species. No culture in the default mapping uses it.
 dwarf:
@@ -93,3 +113,12 @@ dwarf:
   # Occupations only this species has.
   occupations:
     - {id: runesmith, name: Runesmith, category: luxury, workplace: forge, weight: 4, status: comfortable}
+  life:
+    walkingSpeed:
+      - {upToAge: 24, metresPerSecond: 0.8}
+      - {upToAge: 139, metresPerSecond: 1.1}
+      - {metresPerSecond: 0.8}
+    sleep: {from: "23:00", to: "06:00"}
+    variation: {personalMinutes: 10, dailyMinutes: 5}
+    minutesBeforeLeaving: 45
+    minutesBeforeBed: 60

@@ -2,7 +2,17 @@
  * The whole-world run: every settlement of Lomia, generated and checked.
  */
 import { describe, expect, it } from 'vitest';
-import { WORKFORCE_SHARE_LIMITS, checkCity, checkLayout, createPathFinder, generateCity, generateLayout } from '../src/index.ts';
+import {
+  WORKFORCE_SHARE_LIMITS,
+  checkCity,
+  checkLayout,
+  createLife,
+  createPathFinder,
+  createPlanChecker,
+  createRng,
+  generateCity,
+  generateLayout,
+} from '../src/index.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
 
 describe('every settlement of Lomia', () => {
@@ -35,9 +45,11 @@ describe('every settlement of Lomia', () => {
     expect(people).toBe(2_935_089);
   });
 
-  it('lays out with every layout invariant holding, and a path between lots everywhere', { timeout: 180_000 }, () => {
+  it('lays out with every layout invariant holding, a path between lots everywhere, and sound day plans', { timeout: 180_000 }, () => {
     const pack = medievalPack();
     const { settlements } = lomiaWorld();
+    const RESIDENTS_SAMPLED = 12;
+    let plans = 0;
     let lots = 0;
     let slowest = { seconds: 0, id: '' };
     let layoutSeconds = 0;
@@ -61,10 +73,21 @@ describe('every settlement of Lomia', () => {
           const path = finder.path(layout.lots[0]!.id, layout.lots[at]!.id);
           if (!(path.length >= 0) || path.segmentIds.length === 0) failures.push(`${brief.id}: no path to ${layout.lots[at]!.id}`);
         }
+        // A seeded sample of residents has a sound plan for day 1 that joins on to day 2.
+        const life = createLife({ city, layout, pack });
+        const checker = createPlanChecker({ city, layout, pack });
+        const pick = createRng(brief.seed);
+        for (let sample = 0; sample < RESIDENTS_SAMPLED; sample++) {
+          const person = city.people[pick.int(0, city.people.length - 1)]!;
+          const today = life.plan(person.id, 1);
+          plans++;
+          failures.push(...checker.check(today), ...checker.checkContinuity(today, life.plan(person.id, 2)));
+        }
       } catch (error) {
         failures.push((error as Error).message);
       }
     }
+    console.log(`Checked the day plans of ${plans.toLocaleString('en-US')} sampled residents across ${settlements.length} settlements`);
     console.log(
       `Laid out ${settlements.length} settlements, ${lots.toLocaleString('en-US')} lots, in ${layoutSeconds.toFixed(1)} s; the slowest was ${slowest.id} at ${slowest.seconds.toFixed(2)} s`,
     );

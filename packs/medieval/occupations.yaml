@@ -19,6 +19,9 @@
 #   minPopulation   optional: the job does not exist in smaller settlements
 #   minAge, maxAge  optional: ages outside this range cannot hold the job
 #   sexes           optional: only the listed sexes can hold the job
+#   shift           optional: the hours worked, naming a shift from shifts.yaml.
+#                   Left out, the default shift applies. Apprentices keep the
+#                   same hours.
 #   apprenticeUntil optional: a worker younger than this holds the job as an
 #                   apprentice. 0 means the job has no apprenticeship. Left out, the
 #                   pack-wide age in pack.yaml applies.
@@ -32,18 +35,21 @@
 #     (species.yaml) hold every other job.
 #   - apprenticeUntil is 0 on unskilled jobs; every other job uses the
 #     pack-wide age.
+#   - Shifts: bakers and millers work early; tavern staff, musicians and
+#     players work evenings; watchmen work nights; clergy keep their own hours.
+#     The watch, the taverns and the clergy also work on rest days.
 #   - No occupation sets `sexes`. The syntax, on an example that is not in use:
 #       - {id: midwife, name: Midwife, category: services, workplace: healers-house, weight: 3, status: modest, sexes: [female]}
 
 # --- Food -------------------------------------------------------------------
-- {id: baker, name: Baker, category: food, workplace: bakery, weight: 14, status: modest}
-- {id: miller, name: Miller, category: food, workplace: mill, weight: 4, status: modest}
+- {id: baker, name: Baker, category: food, workplace: bakery, weight: 14, status: modest, shift: early}
+- {id: miller, name: Miller, category: food, workplace: mill, weight: 4, status: modest, shift: early}
 - {id: butcher, name: Butcher, category: food, workplace: butchery, weight: 8, status: modest}
 - {id: brewer, name: Brewer, category: food, workplace: brewery, weight: 7, status: modest}
-- {id: tavern-keeper, name: Tavern keeper, category: food, workplace: tavern, weight: 5, status: modest}
-- {id: innkeeper, name: Innkeeper, category: food, workplace: tavern, weight: 2, status: comfortable, minPopulation: 500}
-- {id: tapster, name: Tapster, category: food, workplace: tavern, weight: 7, status: poor, apprenticeUntil: 0}
-- {id: cook, name: Cook, category: food, workplace: tavern, weight: 7, status: poor}
+- {id: tavern-keeper, name: Tavern keeper, category: food, workplace: tavern, weight: 5, status: modest, shift: evening}
+- {id: innkeeper, name: Innkeeper, category: food, workplace: tavern, weight: 2, status: comfortable, minPopulation: 500, shift: evening}
+- {id: tapster, name: Tapster, category: food, workplace: tavern, weight: 7, status: poor, apprenticeUntil: 0, shift: evening}
+- {id: cook, name: Cook, category: food, workplace: tavern, weight: 7, status: poor, shift: evening}
 - {id: grocer, name: Grocer, category: food, workplace: general-shop, weight: 6, status: modest}
 - {id: fishmonger, name: Fishmonger, category: food, workplace: market-stall, weight: 4, status: poor, apprenticeUntil: 0}
 - {id: market-gardener, name: Market gardener, category: food, workplace: farmstead, weight: 12, status: poor, apprenticeUntil: 0}
@@ -72,15 +78,15 @@
 - {id: cobbler, name: Cobbler, category: services, workplace: leather-shop, weight: 5, status: modest}
 - {id: scribe, name: Scribe, category: services, workplace: scribes-office, weight: 3, status: modest, minPopulation: 1000, minAge: 18}
 - {id: clerk, name: Clerk, category: services, workplace: scribes-office, weight: 4, status: modest, minPopulation: 2000, minAge: 18}
-- {id: priest, name: Priest, category: services, workplace: chapel, weight: 3, status: comfortable, minAge: 25}
-- {id: sexton, name: Sexton, category: services, workplace: chapel, weight: 2, status: poor, apprenticeUntil: 0}
+- {id: priest, name: Priest, category: services, workplace: chapel, weight: 3, status: comfortable, minAge: 25, shift: clergy}
+- {id: sexton, name: Sexton, category: services, workplace: chapel, weight: 2, status: poor, apprenticeUntil: 0, shift: clergy}
 - {id: moneylender, name: Moneylender, category: services, workplace: counting-house, weight: 1, status: wealthy, minPopulation: 3000, minAge: 25}
 # Fixed posts
 - {id: provincial-official, name: Provincial official, category: services, workplace: province-hall, weight: 0, status: comfortable, minAge: 30}
 - {id: provincial-clerk, name: Provincial clerk, category: services, workplace: province-hall, weight: 0, status: modest, minAge: 18}
-- {id: high-priest, name: High priest, category: services, workplace: temple, weight: 0, status: wealthy, minAge: 40}
-- {id: temple-priest, name: Temple priest, category: services, workplace: temple, weight: 0, status: comfortable, minAge: 25}
-- {id: acolyte, name: Acolyte, category: services, workplace: temple, weight: 0, status: poor, apprenticeUntil: 0}
+- {id: high-priest, name: High priest, category: services, workplace: temple, weight: 0, status: wealthy, minAge: 40, shift: clergy}
+- {id: temple-priest, name: Temple priest, category: services, workplace: temple, weight: 0, status: comfortable, minAge: 25, shift: clergy}
+- {id: acolyte, name: Acolyte, category: services, workplace: temple, weight: 0, status: poor, apprenticeUntil: 0, shift: clergy}
 - {id: market-warden, name: Market warden, category: services, workplace: market-square, weight: 0, status: modest, minAge: 30}
 - {id: courtier, name: Courtier, category: services, workplace: palace, weight: 0, status: noble, minAge: 21}
 - {id: palace-official, name: Palace official, category: services, workplace: palace, weight: 0, status: wealthy, minAge: 30}
@@ -98,7 +104,7 @@
 - {id: sawyer, name: Sawyer, category: construction, workplace: woodyard, weight: 4, status: poor, apprenticeUntil: 0}
 
 # --- Military ---------------------------------------------------------------
-- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor, minAge: 16, apprenticeUntil: 0}
+- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor, minAge: 16, apprenticeUntil: 0, shift: night}
 - {id: watch-sergeant, name: Watch sergeant, category: military, workplace: watch-house, weight: 2, status: modest, minAge: 25}
 - {id: gaoler, name: Gaoler, category: military, workplace: watch-house, weight: 1, status: poor, minPopulation: 2000, minAge: 21, apprenticeUntil: 0}
 - {id: soldier, name: Soldier, category: military, workplace: barracks, weight: 8, status: poor, minAge: 16, apprenticeUntil: 0}
@@ -115,8 +121,8 @@
 - {id: mercer, name: Mercer, category: luxury, workplace: fine-shop, weight: 4, status: comfortable}
 - {id: confectioner, name: Confectioner, category: luxury, workplace: fine-shop, weight: 3, status: modest}
 - {id: vintner, name: Vintner, category: luxury, workplace: fine-shop, weight: 3, status: comfortable}
-- {id: musician, name: Musician, category: luxury, workplace: players-hall, weight: 5, status: poor}
-- {id: player, name: Player, category: luxury, workplace: players-hall, weight: 3, status: poor, minPopulation: 3000}
+- {id: musician, name: Musician, category: luxury, workplace: players-hall, weight: 5, status: poor, shift: evening}
+- {id: player, name: Player, category: luxury, workplace: players-hall, weight: 3, status: poor, minPopulation: 3000, shift: evening}
 - {id: painter, name: Painter, category: luxury, workplace: studio, weight: 2, status: modest}
 
 # --- Trade: general ---------------------------------------------------------

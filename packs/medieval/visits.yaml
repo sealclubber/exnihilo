@@ -1,0 +1,58 @@
+# Stops people make besides work: where, who, when and for how long.
+#
+#   who.states       which residents: working, keeping-house, not-working
+#   who.minAge/maxAge optional age limits. Children too young to be given a
+#                    minAge here stay at home.
+#   days             work, rest or any: on which kind of day the visit can happen.
+#                    For someone in the workforce a "work" day is one they work.
+#   probability      the chance, each day, that the person makes the visit
+#   when             after-work: on the way home from the day's work; or
+#                    {from, to}: starting at some time in that window of the day,
+#                    from home and back home. A visit that would collide with
+#                    work, another visit or sleep does not happen.
+#   durationMinutes  how long the stop lasts, between min and max
+#   destinations     building types the visit can go to. If the settlement has
+#                    none of them, the visit does not happen.
+#
+# All values are placeholders.
+
+# How strongly nearer destinations are favoured: 1 is no preference, 2 means
+# the nearest quarter is chosen half the time, and so on.
+nearness: 2
+
+visits:
+  - id: market
+    name: Going to market
+    who: {states: [keeping-house], minAge: 13}
+    days: any
+    probability: 0.6
+    when: {from: "08:00", to: "12:00"}
+    durationMinutes: {min: 20, max: 60}
+    destinations: [market-stall, market-square, general-shop, bakery, butchery]
+
+  - id: tavern
+    name: A drink after work
+    who: {states: [working], minAge: 16}
+    days: work
+    probability: 0.25
+    when: after-work
+    durationMinutes: {min: 30, max: 120}
+    destinations: [tavern]
+
+  - id: worship
+    name: Worship
+    who: {states: [working, keeping-house, not-working], minAge: 13}
+    days: rest
+    probability: 0.5
+    when: {from: "09:00", to: "11:00"}
+    durationMinutes: {min: 45, max: 90}
+    destinations: [chapel, temple]
+
+  - id: errand
+    name: An errand
+    who: {states: [not-working], minAge: 16}
+    days: any
+    probability: 0.2
+    when: {from: "10:00", to: "15:00"}
+    durationMinutes: {min: 20, max: 60}
+    destinations: [market-stall, market-square, general-shop, chapel, healers-house]

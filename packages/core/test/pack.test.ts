@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.3.0');
+    expect(pack.pack.version).toBe('0.4.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -138,6 +138,42 @@ describe('the medieval pack', () => {
     expect(layout.atExits).toEqual(['gatehouse']);
   });
 
+  it('has a calendar, clock rates, shifts and visits, as placeholders', () => {
+    expect(pack.calendar.week).toHaveLength(7);
+    expect(pack.calendar.week.filter((day) => day.rest).map((day) => day.name)).toEqual(['Restday']);
+    expect(pack.calendar).toMatchObject({ daysPerYear: 364, sunrise: 6 * 3600, sunset: 19 * 3600 });
+    // The default rate is real time, and 30 gives a game day in 48 real minutes.
+    expect(pack.time.defaultRate).toBe(1);
+    expect(pack.time.rates).toContain(30);
+    expect(86_400 / 30 / 60).toBe(48);
+    expect(pack.time.rates.every((rate, index) => index === 0 || rate > pack.time.rates[index - 1]!)).toBe(true);
+
+    const { shifts } = pack.shifts;
+    expect(pack.shifts.default).toBe('day');
+    expect(shifts.day).toMatchObject({ start: 8 * 3600, end: 17 * 3600, restDays: false });
+    expect(shifts.early!.start).toBeLessThan(shifts.day!.start);
+    expect(shifts.evening!.end).toBeGreaterThan(shifts.day!.end);
+    expect(shifts.night).toMatchObject({ start: 22 * 3600, end: 6 * 3600, crossesMidnight: true, restDays: true });
+    const shiftFor = (id: string) => allOccupations(pack).find((occupation) => occupation.id === id)!.shift;
+    expect(shiftFor('baker')).toBe('early');
+    expect(shiftFor('tavern-keeper')).toBe('evening');
+    expect(shiftFor('watchman')).toBe('night');
+    expect(shiftFor('tanner')).toBeUndefined();
+    // Rest-day duty for the watch, the taverns and the clergy.
+    for (const id of ['watchman', 'tavern-keeper', 'tapster', 'priest']) expect(shifts[shiftFor(id)!]!.restDays, id).toBe(true);
+
+    const visits = Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit]));
+    expect(visits.market).toMatchObject({ who: { states: ['keeping-house'] }, when: { from: 8 * 3600, to: 12 * 3600 } });
+    expect(visits.tavern).toMatchObject({ who: { states: ['working'] }, when: 'after-work', destinations: ['tavern'] });
+    expect(visits.worship).toMatchObject({ days: 'rest', destinations: ['chapel', 'temple'] });
+    expect(pack.visits.nearness).toBeGreaterThanOrEqual(1);
+
+    const { life } = pack.species.human!;
+    expect(life.sleep).toEqual({ from: 22 * 3600, to: 6 * 3600 });
+    expect(life.walkingSpeed.map((band) => band.upToAge)).toEqual([12, 59, undefined]);
+    expect(life.variation.dailyMinutes).toBeLessThan(life.variation.personalMinutes);
+  });
+
   it('maps every Lomia culture to human by default', () => {
     expect(pack.cultures.default).toBe('human');
     for (const culture of lomiaWorld().cultures.filter((entry) => !entry.isPlaceholder)) {
@@ -219,6 +255,26 @@ describe('pack validation', () => {
     ['a district kind with no placement', (raw) => delete raw.districts.kinds[1].placement, /^districts at kinds\.1\.placement/],
     ['a district placement the layout does not know', (raw) => (raw.districts.kinds[1].placement = 'suburb'), /^districts at kinds\.1\.placement/],
     ['a missing layout file', (raw) => delete raw.layout, /^layout: /],
+    ['a shift that ends before it starts without crossing midnight', (raw) => Object.assign(raw.shifts.shifts.day, { start: '22:00', end: '06:00' }), /shifts: "day" ends before it starts; if it runs past midnight, mark it crossesMidnight: true/],
+    ['a shift marked as crossing midnight that does not', (raw) => (raw.shifts.shifts.day.crossesMidnight = true), /shifts: "day" is marked crossesMidnight but ends after it starts/],
+    ['a rest-day shift with no duty share', (raw) => delete raw.shifts.shifts.night.dutyShare, /shifts: "night" is worked on rest days, so it needs a dutyShare/],
+    ['a duty share on a shift that rests', (raw) => (raw.shifts.shifts.day.dutyShare = 0.5), /shifts: "day" has a dutyShare but is not worked on rest days/],
+    ['a shift too long to sleep around', (raw) => Object.assign(raw.shifts.shifts.day, { start: '04:00', end: '23:00' }), /shifts: "day" is too long for the species "human"/],
+    ['a default shift that is not defined', (raw) => (raw.shifts.default = 'dawn'), /shifts: the default shift "dawn" is not defined/],
+    ['an occupation on a shift that is not defined', (raw) => (raw.occupations[0].shift = 'dawn'), /occupations: "baker" names the shift "dawn", which shifts does not define/],
+    ['a time of day that is not one', (raw) => (raw.shifts.shifts.day.start = '8am'), /^shifts at shifts\.day\.start: must be a time of day/],
+    ['a visit naming a missing building type', (raw) => raw.visits.visits[0].destinations.push('bazaar'), /visits: "market" names the building type "bazaar", which does not exist/],
+    ['a visit with its durations the wrong way round', (raw) => (raw.visits.visits[0].durationMinutes = { min: 60, max: 20 }), /visits: "market" has a shortest duration above its longest/],
+    ['a visit whose window ends before it starts', (raw) => (raw.visits.visits[0].when = { from: '12:00', to: '08:00' }), /visits: "market" has a window that ends before it starts/],
+    ['a visit defined twice', (raw) => raw.visits.visits.push({ ...raw.visits.visits[0] }), /visits: "market" is defined more than once/],
+    ['a visit for a workforce state that does not exist', (raw) => (raw.visits.visits[0].who.states = ['retired']), /^visits at visits\.0\.who\.states/],
+    ['a default clock rate that is not on offer', (raw) => (raw.time.defaultRate = 7), /time: defaultRate 7 is not one of the rates listed/],
+    ['a clock rate of zero', (raw) => (raw.time.rates = [0, 1]), /^time at rates\.0/],
+    ['a week with no days', (raw) => (raw.calendar.week = []), /^calendar at week/],
+    ['sunset before sunrise', (raw) => Object.assign(raw.calendar, { sunrise: '19:00', sunset: '06:00' }), /^calendar: sunrise must be before sunset/],
+    ['walking speeds out of order', (raw) => raw.species.human.life.walkingSpeed.reverse(), /species: "human" needs walking speeds in rising order of upToAge, the last with no upToAge/],
+    ['a walking speed of zero', (raw) => (raw.species.human.life.walkingSpeed[0].metresPerSecond = 0), /^species at human\.life\.walkingSpeed\.0\.metresPerSecond/],
+    ['a species with no life settings', (raw) => delete raw.species.dwarf.life, /^species at dwarf\.life/],
     ['a culture mapped to a missing species', (raw) => (raw.cultures.cultures.Norse = 'elf'), /cultures: "Norse" names the species "elf"/],
     ['a default species that is missing', (raw) => (raw.cultures.default = 'elf'), /the default names the species "elf"/],
     ['a multiplier for an unknown occupation', (raw) => (raw.species.dwarf.multipliers.occupations.wizard = 2), /"dwarf" has a multiplier for the occupation "wizard"/],

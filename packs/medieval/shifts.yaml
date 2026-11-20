@@ -1,0 +1,55 @@
+# Working hours. An occupation names its shift in occupations.yaml; one that
+# names none works the default.
+#
+#   start, end       times of day, "HH:MM"
+#   crossesMidnight  true for a shift that ends on the day after it starts.
+#                    A shift that ends before it starts without this is refused.
+#   restDays         whether the shift is worked on rest days
+#   dutyShare        for a shift worked on rest days: the share of each
+#                    occupation's workers on duty on a rest day. They take
+#                    turns, so the same people are not always on. On work days
+#                    everyone works.
+#
+# All hours are placeholders. Which trades keep which hours is a setting
+# decision: these are first guesses for review.
+
+default: day
+
+shifts:
+  day:
+    name: Day
+    start: "08:00"
+    end: "17:00"
+    restDays: false
+
+  # Trades that must be ready before the town wakes, such as baking.
+  early:
+    name: Early
+    start: "05:00"
+    end: "13:00"
+    restDays: false
+
+  # Taverns and players.
+  evening:
+    name: Evening
+    start: "15:00"
+    end: "23:00"
+    restDays: true
+    dutyShare: 0.6
+
+  # The night watch.
+  night:
+    name: Night
+    start: "22:00"
+    end: "06:00"
+    crossesMidnight: true
+    restDays: true
+    dutyShare: 0.5
+
+  # Clergy: day hours, and every one of them on duty on rest days.
+  clergy:
+    name: Clergy
+    start: "07:00"
+    end: "15:00"
+    restDays: true
+    dutyShare: 1

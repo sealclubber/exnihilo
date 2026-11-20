@@ -147,6 +147,8 @@ export const LayoutPathSchema = z.strictObject({
   toLotId: LotIdSchema,
   /** Every segment walked, in order. The first and last are usually walked only in part. */
   segmentIds: z.array(SegmentIdSchema),
+  /** How far is walked on each of those segments, in the same order. These sum to the length. */
+  walked: z.array(z.number().nonnegative()),
   /** In metres, from entrance point to entrance point. */
   length: z.number().nonnegative(),
   /** The line walked, for drawing. */

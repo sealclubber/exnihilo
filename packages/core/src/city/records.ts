@@ -7,7 +7,7 @@
  * ID order: person-641-000123.
  */
 import { z } from 'zod';
-import { CategoryIdSchema, SexSchema } from '../pack/schema.ts';
+import { CategoryIdSchema, SexSchema, WorkforceStateSchema } from '../pack/schema.ts';
 import { CultureIdSchema, SettlementIdSchema } from '../schema.ts';
 
 const recordId = (kind: string, digits: number) =>
@@ -26,8 +26,7 @@ export { SexSchema, type Sex } from '../pack/schema.ts';
 export const HouseholdRoleSchema = z.enum(['head', 'partner', 'child', 'elder', 'lodger']);
 export type HouseholdRole = z.infer<typeof HouseholdRoleSchema>;
 
-export const WorkforceStateSchema = z.enum(['working', 'keeping-house', 'not-working']);
-export type WorkforceState = z.infer<typeof WorkforceStateSchema>;
+export { WorkforceStateSchema, type WorkforceState } from '../pack/schema.ts';
 
 export const PersonSchema = z.strictObject({
   id: PersonIdSchema,

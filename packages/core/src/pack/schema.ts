@@ -32,6 +32,10 @@ export const PACK_FILES = [
   'cultures',
   'districts',
   'layout',
+  'calendar',
+  'time',
+  'shifts',
+  'visits',
 ] as const;
 export type PackFile = (typeof PACK_FILES)[number];
 
@@ -46,6 +50,18 @@ const range = z
 
 export const SexSchema = z.enum(['female', 'male']);
 export type Sex = z.infer<typeof SexSchema>;
+
+export const WorkforceStateSchema = z.enum(['working', 'keeping-house', 'not-working']);
+export type WorkforceState = z.infer<typeof WorkforceStateSchema>;
+
+export const SECONDS_PER_DAY = 86_400;
+
+/** A time of day written as "HH:MM", read as seconds since midnight. */
+const clockTime = z
+  .string()
+  .regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, 'must be a time of day such as "06:30"')
+  .transform((text) => Number(text.slice(0, 2)) * 3600 + Number(text.slice(3)) * 60);
+const minutes = z.number().nonnegative();
 
 const ManifestSchema = z.strictObject({
   name: id,
@@ -104,6 +120,8 @@ const OccupationSchema = z.strictObject({
   sexes: z.array(SexSchema).min(1).optional(),
   /** A worker younger than this is an apprentice; 0 means the job has no apprenticeship. Left out means the pack-wide age. */
   apprenticeUntil: wholeNumber.optional(),
+  /** The hours worked, naming a shift. Left out means the default shift. */
+  shift: id.optional(),
 });
 export type Occupation = z.infer<typeof OccupationSchema>;
 
@@ -203,6 +221,18 @@ const SpeciesSchema = z.strictObject({
   }),
   /** Occupations only this species has. */
   occupations: z.array(OccupationSchema).optional(),
+  /** How the species lives its day. */
+  life: z.strictObject({
+    /** Walking speed by age: each entry covers ages up to and including `upToAge`; the last has none and covers the rest. */
+    walkingSpeed: z.array(z.strictObject({ upToAge: wholeNumber.optional(), metresPerSecond: z.number().positive() })).min(1),
+    /** Usual sleeping hours. A worker's are moved as far as their shift requires. */
+    sleep: z.strictObject({ from: clockTime, to: clockTime }),
+    /** How far a person's own habit moves their times, and how far each day moves them again. */
+    variation: z.strictObject({ personalMinutes: minutes, dailyMinutes: minutes }),
+    /** The least time awake at home before leaving for work, and after work before sleep. */
+    minutesBeforeLeaving: minutes,
+    minutesBeforeBed: minutes,
+  }),
 });
 export type Species = z.infer<typeof SpeciesSchema>;
 
@@ -265,6 +295,60 @@ const LayoutSettingsSchema = z.strictObject({
 });
 export type LayoutSettings = z.infer<typeof LayoutSettingsSchema>;
 
+const CalendarSchema = z
+  .strictObject({
+    /** The days of the week in order, and which are rest days. */
+    week: z.array(z.strictObject({ name: text, rest: z.boolean() })).min(1),
+    daysPerYear: z.int().positive(),
+    sunrise: clockTime,
+    sunset: clockTime,
+  })
+  .refine((value) => value.sunrise < value.sunset, 'sunrise must be before sunset');
+export type Calendar = z.infer<typeof CalendarSchema>;
+
+const TimeSchema = z.strictObject({
+  /** Clock rates on offer, in game seconds per real second. */
+  rates: z.array(z.number().positive()).min(1),
+  defaultRate: z.number().positive(),
+});
+
+const ShiftSchema = z.strictObject({
+  name: text,
+  start: clockTime,
+  end: clockTime,
+  /** Must be true when the shift ends on the day after it starts. */
+  crossesMidnight: z.boolean().optional(),
+  /** Whether the shift is worked on rest days, and if so what share of each occupation is on duty then. */
+  restDays: z.boolean(),
+  dutyShare: probability.optional(),
+});
+export type Shift = z.infer<typeof ShiftSchema>;
+
+const VisitSchema = z.strictObject({
+  id,
+  name: text,
+  who: z.strictObject({
+    states: z.array(WorkforceStateSchema).min(1),
+    minAge: wholeNumber.optional(),
+    maxAge: wholeNumber.optional(),
+  }),
+  /** On which kind of day the visit can happen. */
+  days: z.enum(['work', 'rest', 'any']),
+  probability,
+  /** After the day's work, on the way home; or starting at some time in a window of the day. */
+  when: z.union([z.literal('after-work'), z.strictObject({ from: clockTime, to: clockTime })]),
+  durationMinutes: z.strictObject({ min: minutes, max: minutes }),
+  /** Building types the visit can go to. */
+  destinations: z.array(id).min(1),
+});
+export type Visit = z.infer<typeof VisitSchema>;
+
+const VisitsSchema = z.strictObject({
+  /** How strongly nearer destinations are favoured: 1 is not at all, higher is more. */
+  nearness: z.number().min(1),
+  visits: z.array(VisitSchema),
+});
+
 const RawPackSchema = z.strictObject({
   pack: ManifestSchema,
   categories: z.array(CategorySchema),
@@ -278,6 +362,10 @@ const RawPackSchema = z.strictObject({
   cultures: CulturesSchema,
   districts: DistrictsSchema,
   layout: LayoutSettingsSchema,
+  calendar: CalendarSchema,
+  time: TimeSchema,
+  shifts: z.strictObject({ default: id, shifts: z.record(id, ShiftSchema) }),
+  visits: VisitsSchema,
 });
 
 export type SettingPack = z.infer<typeof RawPackSchema>;
@@ -316,6 +404,23 @@ export function parsePack(raw: unknown): SettingPack {
 /** Every occupation a pack defines, including those only one species has. */
 export function allOccupations(pack: SettingPack): Occupation[] {
   return [...pack.occupations, ...Object.values(pack.species).flatMap((species) => species.occupations ?? [])];
+}
+
+/** The shift an occupation works: its own, or the pack's default. */
+export function shiftOf(occupation: Occupation, pack: SettingPack): Shift & { id: string } {
+  const shiftId = occupation.shift ?? pack.shifts.default;
+  return { id: shiftId, ...(pack.shifts.shifts[shiftId] as Shift) };
+}
+
+/** How long a shift lasts, in seconds, allowing for one that crosses midnight. */
+export function shiftLength(shift: Shift): number {
+  return shift.end - shift.start + (shift.crossesMidnight ? SECONDS_PER_DAY : 0);
+}
+
+/** How long the species usually sleeps, in seconds. */
+export function sleepLength(species: Species): number {
+  const { from, to } = species.life.sleep;
+  return (to - from + SECONDS_PER_DAY) % SECONDS_PER_DAY;
 }
 
 /** The lot a building of the given type gets. */
@@ -505,6 +610,61 @@ function crossCheck(pack: SettingPack): string[] {
   };
   needSpecies(pack.cultures.default, 'the default');
   for (const [culture, speciesId] of Object.entries(pack.cultures.cultures)) needSpecies(speciesId, `"${culture}"`);
+
+  // Time: the clock's rates, the shifts and the visits.
+  if (!pack.time.rates.includes(pack.time.defaultRate)) {
+    problems.push(`time: defaultRate ${pack.time.defaultRate} is not one of the rates listed`);
+  }
+  if (!(pack.shifts.default in pack.shifts.shifts)) {
+    problems.push(`shifts: the default shift "${pack.shifts.default}" is not defined`);
+  }
+  for (const [shiftId, shift] of Object.entries(pack.shifts.shifts)) {
+    const where = `shifts: "${shiftId}"`;
+    if (shift.end <= shift.start && !shift.crossesMidnight) {
+      problems.push(`${where} ends before it starts; if it runs past midnight, mark it crossesMidnight: true`);
+    }
+    if (shift.end > shift.start && shift.crossesMidnight) {
+      problems.push(`${where} is marked crossesMidnight but ends after it starts on the same day`);
+    }
+    if (shift.restDays && shift.dutyShare === undefined) problems.push(`${where} is worked on rest days, so it needs a dutyShare`);
+    if (!shift.restDays && shift.dutyShare !== undefined) problems.push(`${where} has a dutyShare but is not worked on rest days`);
+    // A worker must be able to sleep, get ready, work and wind down within a day.
+    for (const [speciesId, species] of Object.entries(pack.species)) {
+      const awake = SECONDS_PER_DAY - sleepLength(species);
+      const needed = shiftLength(shift) + (species.life.minutesBeforeLeaving + species.life.minutesBeforeBed) * 60;
+      if (needed > awake) {
+        problems.push(`${where} is too long for the species "${speciesId}": with time before and after, it needs ${(needed / 3600).toFixed(1)} waking hours of ${(awake / 3600).toFixed(1)}`);
+      }
+    }
+  }
+  for (const occupation of occupations) {
+    if (occupation.shift !== undefined && !(occupation.shift in pack.shifts.shifts)) {
+      problems.push(`occupations: "${occupation.id}" names the shift "${occupation.shift}", which shifts does not define`);
+    }
+  }
+  for (const repeated of duplicates(pack.visits.visits.map((visit) => visit.id))) {
+    problems.push(`visits: "${repeated}" is defined more than once`);
+  }
+  for (const visit of pack.visits.visits) {
+    const where = `visits: "${visit.id}"`;
+    for (const type of visit.destinations) {
+      if (!buildingTypeIds.includes(type)) problems.push(`${where} names the building type "${type}", which does not exist`);
+    }
+    if (visit.durationMinutes.min > visit.durationMinutes.max) problems.push(`${where} has a shortest duration above its longest`);
+    if (visit.when !== 'after-work' && visit.when.from > visit.when.to) problems.push(`${where} has a window that ends before it starts`);
+    if (visit.who.minAge !== undefined && visit.who.maxAge !== undefined && visit.who.minAge > visit.who.maxAge) {
+      problems.push(`${where} has a minAge above its maxAge`);
+    }
+  }
+  for (const [speciesId, species] of Object.entries(pack.species)) {
+    const bands = species.life.walkingSpeed;
+    const open = bands.filter((band) => band.upToAge === undefined).length;
+    const ordered = bands.every((band, index) => index === 0 || band.upToAge === undefined || (bands[index - 1] as (typeof bands)[number]).upToAge! < band.upToAge);
+    if (open !== 1 || bands[bands.length - 1]?.upToAge !== undefined || !ordered) {
+      problems.push(`species: "${speciesId}" needs walking speeds in rising order of upToAge, the last with no upToAge`);
+    }
+    if (sleepLength(species) === 0) problems.push(`species: "${speciesId}" has sleep hours of no length`);
+  }
 
   // Layout: every lot must fit in a block, since a block is where lots go.
   const buildingTypes = new Set(buildingTypeIds);

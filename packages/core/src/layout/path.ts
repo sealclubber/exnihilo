@@ -20,7 +20,11 @@ export interface PathFinder {
   path(fromLotId: string, toLotId: string): LayoutPath;
 }
 
-/** Prepares a layout for path queries. Use this when asking for more than one path. */
+/**
+ * Prepares a layout for path queries. Use this when asking for more than one
+ * path: it keeps a table of distances for each junction paths leave through,
+ * and every path it has found, so repeated and similar queries are cheap.
+ */
 export function createPathFinder(layout: Layout): PathFinder {
   const junctionIndex = new Map(layout.junctions.map((junction, index) => [junction.id, index]));
   const segmentIndex = new Map(layout.segments.map((segment, index) => [segment.id, index]));
@@ -49,85 +53,109 @@ export function createPathFinder(layout: Layout): PathFinder {
   };
   const line = (segment: number) => (layout.segments[segment] as Layout['segments'][number]).points;
 
+  /**
+   * Lookup tables, made once per junction the first time a path leaves through it: the
+   * distance from that junction to every other, and the segment by which each is reached.
+   */
+  const trees = new Map<number, { cost: Float64Array; cameBy: Int32Array }>();
+  const treeFrom = (source: number) => {
+    let tree = trees.get(source);
+    if (tree) return tree;
+    const cost = new Float64Array(layout.junctions.length).fill(Infinity);
+    const cameBy = new Int32Array(layout.junctions.length).fill(-1);
+    const heap = new Heap();
+    cost[source] = 0;
+    heap.push(0, source);
+    while (heap.size > 0) {
+      const [walked, junction] = heap.pop();
+      if (walked > (cost[junction] as number)) continue;
+      for (const way of ways[junction] as Array<{ to: number; segment: number }>) {
+        const next = walked + (lengths[way.segment] as number);
+        if (next < (cost[way.to] as number)) {
+          cost[way.to] = next;
+          cameBy[way.to] = way.segment;
+          heap.push(next, way.to);
+        }
+      }
+    }
+    tree = { cost, cameBy };
+    trees.set(source, tree);
+    return tree;
+  };
+  const found = new Map<string, LayoutPath>();
+
   return {
     path(fromLotId, toLotId) {
+      const key = `${fromLotId}>${toLotId}`;
+      const known = found.get(key);
+      if (known) return known;
       const start = entrance(fromLotId);
       const goal = entrance(toLotId);
-      const result = (segments: number[], length: number, points: Point[]): LayoutPath => ({
-        fromLotId,
-        toLotId,
-        segmentIds: segments.map((segment) => (layout.segments[segment] as Layout['segments'][number]).id),
-        length,
-        // Drop points repeated where one segment ends and the next begins.
-        points: points.filter((point, index) => index === 0 || distance(point, points[index - 1] as Point) > 0),
-      });
+      const startLength = lengths[start.segment] as number;
+      const goalLength = lengths[goal.segment] as number;
+      const result = (segments: number[], walked: number[], length: number, points: Point[]): LayoutPath => {
+        const path: LayoutPath = {
+          fromLotId,
+          toLotId,
+          segmentIds: segments.map((segment) => (layout.segments[segment] as Layout['segments'][number]).id),
+          walked,
+          length,
+          // Drop points repeated where one segment ends and the next begins.
+          points: points.filter((point, index) => index === 0 || distance(point, points[index - 1] as Point) > 0),
+        };
+        found.set(key, path);
+        return path;
+      };
 
       // Along the one segment, when both entrances are on it.
       let bestLength = start.segment === goal.segment ? Math.abs(start.along - goal.along) : Infinity;
-      let bestEnd: number | undefined;
-
+      let best: { leave: number; enter: number } | undefined;
       // Or out through either end of the first segment, across the graph, and in through either end of the last.
-      const cost = new Float64Array(layout.junctions.length).fill(Infinity);
-      const cameBy = new Int32Array(layout.junctions.length).fill(-1);
-      const heap = new Heap();
       const [startFrom, startTo] = ends[start.segment] as [number, number];
-      const leave = (junction: number, walked: number) => {
-        if (walked < (cost[junction] as number)) {
-          cost[junction] = walked;
-          heap.push(walked, junction);
-        }
-      };
-      leave(startFrom, start.along);
-      leave(startTo, (lengths[start.segment] as number) - start.along);
       const [goalFrom, goalTo] = ends[goal.segment] as [number, number];
-      const lastLeg = (junction: number) => (junction === goalFrom ? goal.along : (lengths[goal.segment] as number) - goal.along);
-      while (heap.size > 0) {
-        const [walked, junction] = heap.pop();
-        if (walked > (cost[junction] as number)) continue;
-        if (walked >= bestLength) break;
-        if (junction === goalFrom || junction === goalTo) {
-          // A segment that joins a junction to itself has both ends here; take the shorter way in.
-          const total = walked + (goalFrom === goalTo ? Math.min(goal.along, (lengths[goal.segment] as number) - goal.along) : lastLeg(junction));
+      for (const [leave, out] of [[startFrom, start.along], [startTo, startLength - start.along]] as const) {
+        const tree = treeFrom(leave);
+        for (const [enter, into] of [[goalFrom, goal.along], [goalTo, goalLength - goal.along]] as const) {
+          const total = out + (tree.cost[enter] as number) + into;
           if (total < bestLength) {
             bestLength = total;
-            bestEnd = junction;
-          }
-        }
-        for (const way of ways[junction] as Array<{ to: number; segment: number }>) {
-          const next = walked + (lengths[way.segment] as number);
-          if (next < (cost[way.to] as number)) {
-            cost[way.to] = next;
-            cameBy[way.to] = way.segment;
-            heap.push(next, way.to);
+            best = { leave, enter };
           }
         }
       }
       if (bestLength === Infinity) {
         throw new LayoutPathError(`no path joins ${fromLotId} and ${toLotId}: the street graph is not connected`);
       }
-      if (bestEnd === undefined) {
-        return result([start.segment], bestLength, slicePolyline(line(start.segment), start.along, goal.along));
+      if (!best) {
+        return result([start.segment], [bestLength], bestLength, slicePolyline(line(start.segment), start.along, goal.along));
       }
 
-      // Walk back from the last junction to the first, then lay the pieces end to end.
+      // Walk back from the junction entered to the junction left by, then lay the pieces end to end.
+      const { cameBy } = treeFrom(best.leave);
       const crossed: number[] = [];
-      let junction = bestEnd;
-      while ((cameBy[junction] as number) >= 0) {
+      let junction = best.enter;
+      while (junction !== best.leave) {
         const segment = cameBy[junction] as number;
         crossed.push(segment);
         const [from, to] = ends[segment] as [number, number];
         junction = junction === to ? from : to;
       }
       crossed.reverse();
-      const points: Point[] = slicePolyline(line(start.segment), start.along, junction === startFrom ? 0 : (lengths[start.segment] as number));
+      const outBy = best.leave === startFrom && (startFrom !== startTo || start.along <= startLength - start.along) ? 0 : startLength;
+      const points: Point[] = slicePolyline(line(start.segment), start.along, outBy);
       for (const segment of crossed) {
         const [from, to] = ends[segment] as [number, number];
         points.push(...(junction === from ? line(segment) : [...line(segment)].reverse()));
         junction = junction === from ? to : from;
       }
-      const enterAt = bestEnd === goalFrom && (goalFrom !== goalTo || goal.along <= (lengths[goal.segment] as number) - goal.along) ? 0 : (lengths[goal.segment] as number);
-      points.push(...slicePolyline(line(goal.segment), enterAt, goal.along));
-      return result([start.segment, ...crossed, goal.segment], bestLength, points);
+      const inBy = best.enter === goalFrom && (goalFrom !== goalTo || goal.along <= goalLength - goal.along) ? 0 : goalLength;
+      points.push(...slicePolyline(line(goal.segment), inBy, goal.along));
+      return result(
+        [start.segment, ...crossed, goal.segment],
+        [Math.abs(start.along - outBy), ...crossed.map((segment) => lengths[segment] as number), Math.abs(goal.along - inBy)],
+        bestLength,
+        points,
+      );
     },
   };
 }
