@@ -581,3 +581,80 @@ main {
 #inspector .path-status:empty {
   display: none;
 }
+
+#inspector .street-count {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  font-variant-numeric: tabular-nums;
+}
+
+#inspector .street-count:empty {
+  display: none;
+}
+
+/* ---- Clock ---- */
+
+.clock-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.clock-bar.disconnected button {
+  visibility: hidden;
+}
+
+.clock-face {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #fff6d6;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.clock-face.night {
+  background: #1f2a52;
+  color: #f1f3fb;
+}
+
+.clock-bar button {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+
+.clock-bar button.active {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.clock-rates,
+.clock-jumps {
+  display: inline-flex;
+  gap: 3px;
+}
+
+#inspector .timeline tr.current td {
+  background: #eff4ff;
+  font-weight: 600;
+}
+
+#inspector .timeline tr.travel td:last-child {
+  color: var(--muted);
+}
+
+#inspector .timeline td.number {
+  white-space: nowrap;
+  width: 1%;
+}

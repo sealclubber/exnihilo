@@ -2,8 +2,25 @@
  * The city inspector: a generated city's summary, its districts, a searchable
  * list of households, and views of one household or one building.
  */
-import type { BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, PackLabels } from '@worldsim/core';
-import { fetchBuilding, fetchCitySummary, fetchDistricts, fetchHousehold, fetchHouseholds, fetchLayout, fetchPackLabels, fetchPath } from './api.ts';
+import type { BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
+import {
+  fetchBuilding,
+  fetchCitySummary,
+  fetchClock,
+  fetchDistricts,
+  fetchHousehold,
+  fetchHouseholdNow,
+  fetchHouseholds,
+  fetchLayout,
+  fetchOccupants,
+  fetchPackLabels,
+  fetchPath,
+  fetchPersonNow,
+  fetchPersonPlan,
+  fetchTrips,
+  postClock,
+  watchClock,
+} from './api.ts';
 import {
   type BarSection,
   type HouseholdFilters,
@@ -19,7 +36,10 @@ import {
   workName,
   workplaceText,
 } from './city-format.ts';
+import { ClockSync, clockFace } from './clock.ts';
+import { createClockBar } from './clock-bar.ts';
 import { h, link } from './dom.ts';
+import { activityWord, describeWhereabouts, timeline } from './life-format.ts';
 import { createTownMap } from './town-map.ts';
 
 const PAGE = 100;
@@ -51,8 +71,22 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const detailBox = h('div', { class: 'column detail' });
   const mapBox = h('div', { class: 'column town-map' });
 
+  // The world clock: kept in step with the server's over a socket, and shown with its controls.
+  const sync = new ClockSync(() => performance.now());
+  const clockBar = createClockBar(sync, { change: postClock, changed: () => townMap.clockChanged() });
+  const heard = (state: Parameters<ClockSync['apply']>[0]) => {
+    sync.apply(state);
+    clockBar.refresh();
+    townMap.clockChanged();
+  };
+  watchClock(heard);
+  void fetchClock().then(heard, () => undefined);
+  void fetchPackLabels().then((known) => clockBar.setCalendar(known.calendar), () => undefined);
+  /** The game time now, in whole seconds, for asking the server about this moment. */
+  const gameNow = () => Math.floor(sync.now() ?? 0);
+
   root.replaceChildren(
-    h('header', {}, h('button', { class: 'back', onClick: onClose, attrs: { type: 'button' } }, '← Map'), h('div', {}, title, subtitle)),
+    h('header', {}, h('button', { class: 'back', onClick: onClose, attrs: { type: 'button' } }, '← Map'), h('div', {}, title, subtitle), clockBar.element),
     h(
       'div',
       { class: 'columns' },
@@ -81,7 +115,17 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const townMap = createTownMap(mapBox, {
     onLotClick: (lot) => void showBuilding(lot.buildingId),
     findPath: (from, to) => fetchPath(settlementId, from, to),
+    now: () => sync.now(),
+    rate: () => sync.current?.rate ?? 1,
+    isLight: (time) => (labels ? clockFace(time, labels.calendar).isLight : true),
+    loadTrips: async (from, to, region) => (await fetchTrips(settlementId, from, to, region)).trips,
+    onPersonClick: (personId) => void showPerson(personId),
   });
+  /** A moment in words, for saying when an answer was true. */
+  const asOf = (time: number) => {
+    const shown = clockFace(time, labels.calendar);
+    return `${shown.dayName} ${shown.time}`;
+  };
   const districtName = (id: string) => districts.find((district) => district.id === id)?.name ?? id;
   const tierName = (id: string) => labels.statusTiers.find((tier) => tier.id === id)?.name ?? id;
 
@@ -208,8 +252,9 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       ),
     );
 
-  function renderHousehold(detail: HouseholdDetail): void {
+  function renderHousehold(detail: HouseholdDetail, now?: HouseholdNow): void {
     const { household, members, dwelling, district, staff } = detail;
+    const doing = new Map((now?.members ?? []).map((member) => [member.personId, member]));
     const rows = members.map((person) => {
       const text = describeMember(person, labels);
       const employer = person.workplaceId === undefined ? undefined : detail.workplaces[person.workplaceId]?.employer;
@@ -229,6 +274,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         h('td', {}, text.role, h('small', {}, describeKin(person, members))),
         h('td', {}, text.work),
         h('td', {}, workplace),
+        h('td', {}, link(doing.has(person.id) ? activityWord(doing.get(person.id)!.kind) : 'Open', () => void showPerson(person.id), 'Show this person\'s day')),
       );
     });
     detailBox.replaceChildren(
@@ -240,7 +286,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       h(
         'table',
         {},
-        h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Sex', 'Role and kin', 'Occupation', 'Workplace'].map((heading) => h('th', {}, heading)))),
+        h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Sex', 'Role and kin', 'Occupation', 'Workplace', now ? `Now (${asOf(now.time)})` : 'Now'].map((heading) => h('th', {}, heading)))),
         h('tbody', {}, ...rows),
       ),
       ...(staff.length > 0 ? [h('h3', {}, `People who work in this home (${staff.length})`), workersTable(staff)] : []),
@@ -248,11 +294,38 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     detailBox.scrollTop = 0;
   }
 
-  function renderBuilding(detail: BuildingDetail): void {
+  function renderBuilding(detail: BuildingDetail, now?: OccupantsNow): void {
     const { building, district, workers, households } = detail;
+    const inside = now
+      ? [
+          h('h3', {}, `Inside now (${now.occupants.length}), ${asOf(now.time)}`),
+          now.occupants.length === 0
+            ? hint('Nobody is inside.')
+            : h(
+                'table',
+                {},
+                h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Doing', 'Day'].map((heading) => h('th', {}, heading)))),
+                h(
+                  'tbody',
+                  {},
+                  ...now.occupants.map((occupant) =>
+                    h(
+                      'tr',
+                      {},
+                      h('td', {}, `${occupant.person.givenName} ${occupant.person.familyName}`),
+                      h('td', { class: 'number' }, String(occupant.person.age)),
+                      h('td', {}, occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind)),
+                      h('td', {}, link('Open', () => void showPerson(occupant.personId), 'Show this person\'s day')),
+                    ),
+                  ),
+                ),
+              ),
+        ]
+      : [];
     detailBox.replaceChildren(
       h('h2', {}, buildingTypeName(building.type, labels)),
       h('p', { class: 'subtitle' }, `${buildingKindName(building.kind)} · ${districtLabel(district, labels)} · ${building.id}`),
+      ...inside,
       h('h3', {}, `People working here (${workers.length})`),
       workers.length === 0 ? hint('Nobody works here.') : workersTable(workers),
       h('h3', {}, `Households living here (${households.length})`),
@@ -282,17 +355,70 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   async function showHousehold(id: string): Promise<void> {
     selected = id;
     renderList();
-    await showDetail(() => fetchHousehold(settlementId, id), (detail) => {
-      townMap.highlight(detail.dwelling.id);
-      renderHousehold(detail);
-    });
+    townMap.follow(undefined);
+    // What each member is doing now comes with the household; if it cannot be had, the household is shown without.
+    const time = gameNow();
+    await showDetail(
+      async () => [await fetchHousehold(settlementId, id), await fetchHouseholdNow(settlementId, id, time).catch(() => undefined)] as const,
+      ([detail, now]) => {
+        townMap.highlight(detail.dwelling.id);
+        renderHousehold(detail, now);
+      },
+    );
   }
 
   async function showBuilding(id: string): Promise<void> {
-    await showDetail(() => fetchBuilding(settlementId, id), (detail) => {
-      townMap.highlight(detail.building.id);
-      renderBuilding(detail);
+    townMap.follow(undefined);
+    const time = gameNow();
+    await showDetail(
+      async () => [await fetchBuilding(settlementId, id), await fetchOccupants(settlementId, id, time).catch(() => undefined)] as const,
+      ([detail, now]) => {
+        townMap.highlight(detail.building.id);
+        renderBuilding(detail, now);
+      },
+    );
+  }
+
+  /** A person: who they are, what they are doing now, and their day as a timeline. */
+  function renderPerson(now: PersonNow, plan: PersonPlan): void {
+    const { person, whereabouts, time } = now;
+    const buildings = { ...plan.buildings, ...now.buildings };
+    const home = plan.plan.activities.find((activity) => activity.kind === 'sleep' || activity.kind === 'home');
+    const homeId = home && home.kind !== 'travel' ? home.buildingId : undefined;
+    const follow = h('input', { attrs: { type: 'checkbox', id: 'follow-person' } });
+    follow.addEventListener('change', () => {
+      townMap.follow(follow.checked ? { personId: person.id, ...(whereabouts.kind !== 'travel' && { buildingId: whereabouts.buildingId }) } : undefined);
     });
+    const where = whereabouts.kind === 'travel' ? undefined : whereabouts.buildingId;
+    townMap.highlight(where);
+    detailBox.replaceChildren(
+      h('h2', {}, `${person.givenName} ${person.familyName}`),
+      h('p', { class: 'subtitle' }, `${person.age} · ${person.sex === 'female' ? 'Female' : 'Male'}${person.occupationId ? ` · ${workName(person, labels)}` : ''} · ${person.id}`),
+      h('p', {}, link('Their household', () => void showHousehold(person.householdId)), person.workplaceId ? ' · ' : '', person.workplaceId ? link('Their workplace', () => void showBuilding(person.workplaceId as string)) : ''),
+      h('h3', {}, `Now, ${asOf(time)}`),
+      h('p', {}, describeWhereabouts(whereabouts, buildings, labels, homeId), where ? ' · ' : '', where ? link('Show the building', () => void showBuilding(where)) : ''),
+      h('p', {}, h('label', { attrs: { for: 'follow-person' } }, follow, ' Follow on the map')),
+      h('h3', {}, 'Today\'s plan'),
+      h(
+        'table',
+        { class: 'timeline' },
+        h(
+          'tbody',
+          {},
+          ...timeline(plan.plan.activities, buildings, labels, time, homeId).map((row) =>
+            h('tr', { class: row.current ? `current ${row.kind}` : row.kind }, h('td', { class: 'number' }, row.time), h('td', {}, row.text)),
+          ),
+        ),
+      ),
+    );
+    detailBox.scrollTop = 0;
+  }
+
+  async function showPerson(id: string): Promise<void> {
+    townMap.follow(undefined);
+    const time = gameNow();
+    const day = Math.floor(time / 86_400) + 1;
+    await showDetail(async () => [await fetchPersonNow(settlementId, id, time), await fetchPersonPlan(settlementId, id, day)] as const, ([now, plan]) => renderPerson(now, plan));
   }
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
