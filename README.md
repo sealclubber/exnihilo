@@ -10,8 +10,10 @@ holds the first two phases:
    resident, household, building and district of that settlement, as linked
    records with no geometry, browsable from the command line and the viewer.
 
-The briefs for this work are [worldsim-phase1-gameplan.md](worldsim-phase1-gameplan.md)
-and [worldsim-phase2-gameplan.md](worldsim-phase2-gameplan.md).
+The briefs for this work are [worldsim-phase1-gameplan.md](worldsim-phase1-gameplan.md),
+[worldsim-phase2-gameplan.md](worldsim-phase2-gameplan.md) and
+[worldsim-phase2_5-gameplan.md](worldsim-phase2_5-gameplan.md), a patch that makes
+households, working ages and workplaces hang together.
 
 ## Layout
 
@@ -100,9 +102,12 @@ Badanos is at `http://<that machine>:5173/#settlement-641`.
 **Open city** in the settlement panel leads to the city inspector, also
 reachable directly at `#settlement-641/city`. It shows the summary as counts
 and bars, the districts, a searchable list of households, and one household at
-a time with its members, their ages, occupations and workplaces, and its home.
+a time with its members, their ages, kinship (partner of, child of, parent
+of), occupations and workplaces, its home, and the people it employs there.
 Clicking a category, occupation, status or district filters the households;
-clicking a workplace shows who works there.
+under a category or occupation filter each row shows the member who matched.
+Clicking a workplace shows who works there, and a servant's workplace leads to
+the household that employs them.
 
 The viewer looks for the API on port 3001 of the host it was loaded from. If
 the server is somewhere else, say where when starting the viewer:
@@ -126,7 +131,7 @@ summary, and writes two files to `data/cities/settlement-641/`:
 
 | File | Holds |
 | --- | --- |
-| `city.json` | Every person, household, building and district, one record per line, plus the summary |
+| `city.json` | Every person (with kinship, occupation, apprenticeship, workplace and employer), household, building and district, one record per line, plus the summary |
 | `summary.txt` | The printed summary: totals, workforce, categories, occupations, status tiers, districts, buildings by type |
 
 Options: `--seed <number>` replaces the settlement's own seed, `--out <folder>`
@@ -141,15 +146,15 @@ numbers.
 
 | File | Holds |
 | --- | --- |
-| `pack.yaml` | The pack's name and version, the status tiers, and a few household settings |
+| `pack.yaml` | The pack's name and version, the status tiers, the apprentice age and label, and a few household settings |
 | `categories.yaml` | The seven workforce categories and their base shares |
 | `modifiers.yaml` | Multipliers on category shares by size group and condition |
-| `occupations.yaml` | Every job: category, workplace, weight, status, specialty tags, minimum population |
+| `occupations.yaml` | Every job: category, workplace or employer, weight, status, specialty tags, minimum population, and who may hold it (`minAge`, `maxAge`, `sexes`, `apprenticeUntil`) |
 | `specialties.yaml` | How specialty tags fill the trade category, and which tags are ignored |
-| `workplaces.yaml` | Every workplace type: capacity, whether the proprietor lives in, preferred district |
+| `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district |
 | `dwellings.yaml` | Housing types by status tier |
 | `landmarks.yaml` | The buildings and fixed posts that flags and status add |
-| `species.yaml` | Per species: households, ages, workforce, multipliers, and occupations of its own |
+| `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, and occupations of its own |
 | `cultures.yaml` | Which species each culture belongs to |
 | `districts.yaml` | District kinds, their size, and naming patterns |
 
@@ -168,6 +173,19 @@ The generator also checks its own output and fails loudly rather than return a
 city that breaks a rule, for instance a workforce outside 35% to 60% of the
 population.
 
+Who may hold which job is the pack's decision. An occupation's `minAge`,
+`maxAge` and `sexes` limit who can hold it, and `apprenticeUntil` says below
+what age a holder is an apprentice; the code supplies no age of its own. The
+limits change who gets a job, never how many of it there are. If they cannot
+all be met, generation stops with a message naming the settlement, the
+occupations and the shortfall. In the `medieval` pack the ages are placeholders
+listed for review at the top of `occupations.yaml`, and no occupation sets
+`sexes`.
+
+An occupation has either a `workplace` or an `employer`. With `employer`, the
+worker is attached to a household of one of the listed status tiers and works
+in its home; `servant` is the one such occupation in the `medieval` pack.
+
 One tag is ignored by the `medieval` pack and listed for review at the top of
 `specialties.yaml`: `slaves`.
 
@@ -182,13 +200,16 @@ npm run typecheck   # strict TypeScript across packages and tests
 npm run check       # both
 ```
 
-The acceptance tests of both gameplans run against the Lomia fixture. Phase 1's
+The acceptance tests of every gameplan run against the Lomia fixture. Phase 1's
 are in `packages/core/test/importer.test.ts`; phase 2's are in
 `packages/core/test/city.test.ts` (single settlements, determinism, species,
 pack edits), `pack.test.ts` (the pack and its validation) and
-`lomia-cities.test.ts` (every settlement).
+`lomia-cities.test.ts` (every settlement); phase 2.5's are in
+`coherence.test.ts` (parent ages, kinship, eligibility, shared workplaces,
+employer households) and `baseline.test.ts` (counts that must not move).
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
-and checks every invariant on each. It takes about 6 seconds on one core of an
-Intel Core Ultra 7 265K; generation alone is about 5.5 seconds, and Pombal,
-the largest settlement at 47,603 people, takes about 0.1 seconds.
+and checks every invariant on each. With generator version 2 it takes about 9
+seconds on one core of an Intel Core Ultra 7 265K; generation alone, which
+includes the generator's own check, is about 7.5 seconds, and Pombal, the
+largest settlement at 47,603 people, takes about 0.13 seconds.
