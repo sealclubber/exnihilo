@@ -31,6 +31,7 @@ export const PACK_FILES = [
   'species',
   'cultures',
   'districts',
+  'layout',
 ] as const;
 export type PackFile = (typeof PACK_FILES)[number];
 
@@ -211,9 +212,15 @@ const CulturesSchema = z.strictObject({
   cultures: z.record(text, id),
 });
 
+/** Where in a town a kind of district belongs. */
+export const PlacementSchema = z.enum(['centre', 'middle', 'edge', 'waterside']);
+export type Placement = z.infer<typeof PlacementSchema>;
+
 const DistrictKindSchema = z.strictObject({
   id,
   name: text,
+  /** Where the town's layout puts districts of this kind. */
+  placement: PlacementSchema,
   /** Relative frequency. Left out for a kind that has `when`. */
   weight: weight.optional(),
   /** A kind with a condition adds exactly one district to settlements that meet it. */
@@ -232,6 +239,32 @@ const DistrictsSchema = z.strictObject({
   kinds: z.array(DistrictKindSchema).min(1),
 });
 
+const metres = z.number().positive();
+const LotSizeSchema = z.strictObject({ frontage: metres, depth: metres });
+export type LotSize = z.infer<typeof LotSizeSchema>;
+
+const LayoutSettingsSchema = z.strictObject({
+  /** The full width of the roadway, per kind of street segment. */
+  streetWidths: z.strictObject({ arterial: metres, street: metres, lane: metres, bridge: metres }),
+  /** The land between streets: its length along the street and its depth. */
+  block: z.strictObject({ length: metres, depth: metres }),
+  /** The lot of a building type that has no entry of its own. */
+  defaultLot: LotSizeSchema,
+  /** Lot sizes by workplace, dwelling and landmark type. */
+  lots: z.record(id, LotSizeSchema),
+  /** The brief does not carry a river's width, so the pack supplies it. */
+  riverWidth: metres,
+  /** The lowest and highest acceptable residents per hectare of built area. */
+  density: z
+    .strictObject({ min: z.number().nonnegative(), max: metres })
+    .refine((value) => value.min < value.max, 'min must be below max'),
+  /** A waterside district must come within this distance of the water. */
+  watersideReach: metres,
+  /** Building types that are placed on the side of their district toward a route exit. */
+  atExits: z.array(id).optional(),
+});
+export type LayoutSettings = z.infer<typeof LayoutSettingsSchema>;
+
 const RawPackSchema = z.strictObject({
   pack: ManifestSchema,
   categories: z.array(CategorySchema),
@@ -244,6 +277,7 @@ const RawPackSchema = z.strictObject({
   species: z.record(id, SpeciesSchema),
   cultures: CulturesSchema,
   districts: DistrictsSchema,
+  layout: LayoutSettingsSchema,
 });
 
 export type SettingPack = z.infer<typeof RawPackSchema>;
@@ -282,6 +316,11 @@ export function parsePack(raw: unknown): SettingPack {
 /** Every occupation a pack defines, including those only one species has. */
 export function allOccupations(pack: SettingPack): Occupation[] {
   return [...pack.occupations, ...Object.values(pack.species).flatMap((species) => species.occupations ?? [])];
+}
+
+/** The lot a building of the given type gets. */
+export function lotSizeOf(type: string, pack: SettingPack): LotSize {
+  return pack.layout.lots[type] ?? pack.layout.defaultLot;
 }
 
 /** The age below which a holder of this occupation is an apprentice; 0 if it has no apprenticeship. */
@@ -466,6 +505,22 @@ function crossCheck(pack: SettingPack): string[] {
   };
   needSpecies(pack.cultures.default, 'the default');
   for (const [culture, speciesId] of Object.entries(pack.cultures.cultures)) needSpecies(speciesId, `"${culture}"`);
+
+  // Layout: every lot must fit in a block, since a block is where lots go.
+  const buildingTypes = new Set(buildingTypeIds);
+  for (const type of Object.keys(pack.layout.lots)) {
+    if (!buildingTypes.has(type)) problems.push(`layout: lots has a size for "${type}", which is not a building type`);
+  }
+  for (const type of pack.layout.atExits ?? []) {
+    if (!buildingTypes.has(type)) problems.push(`layout: atExits lists "${type}", which is not a building type`);
+  }
+  for (const [type, lot] of [['the default lot', pack.layout.defaultLot] as const, ...Object.entries(pack.layout.lots)]) {
+    if (lot.frontage > pack.layout.block.length || lot.depth > pack.layout.block.depth) {
+      problems.push(
+        `layout: ${type === 'the default lot' ? type : `the lot of "${type}"`} is ${lot.frontage} by ${lot.depth}, which does not fit in a block of ${pack.layout.block.length} by ${pack.layout.block.depth}`,
+      );
+    }
+  }
 
   // Districts
   for (const repeated of duplicates(pack.districts.kinds.map((kind) => kind.id))) {

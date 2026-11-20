@@ -1,0 +1,96 @@
+# The numbers behind a town's layout: streets, blocks, lots and water.
+# All lengths are in metres. Every value is a placeholder to be tuned by eye:
+# edit, then run the layout again or restart the server.
+#
+# The layout made from these numbers is deliberately regular: a street grid
+# trimmed to a compact outline, with lots along the streets.
+
+# The full width of the roadway, per kind of street segment. Arterials are the
+# streets that carry the brief's routes from the centre to the town's exits;
+# streets run along the blocks and lanes across them.
+streetWidths:
+  arterial: 10
+  street: 6
+  lane: 4
+  bridge: 8
+
+# A block is the land between streets. Lots line its two long sides, so a
+# lot's depth can be at most half the block's depth, or the whole depth for a
+# lot that runs from street to street.
+block:
+  length: 80
+  depth: 44
+
+# The lot of any building type not listed under `lots`.
+defaultLot: {frontage: 8, depth: 20}
+
+# Lot sizes by building type: `frontage` along the street, `depth` back from
+# it. A dwelling that holds several households has a larger lot than one that
+# holds a single household.
+lots:
+  # Dwellings
+  shack: {frontage: 6, depth: 12}
+  cottage: {frontage: 8, depth: 18}
+  row-house: {frontage: 10, depth: 20}
+  tenement: {frontage: 16, depth: 22}
+  townhouse: {frontage: 9, depth: 22}
+  mansion: {frontage: 20, depth: 44}
+  noble-house: {frontage: 30, depth: 44}
+  # Workplaces that need room
+  market-stall: {frontage: 4, depth: 6}
+  farmstead: {frontage: 24, depth: 22}
+  dairy: {frontage: 14, depth: 22}
+  mill: {frontage: 14, depth: 22}
+  brewery: {frontage: 14, depth: 22}
+  town-yard: {frontage: 20, depth: 22}
+  woodyard: {frontage: 20, depth: 22}
+  carters-yard: {frontage: 22, depth: 22}
+  stockyard: {frontage: 24, depth: 22}
+  chapel: {frontage: 12, depth: 22}
+  masons-yard: {frontage: 20, depth: 22}
+  builders-yard: {frontage: 20, depth: 22}
+  kiln-yard: {frontage: 20, depth: 22}
+  watch-house: {frontage: 10, depth: 20}
+  barracks: {frontage: 30, depth: 44}
+  players-hall: {frontage: 14, depth: 22}
+  warehouse: {frontage: 16, depth: 22}
+  tannery: {frontage: 18, depth: 22}
+  weaving-shed: {frontage: 14, depth: 22}
+  dye-works: {frontage: 14, depth: 22}
+  glassworks: {frontage: 14, depth: 22}
+  foundry: {frontage: 16, depth: 22}
+  rigging-loft: {frontage: 24, depth: 22}
+  garment-workshop: {frontage: 12, depth: 22}
+  press-house: {frontage: 14, depth: 22}
+  boatyard: {frontage: 30, depth: 44}
+  paper-mill: {frontage: 16, depth: 22}
+  powder-mill: {frontage: 16, depth: 22}
+  distillery: {frontage: 14, depth: 22}
+  mint: {frontage: 14, depth: 22}
+  mine: {frontage: 30, depth: 44}
+  preserving-house: {frontage: 14, depth: 22}
+  # Landmarks
+  citadel: {frontage: 80, depth: 44}
+  palace: {frontage: 80, depth: 44}
+  temple: {frontage: 40, depth: 44}
+  market-square: {frontage: 50, depth: 44}
+  docks: {frontage: 40, depth: 44}
+  province-hall: {frontage: 24, depth: 44}
+  gatehouse: {frontage: 12, depth: 12}
+
+# The brief says where a river arrives and leaves but not how wide it is.
+riverWidth: 14
+
+# A sanity check on the result: residents per hectare of built area, which is
+# the total area of the lots. A layout outside these limits is rejected.
+density:
+  min: 60
+  max: 700
+
+# A waterside district (see `placement` in districts.yaml) must come within
+# this distance of the sea or the river.
+watersideReach: 40
+
+# Building types placed on the side of their district that faces a route exit.
+# Town walls have no geometry yet; gatehouses are ordinary lots.
+atExits: [gatehouse]

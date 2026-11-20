@@ -6,6 +6,8 @@
 # `when` instead of `weight` adds exactly one district to settlements that
 # meet the condition, and takes only buildings that ask for it.
 #
+#   placement where the town's layout puts the kind: centre, middle, edge, or
+#             waterside (by the sea or the river, where the town has either)
 #   statuses  the status tiers whose dwellings the kind takes
 #   names     patterns; {settlement} is the settlement's name and any other
 #             {key} is filled from `words`
@@ -19,48 +21,56 @@ words:
 
 kinds:
   - id: centre
+    placement: centre
     name: Centre
     weight: 2
     statuses: [modest, comfortable]
     names: ["Old Town", "{settlement} Cross", "High Street", "{age} Market", "{direction} Market", "{feature} Market"]
 
   - id: craft
+    placement: middle
     name: Craft quarter
     weight: 3
     statuses: [modest]
     names: ["Smiths' Row", "Weavers' Lane", "Craftsmen's Quarter", "{direction} Workshops", "{feature} Lane", "{feature} Row"]
 
   - id: common
+    placement: middle
     name: Common quarter
     weight: 4
     statuses: [poor, modest]
     names: ["{direction} Side", "{feature} Ward", "{direction} Ward", "{age} Houses", "{feature} Street"]
 
   - id: upper
+    placement: middle
     name: Upper quarter
     weight: 1
     statuses: [comfortable, wealthy, noble]
     names: ["The Mount", "High Ward", "{direction} Gardens", "{feature} Court", "{feature} Heights"]
 
   - id: lower
+    placement: edge
     name: Lower quarter
     weight: 3
     statuses: [poor]
     names: ["The Warrens", "Low Ward", "{direction} Rows", "{feature} Alley", "{feature} Bottoms"]
 
   - id: outskirts
+    placement: edge
     name: Outskirts
     weight: 2
     statuses: [poor, modest]
     names: ["The Edge", "{direction} Fields", "{direction} Yards", "Outer {feature}", "{feature} End"]
 
   - id: harbour
+    placement: waterside
     name: Harbour
     when: port
     statuses: [poor, modest]
     names: ["Harbourside", "The Quays", "{direction} Wharf"]
 
   - id: shanty
+    placement: edge
     name: Shanty town
     when: shantyTown
     statuses: [poor]
