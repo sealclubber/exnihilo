@@ -1,6 +1,7 @@
 import type { SettlementListItem, WorldInfo } from '@worldsim/core';
 import { fetchBrief, fetchMap, fetchWorld } from './api.ts';
 import { describeBrief } from './brief.ts';
+import { createInspector } from './inspector.ts';
 import { showBrief, showMessage } from './panel.ts';
 import { pickNearest } from './pick.ts';
 import { type Scene, buildScene, draw } from './render.ts';
@@ -74,13 +75,34 @@ function settlementAt(screenX: number, screenY: number): SettlementListItem | un
   return scene ? pickNearest(scene.map.settlements, view, screenX, screenY) : undefined;
 }
 
+// The address after # is a settlement ID, optionally followed by /city for its inspector.
+const CITY_SUFFIX = '/city';
+const inspector = createInspector(byId('inspector'), () => {
+  if (selectedId !== undefined) location.hash = selectedId;
+});
+
+function followAddress(): void {
+  const address = location.hash.slice(1);
+  const wantsCity = address.endsWith(CITY_SUFFIX);
+  const id = wantsCity ? address.slice(0, -CITY_SUFFIX.length) : address;
+  const known = scene?.map.settlements.some((item) => item.id === id) ?? false;
+  if (known && wantsCity) void inspector.open(id);
+  else inspector.close();
+  if (known && id !== selectedId) void select(id);
+}
+window.addEventListener('hashchange', followAddress);
+
 async function select(id: string): Promise<void> {
   selectedId = id;
-  history.replaceState(null, '', `#${id}`);
+  if (!location.hash.startsWith(`#${id}`)) history.replaceState(null, '', `#${id}`);
   requestDraw();
   try {
     const brief = await fetchBrief(id);
-    if (selectedId === id) showBrief(panel, describeBrief(brief, world));
+    if (selectedId === id) {
+      showBrief(panel, describeBrief(brief, world), () => {
+        location.hash = `${id}${CITY_SUFFIX}`;
+      });
+    }
   } catch (error) {
     if (selectedId === id) showMessage(panel, (error as Error).message, 'error');
   }
@@ -175,8 +197,7 @@ async function start(): Promise<void> {
     resize();
     resetView();
 
-    const fromLink = location.hash.slice(1);
-    if (map.settlements.some((item) => item.id === fromLink)) void select(fromLink);
+    followAddress();
   } catch (error) {
     status.textContent = 'Not connected';
     status.className = 'error';

@@ -11,8 +11,12 @@ export function showMessage(panel: HTMLElement, text: string, kind: 'hint' | 'er
   panel.replaceChildren(element('p', text, kind));
 }
 
-export function showBrief(panel: HTMLElement, brief: BriefText): void {
-  const nodes: HTMLElement[] = [element('h2', brief.title), element('p', brief.subtitle, 'subtitle')];
+export function showBrief(panel: HTMLElement, brief: BriefText, onOpenCity: () => void): void {
+  const open = element('button', 'Open city', 'open-city');
+  open.type = 'button';
+  open.title = 'Browse the residents, households and buildings of this settlement';
+  open.addEventListener('click', onOpenCity);
+  const nodes: HTMLElement[] = [element('h2', brief.title), element('p', brief.subtitle, 'subtitle'), open];
   for (const section of brief.sections) {
     nodes.push(element('h3', section.heading));
     if (section.rows) {

@@ -1,4 +1,16 @@
-import type { MapGeometry, SettlementBrief, WorldSummary } from '@worldsim/core';
+import type {
+  BuildingDetail,
+  CitySummary,
+  District,
+  HouseholdDetail,
+  HouseholdListItem,
+  MapGeometry,
+  PackLabels,
+  Page,
+  SettlementBrief,
+  WorldSummary,
+} from '@worldsim/core';
+import { type HouseholdFilters, listQuery } from './city-format.ts';
 
 /**
  * Where the server is. Set VITE_API_URL to override; by default the API is
@@ -22,6 +34,24 @@ async function get<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+const settlement = (id: string) => `/api/settlements/${encodeURIComponent(id)}`;
+
 export const fetchWorld = () => get<WorldSummary>('/api/world');
 export const fetchMap = () => get<MapGeometry>('/api/map');
-export const fetchBrief = (id: string) => get<SettlementBrief>(`/api/settlements/${encodeURIComponent(id)}`);
+export const fetchBrief = (id: string) => get<SettlementBrief>(settlement(id));
+
+let labels: Promise<PackLabels> | undefined;
+/** The pack's display names. They change only when the server restarts, so they are fetched once. */
+export const fetchPackLabels = () => (labels ??= get<PackLabels>('/api/pack').catch((error) => {
+  labels = undefined;
+  throw error;
+}));
+
+export const fetchCitySummary = (id: string) => get<CitySummary>(`${settlement(id)}/city`);
+export const fetchDistricts = (id: string) => get<Page<District>>(`${settlement(id)}/city/districts?limit=500`);
+export const fetchHouseholds = (id: string, filters: HouseholdFilters, offset: number, limit: number) =>
+  get<Page<HouseholdListItem>>(`${settlement(id)}/city/households?${listQuery(filters, offset, limit)}`);
+export const fetchHousehold = (id: string, householdId: string) =>
+  get<HouseholdDetail>(`${settlement(id)}/city/households/${encodeURIComponent(householdId)}`);
+export const fetchBuilding = (id: string, buildingId: string) =>
+  get<BuildingDetail>(`${settlement(id)}/city/buildings/${encodeURIComponent(buildingId)}`);

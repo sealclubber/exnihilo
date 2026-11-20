@@ -62,13 +62,15 @@ describe('package boundaries', () => {
 
   it('lets the client take only types from core', () => {
     const client = shipped.filter((path) => relative(PACKAGES, path).startsWith(join('client', 'src')));
-    const valueImport = /^import\s+(?!type\b).*from\s+['"]@worldsim\/core['"]/;
-    const mixedImport = /^import\s+type\b/;
-    const lines = offenders(client, /@worldsim\/core/).filter((line) => {
-      const code = line.replace(/^[^:]+:\d+: /, '');
-      return valueImport.test(code) || !mixedImport.test(code);
-    });
-    expect(lines).toEqual([]);
+    const statements = client.flatMap((path) =>
+      // An import statement may run over several lines.
+      [...readFileSync(path, 'utf8').matchAll(/^(?:import|export)\b[^;]*?from\s+['"]@worldsim\/core['"]/gms)].map(
+        (match) => `${relative(PACKAGES, path)}: ${match[0].replace(/\s+/g, ' ')}`,
+      ),
+    );
+    expect(statements.length).toBeGreaterThan(5);
+    expect(statements.filter((statement) => !/: (import|export) type\b/.test(statement))).toEqual([]);
+    expect(offenders(client, /import\(\s*['"]@worldsim\/core/)).toEqual([]);
   });
 
   it('keeps unseeded randomness out of every package', () => {
