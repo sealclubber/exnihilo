@@ -43,9 +43,19 @@ const range = z
   .strictObject({ min: z.int(), max: z.int() })
   .refine((value) => value.min <= value.max, 'min must not be greater than max');
 
+export const SexSchema = z.enum(['female', 'male']);
+export type Sex = z.infer<typeof SexSchema>;
+
 const ManifestSchema = z.strictObject({
   name: id,
   version: z.union([text, z.number()]).transform(String),
+  /**
+   * A worker younger than this holds a job as an apprentice, unless the
+   * occupation sets its own age. Left out, or 0, means no apprenticeships.
+   */
+  apprenticeUntil: wholeNumber.optional(),
+  /** How an apprentice's job is shown, such as "Apprentice {occupation}". Needed when anyone can be an apprentice. */
+  apprenticeLabel: text.optional(),
   /** Lowest tier first. */
   statusTiers: z.array(z.strictObject({ id, name: text })).min(1),
   households: z.strictObject({
@@ -72,12 +82,27 @@ const OccupationSchema = z.strictObject({
   id,
   name: text,
   category: CategoryIdSchema,
-  /** A workplace type, or a landmark for an occupation that exists only as a fixed post. */
-  workplace: id,
+  /**
+   * Where the work is done: a workplace type, or a landmark for an occupation
+   * that exists only as a fixed post. An occupation has either this or `employer`.
+   */
+  workplace: id.optional(),
+  /**
+   * For work done in someone else's home: the status tiers whose households
+   * employ such workers, with a weight per tier.
+   */
+  employer: z.strictObject({ tiers: z.record(id, z.number().positive()) }).optional(),
   weight,
   status: id,
   specialties: z.array(text).min(1).optional(),
   minPopulation: z.int().positive().optional(),
+  /** Ages outside this range cannot hold the job. Left out means no limit. */
+  minAge: wholeNumber.optional(),
+  maxAge: wholeNumber.optional(),
+  /** Only the listed sexes can hold the job. Left out means no limit. */
+  sexes: z.array(SexSchema).min(1).optional(),
+  /** A worker younger than this is an apprentice; 0 means the job has no apprenticeship. Left out means the pack-wide age. */
+  apprenticeUntil: wholeNumber.optional(),
 });
 export type Occupation = z.infer<typeof OccupationSchema>;
 
@@ -144,6 +169,8 @@ const SpeciesSchema = z.strictObject({
     /** Relative frequency of each role among members beyond the head and partner. */
     otherRoles: z.strictObject({ child: weight, elder: weight, lodger: weight }),
     maxElders: wholeNumber,
+    /** Chance that an elder is the partner's parent rather than the head's. Left out means never. */
+    elderOfPartnerShare: probability.optional(),
   }),
   ages: z.strictObject({
     head: AgeBandsSchema,
@@ -257,6 +284,11 @@ export function allOccupations(pack: SettingPack): Occupation[] {
   return [...pack.occupations, ...Object.values(pack.species).flatMap((species) => species.occupations ?? [])];
 }
 
+/** The age below which a holder of this occupation is an apprentice; 0 if it has no apprenticeship. */
+export function apprenticeUntil(occupation: Occupation, pack: SettingPack): number {
+  return occupation.apprenticeUntil ?? pack.pack.apprenticeUntil ?? 0;
+}
+
 function duplicates(ids: string[]): string[] {
   const seen = new Set<string>();
   const repeated = new Set<string>();
@@ -336,15 +368,26 @@ function crossCheck(pack: SettingPack): string[] {
   for (const occupation of occupations) {
     const where = `occupations: "${occupation.id}"`;
     needTier(occupation.status, where);
-    if (landmarks.has(occupation.workplace)) {
+    if ((occupation.workplace === undefined) === (occupation.employer === undefined)) {
+      problems.push(
+        `${where} has ${occupation.workplace === undefined ? 'neither a workplace nor an employer' : 'both a workplace and an employer'}; it needs exactly one`,
+      );
+    } else if (occupation.employer) {
+      for (const tier of Object.keys(occupation.employer.tiers)) needTier(tier, `${where} employer`);
+      if (Object.keys(occupation.employer.tiers).length === 0) problems.push(`${where} has an employer block that lists no status tier`);
+      if (posts.has(occupation.id)) problems.push(`${where} is a landmark's fixed post, so it cannot also work in an employer's home`);
+    } else if (occupation.workplace !== undefined && landmarks.has(occupation.workplace)) {
       if (occupation.weight !== 0) {
         problems.push(`${where} works at the landmark "${occupation.workplace}", so it is a fixed post and its weight must be 0`);
       }
       if (!posts.has(occupation.id)) {
         problems.push(`${where} works at the landmark "${occupation.workplace}", which has no post for it`);
       }
-    } else if (!workplaces.has(occupation.workplace)) {
+    } else if (occupation.workplace !== undefined && !workplaces.has(occupation.workplace)) {
       problems.push(`${where} names the workplace type "${occupation.workplace}", which does not exist`);
+    }
+    if (occupation.minAge !== undefined && occupation.maxAge !== undefined && occupation.minAge > occupation.maxAge) {
+      problems.push(`${where} has a minAge of ${occupation.minAge} above its maxAge of ${occupation.maxAge}`);
     }
     if (occupation.specialties && occupation.category !== 'trade') {
       problems.push(`${where} carries specialty tags but is not in the trade category`);
@@ -355,6 +398,15 @@ function crossCheck(pack: SettingPack): string[] {
       }
     }
   }
+  // Apprentices need a label to be shown by.
+  const label = pack.pack.apprenticeLabel;
+  if (label !== undefined && !label.includes('{occupation}')) {
+    problems.push(`pack: apprenticeLabel "${label}" must contain {occupation}`);
+  }
+  if (label === undefined && occupations.some((occupation) => apprenticeUntil(occupation, pack) > 0)) {
+    problems.push('pack: apprenticeLabel is needed because apprenticeUntil makes some workers apprentices');
+  }
+
   // Every category needs an occupation that any settlement can use, or its workers would have nowhere to go.
   for (const category of CATEGORY_IDS) {
     const usable = pack.occupations.some(
@@ -397,6 +449,11 @@ function crossCheck(pack: SettingPack): string[] {
         if (band.min > band.max) problems.push(`${where} has a ${role} age band from ${band.min} to ${band.max}`);
         if (band.max > species.ages.maxAge) problems.push(`${where} has a ${role} age band above its maximum age`);
       }
+    }
+    if (species.ages.elderGap.min < species.ages.parentMinAge) {
+      problems.push(
+        `${where} has an elderGap.min of ${species.ages.elderGap.min} below its parentMinAge of ${species.ages.parentMinAge}; an elder is a parent, so must be at least that much older`,
+      );
     }
     for (const occupation of Object.keys(species.multipliers.occupations ?? {})) {
       if (!occupationById.has(occupation)) {

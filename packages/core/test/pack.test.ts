@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.1.0');
+    expect(pack.pack.version).toBe('0.2.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -80,6 +80,35 @@ describe('the medieval pack', () => {
     expect(pack.occupations.some((occupation) => occupation.id === 'runesmith')).toBe(false);
   });
 
+  it('gives the pack the dials for apprentices and eligibility, as placeholders', () => {
+    expect(pack.pack.apprenticeUntil).toBeGreaterThan(0);
+    expect(pack.pack.apprenticeLabel).toBe('Apprentice {occupation}');
+    const of = (id: string) => allOccupations(pack).find((occupation) => occupation.id === id)!;
+    // Unskilled jobs have no apprenticeship.
+    for (const id of ['servant', 'farmhand', 'porter', 'builders-labourer', 'carter']) expect(of(id).apprenticeUntil, id).toBe(0);
+    expect(of('tanner').apprenticeUntil).toBeUndefined();
+    // Posts of authority, learned professions and the military have a minimum age.
+    for (const id of ['castellan', 'high-priest', 'provincial-official', 'physician', 'priest', 'clerk']) {
+      expect(of(id).minAge, id).toBeGreaterThan(0);
+    }
+    for (const occupation of allOccupations(pack).filter((entry) => entry.category === 'military')) {
+      expect(occupation.minAge, occupation.id).toBeGreaterThan(0);
+    }
+    expect(of('tanner').minAge).toBeUndefined();
+  });
+
+  it('sets a sex limit on no occupation', () => {
+    expect(allOccupations(pack).filter((occupation) => occupation.sexes !== undefined)).toEqual([]);
+  });
+
+  it('has servants work in the homes of households that employ them, with no great house', () => {
+    const servant = pack.occupations.find((occupation) => occupation.id === 'servant')!;
+    expect(servant.workplace).toBeUndefined();
+    expect(Object.keys(servant.employer!.tiers)).toEqual(['comfortable', 'wealthy', 'noble']);
+    expect(pack.workplaces.some((type) => type.id === 'great-house')).toBe(false);
+    expect(allOccupations(pack).filter((occupation) => occupation.employer).map((occupation) => occupation.id)).toEqual(['servant']);
+  });
+
   it('maps every Lomia culture to human by default', () => {
     expect(pack.cultures.default).toBe('human');
     for (const culture of lomiaWorld().cultures.filter((entry) => !entry.isPlaceholder)) {
@@ -137,6 +166,16 @@ describe('pack validation', () => {
     ['a used tag that no occupation carries', (raw) => (raw.specialties.tags.slaves = {}), /the tag "slaves" is not ignored, but no occupation/],
     ['too few rank weights', (raw) => (raw.specialties.maxTags = 5), /rankWeights has 3 entries but maxTags is 5/],
     ['a category left with no general occupation', (raw) => (raw.occupations = raw.occupations.filter((entry: any) => entry.category !== 'luxury')), /the category "luxury" has no occupation/],
+    ['an occupation with both a workplace and an employer', (raw) => (raw.occupations.find((entry: any) => entry.id === 'servant').workplace = 'laundry'), /occupations: "servant" has both a workplace and an employer; it needs exactly one/],
+    ['an occupation with neither a workplace nor an employer', (raw) => delete raw.occupations.find((entry: any) => entry.id === 'baker').workplace, /occupations: "baker" has neither a workplace nor an employer; it needs exactly one/],
+    ['an employer in an unknown status tier', (raw) => (raw.occupations.find((entry: any) => entry.id === 'servant').employer = { tiers: { royal: 1 } }), /"servant" employer names the status tier "royal"/],
+    ['an employer block with no tiers', (raw) => (raw.occupations.find((entry: any) => entry.id === 'servant').employer = { tiers: {} }), /"servant" has an employer block that lists no status tier/],
+    ['a fixed post that works in an employer\'s home', (raw) => Object.assign(raw.occupations.find((entry: any) => entry.id === 'castellan'), { workplace: undefined, employer: { tiers: { noble: 1 } } }), /"castellan" is a landmark's fixed post/],
+    ['a minimum age above the maximum', (raw) => Object.assign(raw.occupations[0], { minAge: 40, maxAge: 30 }), /"baker" has a minAge of 40 above its maxAge of 30/],
+    ['a sex the format does not know', (raw) => (raw.occupations[0].sexes = ['other']), /^occupations at 0\.sexes/],
+    ['an apprentice label without a place for the occupation', (raw) => (raw.pack.apprenticeLabel = 'Apprentice'), /apprenticeLabel "Apprentice" must contain \{occupation\}/],
+    ['apprentices with no label to show them by', (raw) => delete raw.pack.apprenticeLabel, /apprenticeLabel is needed/],
+    ['elders who could be younger than a parent may be', (raw) => (raw.species.human.ages.elderGap = { min: 10, max: 30 }), /"human" has an elderGap\.min of 10 below its parentMinAge of 18/],
     ['a culture mapped to a missing species', (raw) => (raw.cultures.cultures.Norse = 'elf'), /cultures: "Norse" names the species "elf"/],
     ['a default species that is missing', (raw) => (raw.cultures.default = 'elf'), /the default names the species "elf"/],
     ['a multiplier for an unknown occupation', (raw) => (raw.species.dwarf.multipliers.occupations.wizard = 2), /"dwarf" has a multiplier for the occupation "wizard"/],

@@ -114,8 +114,9 @@ describe('steps 1 to 3: households, people, names and workforce', () => {
       expect(person.givenName).toMatch(/^\p{Lu}\p{Ll}+$/u);
       expect(person.familyName).toMatch(/^\p{Lu}\p{Ll}+$/u);
       const family = households.get(person.householdId)!.familyName;
-      if (person.role !== 'lodger') expect(person.familyName).toBe(family);
-      else if (person.familyName !== family) lodgersWithOwnName++;
+      const partnersParent = person.role === 'elder' && person.childIds[0] !== households.get(person.householdId)!.headId;
+      if (person.role !== 'lodger' && !partnersParent) expect(person.familyName).toBe(family);
+      else if (person.role === 'lodger' && person.familyName !== family) lodgersWithOwnName++;
     }
     expect(lodgersWithOwnName / lodgers.length).toBeGreaterThan(0.95);
     expect(new Set(badanos.households.map((household) => household.familyName)).size).toBeGreaterThan(1000);
@@ -320,13 +321,18 @@ describe('steps 4 to 8: shares, posts, occupations, assignment and status', () =
 
 describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
   it('creates just enough buildings of each workplace type for its workers', () => {
+    // Servants also work in some of these buildings, in the homes of proprietors; they do not count against capacity.
+    const staff = new Map<string, number>();
+    for (const person of badanos.people) {
+      if (person.workplaceId && !person.employerHouseholdId) staff.set(person.workplaceId, (staff.get(person.workplaceId) ?? 0) + 1);
+    }
     for (const type of pack.workplaces) {
       const buildings = buildingsOfType(badanos, [type.id]);
-      const workers = buildings.reduce((sum, building) => sum + building.workerIds.length, 0);
+      const workers = buildings.reduce((sum, building) => sum + (staff.get(building.id) ?? 0), 0);
       expect(buildings.length, type.id).toBe(Math.ceil(workers / type.capacity));
       for (const building of buildings) {
-        expect(building.workerIds.length, building.id).toBeGreaterThan(0);
-        expect(building.workerIds.length, building.id).toBeLessThanOrEqual(type.capacity);
+        expect(staff.get(building.id), building.id).toBeGreaterThan(0);
+        expect(staff.get(building.id), building.id).toBeLessThanOrEqual(type.capacity);
       }
     }
   });
@@ -334,13 +340,15 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
   it('houses a proprietor\'s household in the workplace when the type says so', () => {
     const people = new Map(badanos.people.map((person) => [person.id, person]));
     const households = new Map(badanos.households.map((household) => [household.id, household]));
-    const both = badanos.buildings.filter((building) => building.kind === 'both');
+    const workplaceTypes = new Map(pack.workplaces.map((type) => [type.id, type]));
+    const both = badanos.buildings.filter((building) => building.kind === 'both' && workplaceTypes.has(building.type));
     expect(both.length).toBeGreaterThan(100);
     for (const building of both) {
-      expect(pack.workplaces.find((type) => type.id === building.type)!.proprietorLivesIn).toBe(true);
+      expect(workplaceTypes.get(building.type)!.proprietorLivesIn).toBe(true);
       expect(building.householdIds).toHaveLength(1);
       const head = people.get(households.get(building.householdIds[0]!)!.headId)!;
       expect(head.workplaceId).toBe(building.id);
+      expect(head.apprentice).toBeUndefined();
     }
     for (const building of badanos.buildings.filter((entry) => entry.kind === 'workplace')) {
       expect(building.householdIds).toEqual([]);
@@ -349,10 +357,10 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
 
   it('places every other household in a dwelling of its status tier, filled to capacity', () => {
     const households = new Map(badanos.households.map((household) => [household.id, household]));
-    const dwellings = badanos.buildings.filter((building) => building.kind === 'dwelling');
+    // A dwelling in which servants work has the kind "both"; it is still a dwelling type.
+    const dwellings = badanos.buildings.filter((building) => pack.dwellings.some((type) => type.id === building.type));
     for (const building of dwellings) {
       const type = pack.dwellings.find((entry) => entry.id === building.type)!;
-      expect(building.workerIds).toEqual([]);
       expect(building.householdIds.length).toBeGreaterThan(0);
       expect(building.householdIds.length).toBeLessThanOrEqual(type.households);
       for (const id of building.householdIds) expect(households.get(id)!.statusTier).toBe(type.status);
@@ -402,7 +410,7 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
       buildings: badanos.buildings.length,
       districts: badanos.districts.length,
       generatorVersion: GENERATOR_VERSION,
-      pack: { name: 'medieval', version: '0.1.0' },
+      pack: { name: 'medieval', version: '0.2.0' },
       seed: badanosBrief.seed,
     });
     const tiers = Object.values(summary.statusTiers);

@@ -43,6 +43,8 @@ export interface PackLabels {
   /** Lowest tier first. */
   statusTiers: Array<{ id: string; name: string }>;
   occupations: Record<string, { name: string; category: CategoryId }>;
+  /** How an apprentice's occupation is shown; {occupation} stands for the occupation's name. */
+  apprenticeLabel?: string;
   buildingTypes: Record<string, string>;
   districtKinds: Record<string, string>;
 }
@@ -59,8 +61,11 @@ export interface Page<T> {
 /** A household as shown in a list: the record plus what identifies it at a glance. */
 export interface HouseholdListItem extends Household {
   size: number;
-  headName: string;
-  headOccupationId?: string;
+  /**
+   * The member a list row shows: the head, or under a category or occupation
+   * filter the first member who matches it.
+   */
+  member: Pick<Person, 'id' | 'role' | 'occupationId' | 'apprentice'> & { name: string };
   districtId: string;
 }
 
@@ -71,6 +76,13 @@ export interface HouseholdDetail {
   members: Person[];
   dwelling: Building;
   district: DistrictRef;
+  /**
+   * Where each working member works, by building ID: the building's type, and
+   * the employing household when the work is done in its home.
+   */
+  workplaces: Record<string, { type: string; employer?: { householdId: string; familyName: string } }>;
+  /** People employed by this household, who work in its home. */
+  staff: Person[];
 }
 
 export interface BuildingDetail {

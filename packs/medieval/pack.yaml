@@ -5,7 +5,7 @@
 # The server reads the pack when it starts, so restart it after an edit.
 
 name: medieval
-version: "0.1.0"
+version: "0.2.0"
 
 # Status tiers, lowest first. Occupations, dwellings and districts refer to these IDs.
 statusTiers:
@@ -14,6 +14,14 @@ statusTiers:
   - {id: comfortable, name: Comfortable}
   - {id: wealthy, name: Wealthy}
   - {id: noble, name: Noble}
+
+# Apprentices. A worker younger than `apprenticeUntil` holds their job as an
+# apprentice: they are shown with the label below, are never the proprietor of
+# a workplace, and their job sets their household's status only when nobody
+# else in it works. An occupation can set its own age in occupations.yaml;
+# 0 there means the job has no apprenticeship. This is a placeholder.
+apprenticeUntil: 16
+apprenticeLabel: "Apprentice {occupation}"
 
 households:
   # Chance that a working member other than the head takes a free slot in the head's occupation.

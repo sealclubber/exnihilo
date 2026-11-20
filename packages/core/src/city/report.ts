@@ -13,6 +13,7 @@ export function packLabels(pack: SettingPack): PackLabels {
     version: pack.pack.version,
     categories: pack.categories.map((category) => ({ id: category.id, name: category.name })),
     statusTiers: pack.pack.statusTiers,
+    ...(pack.pack.apprenticeLabel !== undefined && { apprenticeLabel: pack.pack.apprenticeLabel }),
     occupations: Object.fromEntries(
       allOccupations(pack).map((occupation) => [occupation.id, { name: occupation.name, category: occupation.category }]),
     ),

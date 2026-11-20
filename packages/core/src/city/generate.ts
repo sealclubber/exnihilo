@@ -6,6 +6,10 @@
  * what people need, and districts group the buildings. Each step draws
  * randomness only from its own stream.
  *
+ * The steps, in order: households and people, kinship, names, workforce,
+ * category shares, fixed posts, occupation slots, assigning slots, status,
+ * workplaces, dwellings, work in an employer's home, districts, summary.
+ *
  * This file knows the seven categories, the brief's flags and the shape of
  * the records. Everything else, every occupation, building and number, comes
  * from the pack.
@@ -22,6 +26,7 @@ import {
   type Species,
   type WorkplaceType,
   CATEGORY_IDS,
+  apprenticeUntil,
 } from '../pack/schema.ts';
 import type { SettlementBrief } from '../schema.ts';
 import { checkCity } from './invariants.ts';
@@ -30,7 +35,10 @@ import { type Rng, apportion, shuffle, stepRng, weightedPicker } from './random.
 import type { Building, City, CitySummary, District, Household, HouseholdRole, Person } from './records.ts';
 
 /** Raised whenever the generator's output for the same inputs would change. */
-export const GENERATOR_VERSION = 1;
+export const GENERATOR_VERSION = 2;
+
+/** A person has at most this many parents; it bounds how many elders one adult can be the child of. */
+const PARENTS_PER_PERSON = 2;
 
 export class CityGenerationError extends Error {
   constructor(message: string) {
@@ -85,7 +93,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     }
   }
 
-  // ---- Step 1: households and people --------------------------------------
+  // ---- Households and people --------------------------------------
   const people: Person[] = [];
   const households: Household[] = [];
   /** Person indexes of each household's members, head first. */
@@ -135,6 +143,8 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
           cultureId: brief.culture.id,
           householdId,
           role,
+          parentIds: [],
+          childIds: [],
           workforceState: 'not-working',
         });
       };
@@ -142,22 +152,36 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       const headIsMale = rng.chance(species.sexes.headMaleShare);
       const age = headAge();
       add('head', age, headIsMale);
+      let partnerAge: number | undefined;
       if (size >= 2 && rng.chance(species.household.partnerProbability)) {
         const gap = rng.int(ages.partnerGap.min, ages.partnerGap.max);
-        add('partner', Math.min(Math.max(age + gap, ages.minPartnerAge), ages.maxAge), !headIsMale);
+        partnerAge = Math.min(Math.max(age + gap, ages.minPartnerAge), ages.maxAge);
+        add('partner', partnerAge, !headIsMale);
       }
+      // A child is the child of both adults, so the younger of them limits its age.
+      const youngerParent = Math.min(age, partnerAge ?? age);
+      const olderAdult = Math.max(age, partnerAge ?? age);
       let elders = 0;
       while (list.length < size) {
         const possible: HouseholdRole[] = ['lodger'];
-        if (age >= ages.parentMinAge) possible.push('child');
-        if (elders < species.household.maxElders && age + ages.elderGap.min <= ages.maxAge) possible.push('elder');
+        if (youngerParent >= ages.parentMinAge) possible.push('child');
+        // An elder is a parent of the head or the partner. The head can have two; any more need a
+        // partner to be the parents of, and are made old enough to be the parent of either adult.
+        const elderBase = elders < PARENTS_PER_PERSON ? age : olderAdult;
+        if (
+          elders < species.household.maxElders &&
+          elders < PARENTS_PER_PERSON * (partnerAge === undefined ? 1 : 2) &&
+          elderBase + ages.elderGap.min <= ages.maxAge
+        ) {
+          possible.push('elder');
+        }
         const role = pickRole(possible);
         const male = rng.chance(species.sexes.maleShare);
         if (role === 'child') {
-          add('child', rng.int(0, Math.min(age - ages.parentMinAge, ages.childMaxAge)), male);
+          add('child', rng.int(0, Math.min(youngerParent - ages.parentMinAge, ages.childMaxAge)), male);
         } else if (role === 'elder') {
           elders++;
-          add('elder', rng.int(age + ages.elderGap.min, Math.min(age + ages.elderGap.max, ages.maxAge)), male);
+          add('elder', rng.int(elderBase + ages.elderGap.min, Math.min(elderBase + ages.elderGap.max, ages.maxAge)), male);
         } else {
           add('lodger', lodgerAge(), male);
         }
@@ -177,22 +201,77 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   const householdOf = new Int32Array(people.length);
   members.forEach((list, household) => list.forEach((index) => (householdOf[index] = household)));
 
-  // ---- Step 2: names ---------------------------------------------------------
+  // ---- Kinship ---------------------------------------------------------------
+  /** Elders who are the partner's parent rather than the head's, by person index. */
+  const partnersParent = new Set<number>();
+  {
+    const rng = stepRng(seed, 'kinship');
+    const share = species.household.elderOfPartnerShare ?? 0;
+    const gapMin = species.ages.elderGap.min;
+    const person = (index: number) => people[index] as Person;
+    const tie = (parent: number, child: number) => {
+      person(parent).childIds.push(person(child).id);
+      person(child).parentIds.push(person(parent).id);
+    };
+    const pair = (a: number, b: number) => {
+      person(a).partnerId = person(b).id;
+      person(b).partnerId = person(a).id;
+    };
+    for (const list of members) {
+      const head = list[0] as number;
+      const partner = list.find((index) => person(index).role === 'partner');
+      if (partner !== undefined) pair(head, partner);
+      const parentsOf = new Map<number, number[]>([[head, []]]);
+      if (partner !== undefined) parentsOf.set(partner, []);
+      for (const index of list) {
+        const { role } = person(index);
+        if (role === 'child') {
+          tie(head, index);
+          if (partner !== undefined) tie(partner, index);
+        } else if (role === 'elder') {
+          const hasRoom = (adult: number) => (parentsOf.get(adult) as number[]).length < PARENTS_PER_PERSON;
+          const canBePartners =
+            partner !== undefined && hasRoom(partner) && person(index).age - person(partner).age >= gapMin;
+          // The head's parent unless a seeded choice says the partner's, or the head already has two.
+          const child = canBePartners && (rng.chance(share) || !hasRoom(head)) ? (partner as number) : head;
+          if (!hasRoom(child)) fail(`${person(index).id} is an elder with nobody left to be the parent of`);
+          (parentsOf.get(child) as number[]).push(index);
+          if (child !== head) partnersParent.add(index);
+          tie(index, child);
+        }
+      }
+      // Two elders who are the parents of the same person, and of opposite sex, are a couple.
+      for (const parents of parentsOf.values()) {
+        const [first, second] = parents;
+        if (first !== undefined && second !== undefined && person(first).sex !== person(second).sex) pair(first, second);
+      }
+    }
+  }
+
+  // ---- Names -------------------------------------------------------------------
   {
     const rng = stepRng(seed, 'names');
     const names = (options.names ?? nameBaseNames)(brief);
     households.forEach((household, index) => {
       household.familyName = names.familyName(rng);
+      // The partner's parents keep the name the partner was born with.
+      let partnersFamily: string | undefined;
       for (const member of members[index] as number[]) {
         const person = people[member] as Person;
         person.givenName = names.givenName(rng, person.sex);
-        // A lodger is not kin, so does not share the household's name.
-        person.familyName = person.role === 'lodger' ? names.familyName(rng) : household.familyName;
+        if (person.role === 'lodger') {
+          // A lodger is not kin, so does not share the household's name.
+          person.familyName = names.familyName(rng);
+        } else if (partnersParent.has(member)) {
+          person.familyName = partnersFamily ??= names.familyName(rng);
+        } else {
+          person.familyName = household.familyName;
+        }
       }
     });
   }
 
-  // ---- Step 3: workforce -----------------------------------------------------
+  // ---- workforce -----------------------------------------------------
   /** Person indexes of everyone in the workforce, in ID order. */
   const workers: number[] = [];
   {
@@ -257,7 +336,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     });
   }
 
-  // ---- Step 4: category shares ------------------------------------------------
+  // ---- category shares ------------------------------------------------
   const shares = {} as Record<CategoryId, number>;
   const categoryCounts = {} as Record<CategoryId, number>;
   {
@@ -288,7 +367,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   /** Slots per occupation, by index into `occupations`. */
   const slots = new Array<number>(occupations.length).fill(0);
 
-  // ---- Step 5: fixed posts -----------------------------------------------------
+  // ---- fixed posts -----------------------------------------------------
   const ordinary = { ...categoryCounts };
   const landmarkPlan: Array<{ landmark: Landmark; buildings: number }> = [];
   for (const landmark of pack.landmarks) {
@@ -304,11 +383,12 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     }
   }
 
-  // ---- Step 6: occupation slots ---------------------------------------------------
+  // ---- occupation slots ---------------------------------------------------
   {
     const multipliers = species.multipliers.occupations ?? {};
     const weightOf = (occupation: Occupation) =>
-      landmarkById.has(occupation.workplace) || (occupation.minPopulation ?? 0) > population
+      (occupation.workplace !== undefined && landmarkById.has(occupation.workplace)) ||
+      (occupation.minPopulation ?? 0) > population
         ? 0
         : occupation.weight * (multipliers[occupation.id] ?? 1);
     const usedTags = brief.specialtyTags
@@ -352,60 +432,171 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     }
   }
 
-  // ---- Step 7: assigning slots ---------------------------------------------------------
+  // ---- assigning slots ---------------------------------------------------------
   /** Occupation index of each person, or -1. */
   const occupationOf = new Int32Array(people.length).fill(-1);
+  const isApprentice = new Uint8Array(people.length);
+  const headOf = (index: number) => (members[householdOf[index] as number] as number[])[0] as number;
   {
     const rng = stepRng(seed, 'assignment');
-    const deck: number[] = [];
-    slots.forEach((count, index) => {
-      for (let n = 0; n < count; n++) deck.push(index);
-    });
-    shuffle(rng, deck);
+    const count = occupations.length;
     const free = [...slots];
-    // Slots taken by name are still somewhere in the deck; this counts them so they are skipped when reached.
-    const taken = new Array<number>(occupations.length).fill(0);
-    let top = 0;
-    const drawAny = (): number => {
-      for (;;) {
-        const index = deck[top++] as number;
-        if (taken[index]! > 0) {
-          taken[index]!--;
-          continue;
+    const offered = occupations.map((_, index) => index).filter((index) => (slots[index] as number) > 0);
+
+    // Workers fall into classes by which occupations the pack lets them hold. The class depends
+    // only on sex and on which of the pack's age limits the worker's age lies between.
+    const limits = [
+      ...new Set(
+        offered.flatMap((index) => {
+          const { minAge, maxAge } = occupations[index] as Occupation;
+          return [...(minAge === undefined ? [] : [minAge]), ...(maxAge === undefined ? [] : [maxAge + 1])];
+        }),
+      ),
+    ].sort((a, b) => a - b);
+    interface EligibilityClass {
+      id: number;
+      /** Occupation indexes this class may hold, and the same as a lookup. */
+      eligible: number[];
+      can: Uint8Array;
+    }
+    const classes: EligibilityClass[] = [];
+    const classByKey = new Map<string, EligibilityClass>();
+    const classOf = (index: number): EligibilityClass => {
+      const { age, sex } = people[index] as Person;
+      let band = 0;
+      while (band < limits.length && age >= (limits[band] as number)) band++;
+      const key = `${sex}:${band}`;
+      let found = classByKey.get(key);
+      if (!found) {
+        const eligible = offered.filter((occupationIndex) => {
+          const { minAge, maxAge, sexes } = occupations[occupationIndex] as Occupation;
+          return (minAge === undefined || age >= minAge) && (maxAge === undefined || age <= maxAge) && (!sexes || sexes.includes(sex));
+        });
+        const can = new Uint8Array(count);
+        for (const occupationIndex of eligible) can[occupationIndex] = 1;
+        found = { id: classes.length, eligible, can };
+        classes.push(found);
+        classByKey.set(key, found);
+      }
+      return found;
+    };
+
+    /** Who holds each occupation, by class, so that a holder can be moved when someone else has no other choice. */
+    const holders = new Map<number, number[]>();
+    const hold = (worker: number, group: EligibilityClass, occupation: number) => {
+      occupationOf[worker] = occupation;
+      const key = group.id * count + occupation;
+      const list = holders.get(key);
+      if (list) list.push(worker);
+      else holders.set(key, [worker]);
+    };
+    const take = (worker: number, group: EligibilityClass, occupation: number) => {
+      free[occupation]!--;
+      hold(worker, group, occupation);
+    };
+
+    /**
+     * Finds a place for a worker whose eligible occupations are all full, by moving earlier
+     * workers along a chain into occupations they may also hold. Fails only when no assignment
+     * of everyone could give this worker a place.
+     */
+    const makeRoom = (worker: number, group: EligibilityClass): boolean => {
+      const cameFrom = new Int32Array(count).fill(-2);
+      const movedClass = new Int32Array(count);
+      const queue = [...group.eligible];
+      for (const occupation of queue) cameFrom[occupation] = -1;
+      let end = -1;
+      search: for (let at = 0; at < queue.length; at++) {
+        const occupation = queue[at] as number;
+        for (const other of classes) {
+          if (!holders.get(other.id * count + occupation)?.length) continue;
+          for (const next of other.eligible) {
+            if (cameFrom[next] !== -2) continue;
+            cameFrom[next] = occupation;
+            movedClass[next] = other.id;
+            if ((free[next] as number) > 0) {
+              end = next;
+              break search;
+            }
+            queue.push(next);
+          }
         }
-        free[index]!--;
-        return index;
+      }
+      if (end === -1) return false;
+      free[end]!--;
+      let occupation = end;
+      while (cameFrom[occupation] !== -1) {
+        const previous = cameFrom[occupation] as number;
+        const mover = classes[movedClass[occupation] as number] as EligibilityClass;
+        const moved = (holders.get(mover.id * count + previous) as number[]).pop() as number;
+        hold(moved, mover, occupation);
+        occupation = previous;
+      }
+      hold(worker, group, occupation);
+      return true;
+    };
+
+    const unplaced: number[] = [];
+    /** Gives the worker a free slot chosen evenly from those they are eligible for. */
+    const drawAny = (worker: number, group: EligibilityClass) => {
+      let open = 0;
+      for (const occupation of group.eligible) open += free[occupation] as number;
+      if (open === 0) {
+        if (!makeRoom(worker, group)) unplaced.push(worker);
+        return;
+      }
+      let target = rng.int(0, open - 1);
+      for (const occupation of group.eligible) {
+        target -= free[occupation] as number;
+        if (target < 0) return take(worker, group, occupation);
       }
     };
+
     for (const index of workers) {
-      if ((people[index] as Person).role === 'head') occupationOf[index] = drawAny();
+      if ((people[index] as Person).role === 'head') drawAny(index, classOf(index));
     }
     const follow = pack.pack.households.followHeadOccupation;
     for (const index of workers) {
       if ((people[index] as Person).role === 'head') continue;
-      const head = (members[householdOf[index] as number] as number[])[0] as number;
-      const headOccupation = occupationOf[head] as number;
-      if (headOccupation >= 0 && free[headOccupation]! > 0 && rng.chance(follow)) {
-        free[headOccupation]!--;
-        taken[headOccupation]!++;
-        occupationOf[index] = headOccupation;
+      const group = classOf(index);
+      const headOccupation = occupationOf[headOf(index)] as number;
+      if (headOccupation >= 0 && free[headOccupation]! > 0 && group.can[headOccupation] === 1 && rng.chance(follow)) {
+        take(index, group, headOccupation);
       } else {
-        occupationOf[index] = drawAny();
+        drawAny(index, group);
       }
     }
+
+    if (unplaced.length > 0) {
+      const short = offered
+        .filter((index) => (free[index] as number) > 0)
+        .map((index) => `${free[index]} of the ${slots[index]} slots for "${(occupations[index] as Occupation).id}"`);
+      fail(
+        `cannot fill ${short.join(', ')}: ${unplaced.length} ${unplaced.length === 1 ? 'worker is' : 'workers are'} left ` +
+          'whom the pack\'s minAge, maxAge and sexes limits exclude from every remaining slot. Loosen a limit on one of these occupations.',
+      );
+    }
     for (const index of workers) {
-      (people[index] as Person).occupationId = (occupations[occupationOf[index] as number] as Occupation).id;
+      const person = people[index] as Person;
+      const occupation = occupations[occupationOf[index] as number] as Occupation;
+      person.occupationId = occupation.id;
+      if (person.age < apprenticeUntil(occupation, pack)) {
+        person.apprentice = true;
+        isApprentice[index] = 1;
+      }
     }
   }
 
-  // ---- Step 8: status ----------------------------------------------------------------------
+  // ---- status ----------------------------------------------------------------------
   {
     const rng = stepRng(seed, 'status');
     const { statusShiftUp, statusShiftDown, statusWithoutWorker } = pack.pack.households;
     households.forEach((household, index) => {
       const list = members[index] as number[];
-      // The head's occupation sets the tier; a household whose head does not work takes its first worker's.
-      const earner = list.find((member) => (occupationOf[member] as number) >= 0);
+      const working = list.filter((member) => (occupationOf[member] as number) >= 0);
+      // The head's occupation sets the tier, or failing that the first worker's. An apprentice's
+      // job counts only when nobody else in the household works.
+      const earner = working.find((member) => isApprentice[member] === 0) ?? working[0];
       if (earner === undefined) {
         household.statusTier = statusWithoutWorker;
         return;
@@ -418,7 +609,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     });
   }
 
-  // ---- Step 9: workplaces ---------------------------------------------------------------------
+  // ---- workplaces ---------------------------------------------------------------------
   interface BuildingDraft {
     building: Building;
     workers: number[];
@@ -444,19 +635,36 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     drafts.push(draft);
     return draft;
   };
+  /**
+   * Splits the holders of one kind of work into heads, each with the co-residents who share
+   * the head's occupation, and everyone else. Groups are ordered largest first.
+   */
+  const groupByHead = (staffList: number[]): { groups: number[][]; others: number[] } => {
+    const byHead = new Map<number, number[]>();
+    const others: number[] = [];
+    for (const index of staffList) {
+      if ((people[index] as Person).role === 'head') byHead.set(index, [index]);
+    }
+    for (const index of staffList) {
+      if ((people[index] as Person).role === 'head') continue;
+      const group = occupationOf[headOf(index)] === occupationOf[index] ? byHead.get(headOf(index)) : undefined;
+      if (group) group.push(index);
+      else others.push(index);
+    }
+    const groups = [...byHead.values()].sort((a, b) => b.length - a.length || (a[0] as number) - (b[0] as number));
+    return { groups, others };
+  };
   /** The household that lives in a workplace, by household index. */
   const livesAtWork = new Map<number, BuildingDraft>();
   {
     const workersByType = new Map<string, number[]>();
     for (const index of workers) {
       const type = (occupations[occupationOf[index] as number] as Occupation).workplace;
+      if (type === undefined) continue; // works in an employer's home, which is settled once homes exist
       let list = workersByType.get(type);
       if (!list) workersByType.set(type, (list = []));
       list.push(index);
     }
-    const staff = (buildings: BuildingDraft[], staffList: number[]) => {
-      staffList.forEach((index, turn) => (buildings[turn % buildings.length] as BuildingDraft).workers.push(index));
-    };
 
     for (const { landmark, buildings } of landmarkPlan) {
       const staffList = workersByType.get(landmark.id) ?? [];
@@ -465,39 +673,46 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       for (let n = 0; n < Math.max(buildings, staffList.length > 0 ? 1 : 0); n++) {
         made.push(newBuilding(landmark.id, 'landmark', { kind: landmark.district }));
       }
-      staff(made, staffList);
+      staffList.forEach((index, turn) => (made[turn % made.length] as BuildingDraft).workers.push(index));
     }
 
     for (const type of pack.workplaces as WorkplaceType[]) {
       const staffList = workersByType.get(type.id);
       if (!staffList) continue;
-      // Heads are dealt out first, so that each building gets a proprietor where there are enough.
-      const isHead = (index: number) => (people[index] as Person).role === 'head';
-      const ordered = [...staffList.filter(isHead), ...staffList.filter((index) => !isHead(index))];
       const made: BuildingDraft[] = [];
-      for (let n = 0; n < Math.ceil(ordered.length / type.capacity); n++) {
+      for (let n = 0; n < Math.ceil(staffList.length / type.capacity); n++) {
         made.push(newBuilding(type.id, 'workplace', { kind: type.district }));
       }
-      staff(made, ordered);
-      if (type.proprietorLivesIn) {
-        for (const draft of made) {
-          const proprietor = draft.workers[0] as number;
-          if (isHead(proprietor)) livesAtWork.set(householdOf[proprietor] as number, draft);
-        }
+      const emptiest = (): BuildingDraft => {
+        let best = made[0] as BuildingDraft;
+        for (const draft of made) if (draft.workers.length < best.workers.length) best = draft;
+        return best;
+      };
+      // Each head goes in together with the co-residents who share the head's occupation, largest
+      // group first and always into the emptiest building, so that heads are spread across the
+      // buildings and groups stay whole where capacity allows. Whoever does not fit, and everyone
+      // who follows no head, then fills the places that remain.
+      const { groups, others } = groupByHead(staffList);
+      const proprietors = new Map<BuildingDraft, number>();
+      for (const group of groups) {
+        const draft = emptiest();
+        const head = group[0] as number;
+        const fits = group.splice(0, type.capacity - draft.workers.length);
+        draft.workers.push(...fits);
+        others.push(...group);
+        // The proprietor is the first head placed in a building. An apprentice is never one.
+        if (!proprietors.has(draft) && isApprentice[head] === 0) proprietors.set(draft, head);
       }
-    }
-
-    for (const draft of drafts) {
-      draft.workers.sort((a, b) => a - b);
-      for (const index of draft.workers) {
-        const person = people[index] as Person;
-        person.workplaceId = draft.building.id;
-        draft.building.workerIds.push(person.id);
+      for (const index of others.sort((a, b) => a - b)) emptiest().workers.push(index);
+      if (type.proprietorLivesIn) {
+        for (const [draft, proprietor] of proprietors) livesAtWork.set(householdOf[proprietor] as number, draft);
       }
     }
   }
 
-  // ---- Step 10: dwellings --------------------------------------------------------------------------
+  // ---- dwellings --------------------------------------------------------------------------
+  /** Each household's home, by household index. */
+  const homeOf: BuildingDraft[] = [];
   {
     const rng = stepRng(seed, 'dwellings');
     const house = (draft: BuildingDraft, index: number) => {
@@ -505,11 +720,9 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       household.dwellingId = draft.building.id;
       draft.building.householdIds.push(household.id);
       draft.residents += (members[index] as number[]).length;
+      homeOf[index] = draft;
     };
-    for (const [index, draft] of livesAtWork) {
-      draft.building.kind = 'both';
-      house(draft, index);
-    }
+    for (const [index, draft] of livesAtWork) house(draft, index);
     for (const tier of tierIds) {
       const types = pack.dwellings.filter((type) => type.status === tier);
       const pickType = weightedPicker(types.map((type) => type.weight));
@@ -528,7 +741,76 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     }
   }
 
-  // ---- Step 11: districts ----------------------------------------------------------------------------
+  // ---- Work in an employer's home ---------------------------------------------------------------
+  {
+    const rng = stepRng(seed, 'employers');
+    const byOccupation = new Map<number, number[]>();
+    for (const index of workers) {
+      const occupation = occupationOf[index] as number;
+      if (!(occupations[occupation] as Occupation).employer) continue;
+      const list = byOccupation.get(occupation);
+      if (list) list.push(index);
+      else byOccupation.set(occupation, [index]);
+    }
+    const householdsOfTier = (tier: string) =>
+      households.flatMap((household, index) => (household.statusTier === tier ? [index] : []));
+    const tiersFromTop = [...tierIds].reverse();
+
+    for (const [occupation, staffList] of byOccupation) {
+      const { id, employer } = occupations[occupation] as Occupation;
+      // Households of the listed tiers employ, by the tier's weight. Where there are none, the highest tier present does.
+      let candidates: number[] = [];
+      let weights: number[] = [];
+      for (const [tier, weight] of Object.entries((employer as NonNullable<Occupation['employer']>).tiers)) {
+        const found = householdsOfTier(tier);
+        candidates.push(...found);
+        weights.push(...found.map(() => weight));
+      }
+      if (candidates.length === 0) {
+        candidates = householdsOfTier(tiersFromTop.find((tier) => householdsOfTier(tier).length > 0) as string);
+        weights = candidates.map(() => 1);
+      }
+      const pick = weightedPicker(weights);
+
+      // A head and the co-residents who share the occupation are taken on together.
+      const { groups, others } = groupByHead(staffList);
+      const units = [...groups, ...others.map((index) => [index])].sort((a, b) => (a[0] as number) - (b[0] as number));
+      for (const unit of units) {
+        const own = householdOf[unit[0] as number] as number;
+        const drawn = pick(rng);
+        // Nobody is employed by their own household: the next candidate takes them instead, or
+        // failing that the first household of the highest tier that has another.
+        let employing: number | undefined = candidates[drawn] as number;
+        if (employing === own) employing = candidates.length > 1 ? candidates[(drawn + 1) % candidates.length] : undefined;
+        if (employing === undefined) {
+          employing = tiersFromTop.flatMap(householdsOfTier).find((index) => index !== own);
+        }
+        if (employing === undefined) {
+          return fail(`nobody can employ the ${unit.length} "${id}" of ${(households[own] as Household).id}: it is the only household`);
+        }
+        for (const index of unit) {
+          (people[index] as Person).employerHouseholdId = (households[employing] as Household).id;
+          (homeOf[employing] as BuildingDraft).workers.push(index);
+        }
+      }
+    }
+  }
+
+  // Buildings now have everyone who works in them.
+  for (const draft of drafts) {
+    const { building } = draft;
+    if (building.kind !== 'landmark') {
+      building.kind = draft.workers.length === 0 ? 'dwelling' : building.householdIds.length > 0 ? 'both' : 'workplace';
+    }
+    draft.workers.sort((a, b) => a - b);
+    for (const index of draft.workers) {
+      const person = people[index] as Person;
+      person.workplaceId = building.id;
+      building.workerIds.push(person.id);
+    }
+  }
+
+  // ---- districts ----------------------------------------------------------------------------
   const districts: District[] = [];
   {
     const rng = stepRng(seed, 'districts');
@@ -600,7 +882,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   }
   const buildings = drafts.map((draft) => draft.building);
 
-  // ---- Step 12: summary ---------------------------------------------------------------------------------
+  // ---- summary ---------------------------------------------------------------------------------
   const summary: CitySummary = {
     settlementId: brief.id,
     settlementName: brief.name,

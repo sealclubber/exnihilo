@@ -7,7 +7,7 @@
  * ID order: person-641-000123.
  */
 import { z } from 'zod';
-import { CategoryIdSchema } from '../pack/schema.ts';
+import { CategoryIdSchema, SexSchema } from '../pack/schema.ts';
 import { CultureIdSchema, SettlementIdSchema } from '../schema.ts';
 
 const recordId = (kind: string, digits: number) =>
@@ -21,8 +21,7 @@ export const DistrictIdSchema = recordId('district', 3);
 const text = z.string().min(1);
 const count = z.int().nonnegative();
 
-export const SexSchema = z.enum(['female', 'male']);
-export type Sex = z.infer<typeof SexSchema>;
+export { SexSchema, type Sex } from '../pack/schema.ts';
 
 export const HouseholdRoleSchema = z.enum(['head', 'partner', 'child', 'elder', 'lodger']);
 export type HouseholdRole = z.infer<typeof HouseholdRoleSchema>;
@@ -40,10 +39,19 @@ export const PersonSchema = z.strictObject({
   cultureId: CultureIdSchema,
   householdId: HouseholdIdSchema,
   role: HouseholdRoleSchema,
+  /** Kinship inside the household. Every tie is recorded on both people. */
+  parentIds: z.array(PersonIdSchema).max(2),
+  childIds: z.array(PersonIdSchema),
+  partnerId: PersonIdSchema.optional(),
   workforceState: WorkforceStateSchema,
   /** Present exactly when the person is working. */
   occupationId: text.optional(),
+  /** Present, and true, when the person holds the occupation as an apprentice. */
+  apprentice: z.literal(true).optional(),
+  /** The building the work is done in: a workplace, a landmark, or an employing household's home. */
   workplaceId: BuildingIdSchema.optional(),
+  /** Present when the work is done in the home of a household that employs the person. */
+  employerHouseholdId: HouseholdIdSchema.optional(),
 });
 export type Person = z.infer<typeof PersonSchema>;
 

@@ -1,8 +1,15 @@
 # Every building type that people work in, apart from landmarks.
 #
+# Work done in someone else's home, such as a servant's, has no building type
+# here: see `employer` in occupations.yaml.
+#
 #   capacity           workers one building holds; more buildings are made as needed
-#   proprietorLivesIn  true: the first household head working in the building lives
-#                      there with their household, and it counts as their home
+#   proprietorLivesIn  true: the first household head placed in the building lives
+#                      there with their household, and it counts as their home.
+#                      An apprentice is never the proprietor.
+#
+# A head and the members of their household who share the head's occupation
+# work in the same building, as far as its capacity allows.
 #   district           the kind of district (districts.yaml) the building prefers
 
 # --- Food
@@ -23,7 +30,6 @@
 - {id: stockyard, name: Stockyard and stables, capacity: 6, proprietorLivesIn: false, district: outskirts}
 
 # --- Services
-- {id: great-house, name: Great house, capacity: 8, proprietorLivesIn: false, district: upper}
 - {id: laundry, name: Laundry, capacity: 6, proprietorLivesIn: false, district: lower}
 - {id: healers-house, name: Healer's house, capacity: 2, proprietorLivesIn: true, district: centre}
 - {id: tailors-shop, name: Tailor's shop, capacity: 3, proprietorLivesIn: true, district: centre}

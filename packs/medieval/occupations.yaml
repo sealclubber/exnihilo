@@ -1,15 +1,39 @@
 # Every job.
 #
-#   id            lower-case, unique
-#   name          shown in the inspector
-#   category      food, utilities, services, construction, military, luxury or trade
-#   workplace     a type from workplaces.yaml, or a landmark from landmarks.yaml
-#   weight        relative share of the category's slots. An occupation that works
-#                 at a landmark is a fixed post: its weight is 0 and landmarks.yaml
-#                 says how many there are.
-#   status        a tier from pack.yaml
-#   specialties   optional, trade only: the specialty tags this job belongs to
-#   minPopulation optional: the job does not exist in smaller settlements
+#   id              lower-case, unique
+#   name            shown in the inspector
+#   category        food, utilities, services, construction, military, luxury or trade
+#   workplace       a type from workplaces.yaml, or a landmark from landmarks.yaml
+#   employer        instead of `workplace`, for work done in someone else's home:
+#                   the status tiers whose households employ such workers, with a
+#                   weight per tier, as in  employer: {tiers: {wealthy: 4, noble: 8}}
+#                   The worker is attached to one such household and works where it
+#                   lives. If the settlement has no household of a listed tier, the
+#                   highest tier present employs them. An occupation has exactly one
+#                   of `workplace` and `employer`.
+#   weight          relative share of the category's slots. An occupation that works
+#                   at a landmark is a fixed post: its weight is 0 and landmarks.yaml
+#                   says how many there are.
+#   status          a tier from pack.yaml
+#   specialties     optional, trade only: the specialty tags this job belongs to
+#   minPopulation   optional: the job does not exist in smaller settlements
+#   minAge, maxAge  optional: ages outside this range cannot hold the job
+#   sexes           optional: only the listed sexes can hold the job
+#   apprenticeUntil optional: a worker younger than this holds the job as an
+#                   apprentice. 0 means the job has no apprenticeship. Left out, the
+#                   pack-wide age in pack.yaml applies.
+#
+# The limits never change how many of each job a settlement has, only who gets
+# them. If they cannot all be met, generation stops and names the occupation.
+#
+# PLACEHOLDERS, for review. The ages below are first guesses, not decisions:
+#   - minAge is set on posts of authority, on learned professions and on the
+#     military. Nothing else has an age limit, so children of working age
+#     (species.yaml) hold every other job.
+#   - apprenticeUntil is 0 on unskilled jobs; every other job uses the
+#     pack-wide age.
+#   - No occupation sets `sexes`. The syntax, on an example that is not in use:
+#       - {id: midwife, name: Midwife, category: services, workplace: healers-house, weight: 3, status: modest, sexes: [female]}
 
 # --- Food -------------------------------------------------------------------
 - {id: baker, name: Baker, category: food, workplace: bakery, weight: 14, status: modest}
@@ -18,49 +42,49 @@
 - {id: brewer, name: Brewer, category: food, workplace: brewery, weight: 7, status: modest}
 - {id: tavern-keeper, name: Tavern keeper, category: food, workplace: tavern, weight: 5, status: modest}
 - {id: innkeeper, name: Innkeeper, category: food, workplace: tavern, weight: 2, status: comfortable, minPopulation: 500}
-- {id: tapster, name: Tapster, category: food, workplace: tavern, weight: 7, status: poor}
+- {id: tapster, name: Tapster, category: food, workplace: tavern, weight: 7, status: poor, apprenticeUntil: 0}
 - {id: cook, name: Cook, category: food, workplace: tavern, weight: 7, status: poor}
 - {id: grocer, name: Grocer, category: food, workplace: general-shop, weight: 6, status: modest}
-- {id: fishmonger, name: Fishmonger, category: food, workplace: market-stall, weight: 4, status: poor}
-- {id: market-gardener, name: Market gardener, category: food, workplace: farmstead, weight: 12, status: poor}
-- {id: farmhand, name: Farmhand, category: food, workplace: farmstead, weight: 14, status: poor}
-- {id: dairy-worker, name: Dairy worker, category: food, workplace: dairy, weight: 4, status: poor}
+- {id: fishmonger, name: Fishmonger, category: food, workplace: market-stall, weight: 4, status: poor, apprenticeUntil: 0}
+- {id: market-gardener, name: Market gardener, category: food, workplace: farmstead, weight: 12, status: poor, apprenticeUntil: 0}
+- {id: farmhand, name: Farmhand, category: food, workplace: farmstead, weight: 14, status: poor, apprenticeUntil: 0}
+- {id: dairy-worker, name: Dairy worker, category: food, workplace: dairy, weight: 4, status: poor, apprenticeUntil: 0}
 
 # --- Utilities --------------------------------------------------------------
-- {id: water-carrier, name: Water carrier, category: utilities, workplace: town-yard, weight: 12, status: poor}
-- {id: night-soil-collector, name: Night-soil collector, category: utilities, workplace: town-yard, weight: 6, status: poor}
-- {id: street-sweeper, name: Street sweeper, category: utilities, workplace: town-yard, weight: 5, status: poor, minPopulation: 1000}
-- {id: lamplighter, name: Lamplighter, category: utilities, workplace: town-yard, weight: 3, status: poor, minPopulation: 2000}
-- {id: woodcutter, name: Woodcutter, category: utilities, workplace: woodyard, weight: 9, status: poor}
+- {id: water-carrier, name: Water carrier, category: utilities, workplace: town-yard, weight: 12, status: poor, apprenticeUntil: 0}
+- {id: night-soil-collector, name: Night-soil collector, category: utilities, workplace: town-yard, weight: 6, status: poor, apprenticeUntil: 0}
+- {id: street-sweeper, name: Street sweeper, category: utilities, workplace: town-yard, weight: 5, status: poor, minPopulation: 1000, apprenticeUntil: 0}
+- {id: lamplighter, name: Lamplighter, category: utilities, workplace: town-yard, weight: 3, status: poor, minPopulation: 2000, apprenticeUntil: 0}
+- {id: woodcutter, name: Woodcutter, category: utilities, workplace: woodyard, weight: 9, status: poor, apprenticeUntil: 0}
 - {id: fuel-seller, name: Fuel seller, category: utilities, workplace: woodyard, weight: 5, status: modest}
-- {id: ostler, name: Ostler, category: utilities, workplace: stockyard, weight: 6, status: poor}
-- {id: porter, name: Porter, category: utilities, workplace: carters-yard, weight: 10, status: poor}
+- {id: ostler, name: Ostler, category: utilities, workplace: stockyard, weight: 6, status: poor, apprenticeUntil: 0}
+- {id: porter, name: Porter, category: utilities, workplace: carters-yard, weight: 10, status: poor, apprenticeUntil: 0}
 
 # --- Services ---------------------------------------------------------------
-- {id: servant, name: Servant, category: services, workplace: great-house, weight: 20, status: poor}
-- {id: launderer, name: Launderer, category: services, workplace: laundry, weight: 8, status: poor}
+- {id: servant, name: Servant, category: services, employer: {tiers: {comfortable: 1, wealthy: 4, noble: 8}}, weight: 20, status: poor, apprenticeUntil: 0}
+- {id: launderer, name: Launderer, category: services, workplace: laundry, weight: 8, status: poor, apprenticeUntil: 0}
 - {id: barber, name: Barber, category: services, workplace: healers-house, weight: 4, status: modest}
 - {id: healer, name: Healer, category: services, workplace: healers-house, weight: 3, status: modest}
 - {id: midwife, name: Midwife, category: services, workplace: healers-house, weight: 3, status: modest}
-- {id: physician, name: Physician, category: services, workplace: healers-house, weight: 1, status: wealthy, minPopulation: 5000}
-- {id: apothecary, name: Apothecary, category: services, workplace: healers-house, weight: 2, status: comfortable, minPopulation: 2000}
+- {id: physician, name: Physician, category: services, workplace: healers-house, weight: 1, status: wealthy, minPopulation: 5000, minAge: 25}
+- {id: apothecary, name: Apothecary, category: services, workplace: healers-house, weight: 2, status: comfortable, minPopulation: 2000, minAge: 21}
 - {id: tailor, name: Tailor, category: services, workplace: tailors-shop, weight: 6, status: modest}
 - {id: cobbler, name: Cobbler, category: services, workplace: leather-shop, weight: 5, status: modest}
-- {id: scribe, name: Scribe, category: services, workplace: scribes-office, weight: 3, status: modest, minPopulation: 1000}
-- {id: clerk, name: Clerk, category: services, workplace: scribes-office, weight: 4, status: modest, minPopulation: 2000}
-- {id: priest, name: Priest, category: services, workplace: chapel, weight: 3, status: comfortable}
-- {id: sexton, name: Sexton, category: services, workplace: chapel, weight: 2, status: poor}
-- {id: moneylender, name: Moneylender, category: services, workplace: counting-house, weight: 1, status: wealthy, minPopulation: 3000}
+- {id: scribe, name: Scribe, category: services, workplace: scribes-office, weight: 3, status: modest, minPopulation: 1000, minAge: 18}
+- {id: clerk, name: Clerk, category: services, workplace: scribes-office, weight: 4, status: modest, minPopulation: 2000, minAge: 18}
+- {id: priest, name: Priest, category: services, workplace: chapel, weight: 3, status: comfortable, minAge: 25}
+- {id: sexton, name: Sexton, category: services, workplace: chapel, weight: 2, status: poor, apprenticeUntil: 0}
+- {id: moneylender, name: Moneylender, category: services, workplace: counting-house, weight: 1, status: wealthy, minPopulation: 3000, minAge: 25}
 # Fixed posts
-- {id: provincial-official, name: Provincial official, category: services, workplace: province-hall, weight: 0, status: comfortable}
-- {id: provincial-clerk, name: Provincial clerk, category: services, workplace: province-hall, weight: 0, status: modest}
-- {id: high-priest, name: High priest, category: services, workplace: temple, weight: 0, status: wealthy}
-- {id: temple-priest, name: Temple priest, category: services, workplace: temple, weight: 0, status: comfortable}
-- {id: acolyte, name: Acolyte, category: services, workplace: temple, weight: 0, status: poor}
-- {id: market-warden, name: Market warden, category: services, workplace: market-square, weight: 0, status: modest}
-- {id: courtier, name: Courtier, category: services, workplace: palace, weight: 0, status: noble}
-- {id: palace-official, name: Palace official, category: services, workplace: palace, weight: 0, status: wealthy}
-- {id: harbourmaster, name: Harbourmaster, category: services, workplace: docks, weight: 0, status: comfortable}
+- {id: provincial-official, name: Provincial official, category: services, workplace: province-hall, weight: 0, status: comfortable, minAge: 30}
+- {id: provincial-clerk, name: Provincial clerk, category: services, workplace: province-hall, weight: 0, status: modest, minAge: 18}
+- {id: high-priest, name: High priest, category: services, workplace: temple, weight: 0, status: wealthy, minAge: 40}
+- {id: temple-priest, name: Temple priest, category: services, workplace: temple, weight: 0, status: comfortable, minAge: 25}
+- {id: acolyte, name: Acolyte, category: services, workplace: temple, weight: 0, status: poor, apprenticeUntil: 0}
+- {id: market-warden, name: Market warden, category: services, workplace: market-square, weight: 0, status: modest, minAge: 30}
+- {id: courtier, name: Courtier, category: services, workplace: palace, weight: 0, status: noble, minAge: 21}
+- {id: palace-official, name: Palace official, category: services, workplace: palace, weight: 0, status: wealthy, minAge: 30}
+- {id: harbourmaster, name: Harbourmaster, category: services, workplace: docks, weight: 0, status: comfortable, minAge: 30}
 
 # --- Construction -----------------------------------------------------------
 - {id: mason, name: Mason, category: construction, workplace: masons-yard, weight: 10, status: modest}
@@ -68,23 +92,23 @@
 - {id: joiner, name: Joiner, category: construction, workplace: carpenters-shop, weight: 5, status: modest}
 - {id: thatcher, name: Thatcher, category: construction, workplace: builders-yard, weight: 6, status: poor}
 - {id: plasterer, name: Plasterer, category: construction, workplace: builders-yard, weight: 4, status: poor}
-- {id: builders-labourer, name: Builder's labourer, category: construction, workplace: builders-yard, weight: 16, status: poor}
-- {id: master-builder, name: Master builder, category: construction, workplace: builders-yard, weight: 1, status: comfortable, minPopulation: 3000}
+- {id: builders-labourer, name: Builder's labourer, category: construction, workplace: builders-yard, weight: 16, status: poor, apprenticeUntil: 0}
+- {id: master-builder, name: Master builder, category: construction, workplace: builders-yard, weight: 1, status: comfortable, minPopulation: 3000, minAge: 30}
 - {id: brickmaker, name: Brickmaker, category: construction, workplace: kiln-yard, weight: 5, status: poor}
-- {id: sawyer, name: Sawyer, category: construction, workplace: woodyard, weight: 4, status: poor}
+- {id: sawyer, name: Sawyer, category: construction, workplace: woodyard, weight: 4, status: poor, apprenticeUntil: 0}
 
 # --- Military ---------------------------------------------------------------
-- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor}
-- {id: watch-sergeant, name: Watch sergeant, category: military, workplace: watch-house, weight: 2, status: modest}
-- {id: gaoler, name: Gaoler, category: military, workplace: watch-house, weight: 1, status: poor, minPopulation: 2000}
-- {id: soldier, name: Soldier, category: military, workplace: barracks, weight: 8, status: poor}
-- {id: officer, name: Officer, category: military, workplace: barracks, weight: 1, status: comfortable, minPopulation: 1000}
+- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor, minAge: 16, apprenticeUntil: 0}
+- {id: watch-sergeant, name: Watch sergeant, category: military, workplace: watch-house, weight: 2, status: modest, minAge: 25}
+- {id: gaoler, name: Gaoler, category: military, workplace: watch-house, weight: 1, status: poor, minPopulation: 2000, minAge: 21, apprenticeUntil: 0}
+- {id: soldier, name: Soldier, category: military, workplace: barracks, weight: 8, status: poor, minAge: 16, apprenticeUntil: 0}
+- {id: officer, name: Officer, category: military, workplace: barracks, weight: 1, status: comfortable, minPopulation: 1000, minAge: 25}
 # Fixed posts
-- {id: castellan, name: Castellan, category: military, workplace: citadel, weight: 0, status: wealthy}
-- {id: garrison-officer, name: Garrison officer, category: military, workplace: citadel, weight: 0, status: comfortable}
-- {id: garrison-soldier, name: Garrison soldier, category: military, workplace: citadel, weight: 0, status: poor}
-- {id: gate-guard, name: Gate guard, category: military, workplace: gatehouse, weight: 0, status: poor}
-- {id: palace-guard, name: Palace guard, category: military, workplace: palace, weight: 0, status: modest}
+- {id: castellan, name: Castellan, category: military, workplace: citadel, weight: 0, status: wealthy, minAge: 30}
+- {id: garrison-officer, name: Garrison officer, category: military, workplace: citadel, weight: 0, status: comfortable, minAge: 25}
+- {id: garrison-soldier, name: Garrison soldier, category: military, workplace: citadel, weight: 0, status: poor, minAge: 16, apprenticeUntil: 0}
+- {id: gate-guard, name: Gate guard, category: military, workplace: gatehouse, weight: 0, status: poor, minAge: 16, apprenticeUntil: 0}
+- {id: palace-guard, name: Palace guard, category: military, workplace: palace, weight: 0, status: modest, minAge: 16, apprenticeUntil: 0}
 
 # --- Luxury -----------------------------------------------------------------
 - {id: goldsmith, name: Goldsmith, category: luxury, workplace: goldsmiths-shop, weight: 3, status: comfortable}
@@ -100,18 +124,18 @@
 - {id: merchant, name: Merchant, category: trade, workplace: merchants-house, weight: 6, status: comfortable}
 - {id: broker, name: Broker, category: trade, workplace: merchants-house, weight: 1, status: wealthy, minPopulation: 3000}
 - {id: shopkeeper, name: Shopkeeper, category: trade, workplace: general-shop, weight: 8, status: modest}
-- {id: pedlar, name: Pedlar, category: trade, workplace: market-stall, weight: 5, status: poor}
-- {id: carter, name: Carter, category: trade, workplace: carters-yard, weight: 10, status: poor}
-- {id: drover, name: Drover, category: trade, workplace: carters-yard, weight: 3, status: poor}
-- {id: warehouseman, name: Warehouseman, category: trade, workplace: warehouse, weight: 5, status: poor}
+- {id: pedlar, name: Pedlar, category: trade, workplace: market-stall, weight: 5, status: poor, apprenticeUntil: 0}
+- {id: carter, name: Carter, category: trade, workplace: carters-yard, weight: 10, status: poor, apprenticeUntil: 0}
+- {id: drover, name: Drover, category: trade, workplace: carters-yard, weight: 3, status: poor, apprenticeUntil: 0}
+- {id: warehouseman, name: Warehouseman, category: trade, workplace: warehouse, weight: 5, status: poor, apprenticeUntil: 0}
 # Fixed post
-- {id: dock-worker, name: Dock worker, category: trade, workplace: docks, weight: 0, status: poor}
+- {id: dock-worker, name: Dock worker, category: trade, workplace: docks, weight: 0, status: poor, apprenticeUntil: 0}
 
 # --- Trade: specialties -----------------------------------------------------
 # These exist only in settlements whose brief carries one of their tags.
 - {id: food-preserver, name: Food preserver, category: trade, workplace: preserving-house, weight: 3, status: poor, specialties: [preserved food]}
 - {id: fish-curer, name: Fish curer, category: trade, workplace: preserving-house, weight: 2, status: poor, specialties: [preserved food, fish]}
-- {id: miner, name: Miner, category: trade, workplace: mine, weight: 6, status: poor, specialties: [coal, tin, silver, saltpeter]}
+- {id: miner, name: Miner, category: trade, workplace: mine, weight: 6, status: poor, specialties: [coal, tin, silver, saltpeter], apprenticeUntil: 0}
 - {id: tanner, name: Tanner, category: trade, workplace: tannery, weight: 5, status: modest, specialties: [leather]}
 - {id: leatherworker, name: Leatherworker, category: trade, workplace: leather-shop, weight: 3, status: modest, specialties: [leather]}
 - {id: saddler, name: Saddler, category: trade, workplace: leather-shop, weight: 3, status: modest, specialties: [harnesses]}
