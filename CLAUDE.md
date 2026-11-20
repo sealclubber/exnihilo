@@ -27,9 +27,9 @@ the server. Run `npm run check` before calling any task done.
 
 | Path | Holds | May depend on |
 | --- | --- | --- |
-| `packages/core` | World format, AFMG importer, setting pack format, city generator | Nothing in this repository |
+| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator | Nothing in this repository |
 | `packages/server` | SQLite storage, pack loader, commands, HTTP API | `core` |
-| `packages/client` | Browser viewer and city inspector | `core`, for types only |
+| `packages/client` | Browser viewer, city inspector and town map | `core`, for types only |
 | `packs/medieval` | The first setting pack, as YAML | n/a |
 | `fixtures/afmg/lomia.json` | The Lomia export used by every test | n/a |
 
@@ -63,6 +63,32 @@ enforce them. Do not weaken that test to make a change pass.
    settlement's specialty tags are the only trace of AFMG's economy.
 10. **Nothing invented on import.** If the export lacks a value, the field is
     absent. No guessed defaults.
+11. **Layout is a separate module that reads a finished city.**
+    `packages/core/src/layout` takes a city, its brief, the pack and a seed,
+    and never reaches back to change the city. Its random streams are named
+    apart from the city generator's (`layout-…`).
+12. **Consumers read the layout format, never the generator.** The viewer,
+    the API, the path function and anything built later may use only what
+    `layout/records.ts` guarantees. A segment is a polyline and a lot is a
+    polygon: nothing that reads a layout may assume straight streets, right
+    angles, rectangles or a grid. The current generator (`layout/grid.ts`) is
+    deliberately regular and will be replaced; the format will not.
+
+## The layout format
+
+A layout belongs to one settlement. Coordinates are metres, origin at the town
+centre, x east and y south; bearings are degrees clockwise from north.
+
+- **One lot per building**, and every building has one.
+- **The graph is the truth for movement.** A lot is reached through its
+  entrance point on its segment. Lots do not connect to each other directly.
+- **The brief's bearings are facts.** Exits and water honour them, within
+  `BEARING_TOLERANCE` as seen from the centre.
+- **District areas** are one or more polygons that touch each other and enclose
+  the district's lots.
+- **The summary names the generator** that made the layout, so generators can
+  coexist.
+- Every length, width and density limit comes from `packs/medieval/layout.yaml`.
 
 ## Conventions
 
@@ -74,9 +100,13 @@ enforce them. Do not weaken that test to make a change pass.
 - **Generator version.** Raise `GENERATOR_VERSION` in
   `packages/core/src/city/generate.ts` whenever output for the same inputs
   would change, and raise the pack's `version` when the pack's data changes.
+  Layouts have their own `LAYOUT_VERSION` in
+  `packages/core/src/layout/records.ts`, raised whenever a layout for the same
+  inputs would change.
 - **Invariants.** Every rule a generated city must satisfy goes in
-  `packages/core/src/city/invariants.ts`. The generator runs them on its own
-  output; tests run them on every settlement in Lomia.
+  `packages/core/src/city/invariants.ts`, and every rule a layout must satisfy
+  in `packages/core/src/layout/invariants.ts`. Each generator runs them on its
+  own output; tests run them on every settlement in Lomia.
 - **Errors name their subject.** A failure says which settlement, field or
   pack entry caused it and what to change.
 - **Tests come with the code**, in the same change.
@@ -101,8 +131,9 @@ enforce them. Do not weaken that test to make a change pass.
 
 ## Later phases, for orientation
 
-Layout (streets and lots), NPC daily life, history generated backward from the
-present, persistence of changes, and LLM conversations. Do not build ahead for
+NPC movement and daily life on the street graph, a layout generator that makes
+natural-looking towns, building footprints, history generated backward from
+the present, persistence of changes, and LLM conversations. Do not build ahead for
 these, but do not make choices that block them: records need stable IDs, and
 anything a later generator derives must come from the brief, the pack and a
 seed.

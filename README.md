@@ -1,7 +1,7 @@
 # World Sim
 
 A persistent world explored from a world map down to a street. This repository
-holds the first two phases:
+holds the first three phases:
 
 1. An importer that turns an Azgaar's Fantasy Map Generator (AFMG) export into
    our own world format, a server that stores and serves it, and a browser
@@ -10,18 +10,22 @@ holds the first two phases:
    resident, household, building and district of that settlement, as linked
    records with no geometry, browsable from the command line and the viewer.
 
+3. A city's first geometry: a street graph, the water, and a lot for every
+   building, laid out simply and shown as a town map with walking paths.
+
 The briefs for this work are [worldsim-phase1-gameplan.md](worldsim-phase1-gameplan.md),
-[worldsim-phase2-gameplan.md](worldsim-phase2-gameplan.md) and
-[worldsim-phase2_5-gameplan.md](worldsim-phase2_5-gameplan.md), a patch that makes
-households, working ages and workplaces hang together.
+[worldsim-phase2-gameplan.md](worldsim-phase2-gameplan.md),
+[worldsim-phase2_5-gameplan.md](worldsim-phase2_5-gameplan.md) (a patch that makes
+households, working ages and workplaces hang together) and
+[worldsim-phase3-gameplan.md](worldsim-phase3-gameplan.md).
 
 ## Layout
 
 | Path | Holds |
 | --- | --- |
-| `packages/core` | The world format, the AFMG importer, the setting pack format, and the city generator. Pure code: no disk, network, clock or unseeded randomness. |
+| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, and the layout format, generator and path function. Pure code: no disk, network, clock or unseeded randomness. |
 | `packages/server` | SQLite storage, the pack loader, the import and generate commands, and the HTTP API. |
-| `packages/client` | The browser viewer and city inspector. Uses `core` for types only. |
+| `packages/client` | The browser viewer, city inspector and town map. Uses `core` for types only. |
 | `packs/medieval` | The first setting pack: every occupation, building and number the generator uses. |
 | `fixtures/afmg` | The Lomia export, used by the tests. |
 
@@ -74,6 +78,8 @@ The API listens on port 3001 on every network interface. Set `PORT`, `HOST`,
 | `GET .../city/districts` | Its districts, in pages |
 | `GET .../city/households/<id>` | One household with its members and its home |
 | `GET .../city/buildings/<id>` | One building with the people who work and live there |
+| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas and a summary |
+| `GET .../layout/path?from=<lot>&to=<lot>` | The shortest walking path between two lots: the segments in order, the length in metres, and the line walked |
 
 Paged lists take `offset` and `limit` (50 by default, 500 at most) and answer
 with `total`, `offset`, `limit` and `items`. They can be filtered:
@@ -85,7 +91,8 @@ with `total`, `offset`, `limit` and `items`. They can be filtered:
 | buildings | `district`, `occupation`, `category`, `kind`, `type` |
 
 A city is generated the first time it is asked for and the last few are kept
-in memory. Nothing generated is written to the world store.
+in memory, each with its layout once that has been asked for. Nothing
+generated is written to the world store.
 
 ## Open the viewer
 
@@ -108,6 +115,13 @@ Clicking a category, occupation, status or district filters the households;
 under a category or occupation filter each row shows the member who matched.
 Clicking a workplace shows who works there, and a servant's workplace leads to
 the household that employs them.
+
+Beside the lists is the **town map**: the water, the streets drawn by kind,
+and every building's lot coloured by district, with the exits labelled by
+their route and a scale bar in metres. Drag to pan and scroll to zoom.
+Clicking a lot shows its building; choosing a household or a building in the
+lists outlines its lot. **Path** shows the shortest walking path between two
+lots you pick, with its length.
 
 The viewer looks for the API on port 3001 of the host it was loaded from. If
 the server is somewhere else, say where when starting the viewer:
@@ -156,7 +170,8 @@ numbers.
 | `landmarks.yaml` | The buildings and fixed posts that flags and status add |
 | `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, and occupations of its own |
 | `cultures.yaml` | Which species each culture belongs to |
-| `districts.yaml` | District kinds, their size, and naming patterns |
+| `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside |
+| `layout.yaml` | Every length behind a town's layout: street widths, block dimensions, lot sizes by building type, the river's width, density limits |
 
 Each file starts with a comment describing its fields. All the numbers are
 placeholders meant to be tuned by eye:
@@ -189,6 +204,46 @@ in its home; `servant` is the one such occupation in the `medieval` pack.
 One tag is ignored by the `medieval` pack and listed for review at the top of
 `specialties.yaml`: `slaves`.
 
+## The layout
+
+A layout gives a generated city its geometry. It is made by a pure function in
+`packages/core/src/layout` from the city, its brief, the pack and a seed, and
+never changes the city.
+
+**The format** (`layout/records.ts`) is what everything else depends on, and
+is meant to outlive the generator. Coordinates are metres from the town
+centre, x east and y south.
+
+| Record | Holds |
+| --- | --- |
+| Junction | A position and a kind: crossing, dead end, bridge end or exit |
+| Segment | The two junctions it joins, a polyline, a kind (arterial, street, lane or bridge), a width, and the route it carries if any |
+| Exit | The junction where one of the brief's routes leaves town, with the route's ID, name, kind and bearing |
+| Water | A river as a centre line with a width, or the sea as a polygon |
+| Lot | Its building, a polygon, its district, and an entrance: a segment and a point on it |
+| District area | The polygons that enclose a district's lots, and a label point |
+| Summary | Counts, the bounding box, built area, residents per hectare, the layout version, the generator's name, the pack and the seed |
+
+Its rules are checked by `layout/invariants.ts` on every layout: one lot per
+building; no lot overlapping another, a roadway or water; every entrance on a
+segment that borders its lot; a connected street graph; an exit within 20
+degrees of each of the brief's route bearings; the river and the sea where the
+brief puts them; only bridges crossing water; a port's waterside district at
+the water; each district in one piece; and a plausible density. Shapes are
+general: nothing that reads a layout may assume straight streets or
+rectangular lots, and the tests bend streets and use five-sided lots to hold
+the viewer, the invariants and the path function to that.
+
+**The generator** (`layout/grid.ts`, named `grid` in a layout's summary) is
+deliberately regular: a street grid around the centre, a river bending beside
+it, districts grown block by block from the centre outward, an arterial from
+the centre to each exit, and bridges where streets meet the river. A later
+generator can replace it without touching anything that reads a layout.
+
+**Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
+walked in order, the length in metres from entrance to entrance, and the line
+walked. `createPathFinder(layout)` does the same for many queries.
+
 To use another pack, copy the folder, edit it, and point `WORLDSIM_PACK` or
 `--pack` at the copy.
 
@@ -206,10 +261,17 @@ are in `packages/core/test/importer.test.ts`; phase 2's are in
 pack edits), `pack.test.ts` (the pack and its validation) and
 `lomia-cities.test.ts` (every settlement); phase 2.5's are in
 `coherence.test.ts` (parent ages, kinship, eligibility, shared workplaces,
-employer households) and `baseline.test.ts` (counts that must not move).
+employer households) and `baseline.test.ts` (counts that must not move);
+phase 3's are in `layout-invariants.test.ts` (the format's rules, on layouts
+built by hand), `layout-geometry.test.ts`, `layout.test.ts` (the generator and
+the path function on single settlements) and `lomia-cities.test.ts`.
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
 and checks every invariant on each. With generator version 2 it takes about 9
 seconds on one core of an Intel Core Ultra 7 265K; generation alone, which
 includes the generator's own check, is about 7.5 seconds, and Pombal, the
 largest settlement at 47,603 people, takes about 0.13 seconds.
+
+Laying out all 682 settlements, 526,006 lots, takes about 5 seconds more,
+again including the generator's own check of every layout invariant. No
+settlement takes longer than 0.1 seconds; Pombal's 8,413 lots take about that.
