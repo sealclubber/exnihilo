@@ -9,12 +9,15 @@ import {
   type HouseholdFilters,
   buildingKindName,
   buildingTypeName,
+  describeKin,
   describeMember,
+  describeRowMember,
   districtLabel,
   filterChips,
   formatNumber,
-  occupationName,
   summaryBars,
+  workName,
+  workplaceText,
 } from './city-format.ts';
 import { h, link } from './dom.ts';
 
@@ -150,7 +153,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
             },
             h('strong', {}, household.familyName),
             h('span', {}, `${household.size} ${household.size === 1 ? 'member' : 'members'} · ${tierName(household.statusTier)}`),
-            h('span', {}, `${household.headName}${household.headOccupationId ? `, ${occupationName(household.headOccupationId, labels).toLowerCase()}` : ''}`),
+            h('span', {}, describeRowMember(household.member, labels)),
             h('span', { class: 'muted' }, districtName(household.districtId)),
           ),
         ),
@@ -175,19 +178,49 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     }
   }
 
+  /** A table of people who work somewhere, each with a way to their own household. */
+  const workersTable = (workers: BuildingDetail['workers']) =>
+    h(
+      'table',
+      {},
+      h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Occupation', 'Household'].map((heading) => h('th', {}, heading)))),
+      h(
+        'tbody',
+        {},
+        ...workers.map((person) =>
+          h(
+            'tr',
+            {},
+            h('td', {}, `${person.givenName} ${person.familyName}`),
+            h('td', { class: 'number' }, String(person.age)),
+            h('td', {}, workName(person, labels)),
+            h('td', {}, link('Open', () => void showHousehold(person.householdId), 'Show this person\'s household')),
+          ),
+        ),
+      ),
+    );
+
   function renderHousehold(detail: HouseholdDetail): void {
-    const { household, members, dwelling, district } = detail;
+    const { household, members, dwelling, district, staff } = detail;
     const rows = members.map((person) => {
       const text = describeMember(person, labels);
+      const employer = person.workplaceId === undefined ? undefined : detail.workplaces[person.workplaceId]?.employer;
+      // Work done in an employer's home leads to that household; other work leads to the building.
+      const workplace =
+        person.workplaceId === undefined
+          ? ''
+          : employer
+            ? link(workplaceText(person, detail, labels), () => void showHousehold(employer.householdId), 'Show the household that employs them')
+            : link(workplaceText(person, detail, labels), () => void showBuilding(person.workplaceId as string), 'Show who works there');
       return h(
         'tr',
         {},
         h('td', {}, text.name),
         h('td', { class: 'number' }, text.age),
         h('td', {}, text.sex),
-        h('td', {}, text.role),
+        h('td', {}, text.role, h('small', {}, describeKin(person, members))),
         h('td', {}, text.work),
-        h('td', {}, person.workplaceId ? link(workplaceName(person.workplaceId, detail), () => void showBuilding(person.workplaceId as string), 'Show who works there') : ''),
+        h('td', {}, workplace),
       );
     });
     detailBox.replaceChildren(
@@ -199,48 +232,21 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       h(
         'table',
         {},
-        h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Sex', 'Role', 'Occupation', 'Workplace'].map((heading) => h('th', {}, heading)))),
+        h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Sex', 'Role and kin', 'Occupation', 'Workplace'].map((heading) => h('th', {}, heading)))),
         h('tbody', {}, ...rows),
       ),
+      ...(staff.length > 0 ? [h('h3', {}, `People who work in this home (${staff.length})`), workersTable(staff)] : []),
     );
     detailBox.scrollTop = 0;
   }
 
-  /** Workplaces are named by type; the building's number tells two of a type apart. */
-  const workplaceNames = new Map<string, string>();
-  function workplaceName(buildingId: string, detail: HouseholdDetail): string {
-    if (buildingId === detail.dwelling.id) return `${buildingTypeName(detail.dwelling.type, labels)} (home)`;
-    return workplaceNames.get(buildingId) ?? `Building ${Number(buildingId.split('-')[2])}`;
-  }
-
   function renderBuilding(detail: BuildingDetail): void {
     const { building, district, workers, households } = detail;
-    workplaceNames.set(building.id, buildingTypeName(building.type, labels));
     detailBox.replaceChildren(
       h('h2', {}, buildingTypeName(building.type, labels)),
       h('p', { class: 'subtitle' }, `${buildingKindName(building.kind)} · ${districtLabel(district, labels)} · ${building.id}`),
       h('h3', {}, `People working here (${workers.length})`),
-      workers.length === 0
-        ? hint('Nobody works here.')
-        : h(
-            'table',
-            {},
-            h('thead', {}, h('tr', {}, ...['Name', 'Age', 'Occupation', 'Household'].map((heading) => h('th', {}, heading)))),
-            h(
-              'tbody',
-              {},
-              ...workers.map((person) =>
-                h(
-                  'tr',
-                  {},
-                  h('td', {}, `${person.givenName} ${person.familyName}`),
-                  h('td', { class: 'number' }, String(person.age)),
-                  h('td', {}, occupationName(person.occupationId, labels)),
-                  h('td', {}, link('Open', () => void showHousehold(person.householdId), 'Show this person\'s household')),
-                ),
-              ),
-            ),
-          ),
+      workers.length === 0 ? hint('Nobody works here.') : workersTable(workers),
       h('h3', {}, `Households living here (${households.length})`),
       households.length === 0
         ? hint('Nobody lives here.')
@@ -268,16 +274,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   async function showHousehold(id: string): Promise<void> {
     selected = id;
     renderList();
-    // Fetch the workplaces' types first, so the members table can name them.
-    await showDetail(async () => {
-      const detail = await fetchHousehold(settlementId, id);
-      const unknown = [...new Set(detail.members.map((person) => person.workplaceId))].filter(
-        (workplace): workplace is string => workplace !== undefined && workplace !== detail.dwelling.id && !workplaceNames.has(workplace),
-      );
-      const buildings = await Promise.all(unknown.map((workplace) => fetchBuilding(settlementId, workplace)));
-      for (const { building } of buildings) workplaceNames.set(building.id, buildingTypeName(building.type, labels));
-      return detail;
-    }, renderHousehold);
+    await showDetail(() => fetchHousehold(settlementId, id), renderHousehold);
   }
 
   async function showBuilding(id: string): Promise<void> {
@@ -304,7 +301,6 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       total = 0;
       selected = undefined;
       allOccupations = false;
-      workplaceNames.clear();
       search.value = '';
       root.hidden = false;
       title.textContent = 'Generating the city…';

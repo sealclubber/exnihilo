@@ -51,6 +51,8 @@ export class CityView {
   private readonly buildings: Map<string, Building>;
   private readonly districts: Map<string, District>;
   private readonly categoryOf: Map<string, CategoryId>;
+  /** The people each household employs, by household ID. */
+  private readonly staff = new Map<string, Person[]>();
 
   constructor(city: City, pack: SettingPack) {
     this.city = city;
@@ -59,6 +61,12 @@ export class CityView {
     this.buildings = new Map(city.buildings.map((building) => [building.id, building]));
     this.districts = new Map(city.districts.map((district) => [district.id, district]));
     this.categoryOf = new Map(allOccupations(pack).map((occupation) => [occupation.id, occupation.category]));
+    for (const person of city.people) {
+      if (person.employerHouseholdId === undefined) continue;
+      const list = this.staff.get(person.employerHouseholdId);
+      if (list) list.push(person);
+      else this.staff.set(person.employerHouseholdId, [person]);
+    }
   }
 
   private districtOfHousehold(household: Household): string {
@@ -77,13 +85,19 @@ export class CityView {
     return true;
   }
 
-  private listItem(household: Household): HouseholdListItem {
-    const head = this.people.get(household.headId) as Person;
+  /** A list row for a household, showing the given member, or its head. */
+  private listItem(household: Household, shown?: Person): HouseholdListItem {
+    const member = shown ?? (this.people.get(household.headId) as Person);
     return {
       ...household,
       size: household.memberIds.length,
-      headName: `${head.givenName} ${head.familyName}`,
-      ...(head.occupationId !== undefined && { headOccupationId: head.occupationId }),
+      member: {
+        id: member.id,
+        name: `${member.givenName} ${member.familyName}`,
+        role: member.role,
+        ...(member.occupationId !== undefined && { occupationId: member.occupationId }),
+        ...(member.apprentice && { apprentice: true as const }),
+      },
       districtId: this.districtOfHousehold(household),
     };
   }
@@ -112,11 +126,17 @@ export class CityView {
   listHouseholds(filters: CityFilters, page: PageRequest): Page<HouseholdListItem> {
     const text = filters.q?.toLowerCase();
     const byWork = filters.occupation !== undefined || filters.category !== undefined;
+    // Under a category or occupation filter, the row shows the member who matched rather than the head.
+    const matched = new Map<string, Person>();
     const matches = this.city.households.filter((household) => {
       if (filters.status !== undefined && household.statusTier !== filters.status) return false;
       if (filters.district !== undefined && this.districtOfHousehold(household) !== filters.district) return false;
       const members = byWork || text !== undefined ? this.membersOf(household) : [];
-      if (byWork && !members.some((person) => person.occupationId !== undefined && this.worksAs(person, filters))) return false;
+      if (byWork) {
+        const worker = members.find((person) => person.occupationId !== undefined && this.worksAs(person, filters));
+        if (!worker) return false;
+        matched.set(household.id, worker);
+      }
       if (text === undefined) return true;
       return (
         household.familyName.toLowerCase().includes(text) ||
@@ -124,7 +144,7 @@ export class CityView {
       );
     });
     const { items, ...rest } = paged(matches, page);
-    return { ...rest, items: items.map((household) => this.listItem(household)) };
+    return { ...rest, items: items.map((household) => this.listItem(household, matched.get(household.id))) };
   }
 
   listBuildings(filters: CityFilters, page: PageRequest): Page<Building> {
@@ -148,7 +168,24 @@ export class CityView {
     const household = this.households.get(id);
     if (!household) return undefined;
     const dwelling = this.buildings.get(household.dwellingId) as Building;
-    return { household, members: this.membersOf(household), dwelling, district: this.districtRef(dwelling.districtId) };
+    const members = this.membersOf(household);
+    const workplaces: HouseholdDetail['workplaces'] = {};
+    for (const person of members) {
+      if (person.workplaceId === undefined) continue;
+      const employer = person.employerHouseholdId === undefined ? undefined : this.households.get(person.employerHouseholdId);
+      workplaces[person.workplaceId] = {
+        type: (this.buildings.get(person.workplaceId) as Building).type,
+        ...(employer && { employer: { householdId: employer.id, familyName: employer.familyName } }),
+      };
+    }
+    return {
+      household,
+      members,
+      dwelling,
+      district: this.districtRef(dwelling.districtId),
+      workplaces,
+      staff: this.staff.get(household.id) ?? [],
+    };
   }
 
   building(id: string): BuildingDetail | undefined {

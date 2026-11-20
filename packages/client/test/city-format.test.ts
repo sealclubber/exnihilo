@@ -4,12 +4,16 @@ import { medievalPack, settlement } from '../../core/test/pack.ts';
 import {
   buildingKindName,
   buildingTypeName,
+  describeKin,
   describeMember,
+  describeRowMember,
   districtLabel,
   filterChips,
   listQuery,
   occupationName,
   summaryBars,
+  workName,
+  workplaceText,
 } from '../src/city-format.ts';
 
 let city: City;
@@ -65,7 +69,7 @@ describe('summaryBars', () => {
 
 describe('record text', () => {
   it('describes a household member', () => {
-    const worker = city.people.find((person) => person.occupationId === 'tanner' && person.role === 'head')!;
+    const worker = city.people.find((person) => person.occupationId === 'tanner' && person.role === 'head' && !person.apprentice)!;
     expect(describeMember(worker, labels)).toEqual({
       name: `${worker.givenName} ${worker.familyName}`,
       age: String(worker.age),
@@ -77,6 +81,51 @@ describe('record text', () => {
     expect(describeMember(keeper, labels).work).toBe('Keeping house');
     const child = city.people.find((person) => person.role === 'child' && person.age < 5)!;
     expect(describeMember(child, labels)).toMatchObject({ role: 'Child', work: 'Not working' });
+  });
+
+  it('shows an apprentice with the pack\'s label', () => {
+    const apprentice = city.people.find((person) => person.occupationId === 'tanner' && person.apprentice)!;
+    expect(workName(apprentice, labels)).toBe('Apprentice tanner');
+    expect(describeMember(apprentice, labels).work).toBe('Apprentice tanner');
+    expect(workName({ occupationId: 'tanner' }, labels)).toBe('Tanner');
+    expect(workName({ occupationId: 'tanner', apprentice: true }, { ...labels, apprenticeLabel: '{occupation} (learning)' })).toBe('Tanner (learning)');
+    const { apprenticeLabel: _, ...unlabelled } = labels;
+    expect(workName({ occupationId: 'tanner', apprentice: true }, unlabelled)).toBe('Tanner');
+  });
+
+  it('describes kinship in words', () => {
+    const household = city.households.find((entry) => {
+      const members = entry.memberIds.map((id) => city.people.find((person) => person.id === id)!);
+      return members.some((person) => person.role === 'partner') && members.filter((person) => person.role === 'child').length === 2 && members.some((person) => person.role === 'elder');
+    })!;
+    const members = household.memberIds.map((id) => city.people.find((person) => person.id === id)!);
+    const [head, partner] = members as [typeof members[0], typeof members[0]];
+    const children = members.filter((person) => person.role === 'child');
+    const names = `${children[0]!.givenName} and ${children[1]!.givenName}`;
+    expect(describeKin(partner, members)).toBe(`Partner of ${head.givenName}; ${partner.parentIds.length ? `child of ${members.find((person) => person.id === partner.parentIds[0])!.givenName}; ` : ''}parent of ${names}`);
+    expect(describeKin(children[0]!, members)).toBe(`Child of ${head.givenName} and ${partner.givenName}`);
+    const elder = members.find((person) => person.role === 'elder')!;
+    expect(describeKin(elder, members)).toMatch(/[Pp]arent of \p{Lu}\p{Ll}+$/u);
+    const lodger = city.people.find((person) => person.role === 'lodger')!;
+    expect(describeKin(lodger, [lodger])).toBe('');
+  });
+
+  it('describes the member a household row shows', () => {
+    expect(describeRowMember({ id: 'person-1-000001', name: 'Ada Smith', role: 'head', occupationId: 'tanner' }, labels)).toBe('Ada Smith, tanner');
+    expect(describeRowMember({ id: 'person-1-000002', name: 'Bo Smith', role: 'child', occupationId: 'soldier' }, labels)).toBe('Bo Smith (child), soldier');
+    expect(describeRowMember({ id: 'person-1-000003', name: 'Cy Smith', role: 'lodger', occupationId: 'tanner', apprentice: true }, labels)).toBe('Cy Smith (lodger), apprentice tanner');
+    expect(describeRowMember({ id: 'person-1-000004', name: 'Di Smith', role: 'head' }, labels)).toBe('Di Smith');
+  });
+
+  it('names a workplace by its type, or by the household that employs the worker', () => {
+    const person = city.people.find((entry) => entry.occupationId === 'tanner')!;
+    const dwelling = city.buildings[0]!;
+    expect(workplaceText(person, { workplaces: { [person.workplaceId!]: { type: 'tannery' } }, dwelling }, labels)).toBe('Tannery');
+    expect(workplaceText(person, { workplaces: { [person.workplaceId!]: { type: 'bakery' } }, dwelling: { ...dwelling, id: person.workplaceId! } }, labels)).toBe('Bakery (home)');
+    const servant = city.people.find((entry) => entry.occupationId === 'servant')!;
+    const employer = { householdId: servant.employerHouseholdId!, familyName: 'Nagy' };
+    expect(workplaceText(servant, { workplaces: { [servant.workplaceId!]: { type: 'mansion', employer } }, dwelling }, labels)).toBe('Home of the Nagy household');
+    expect(workplaceText(city.people.find((entry) => !entry.workplaceId)!, { workplaces: {}, dwelling }, labels)).toBe('');
   });
 
   it('names occupations, buildings and districts, falling back to the ID', () => {

@@ -49,6 +49,8 @@ describe('GET /api/pack', () => {
     expect(body.occupations.tanner).toEqual({ name: 'Tanner', category: 'trade' });
     expect(body.occupations.runesmith).toEqual({ name: 'Runesmith', category: 'luxury' });
     expect(body.buildingTypes).toMatchObject({ tannery: 'Tannery', tenement: 'Tenement', citadel: 'Citadel' });
+    expect(body.buildingTypes['great-house']).toBeUndefined();
+    expect(body.apprenticeLabel).toBe('Apprentice {occupation}');
     expect(body.districtKinds.centre).toBe('Centre');
     expect(body.statusTiers[0]).toEqual({ id: 'poor', name: 'Poor' });
   });
@@ -108,7 +110,12 @@ describe('paged records', () => {
     const households = (await get<Page<HouseholdListItem>>(`${CITY}/households?limit=5`)).body;
     expect(households.total).toBe(badanos.households.length);
     expect(households.items[0]).toMatchObject({ ...badanos.households[0], size: badanos.households[0]!.memberIds.length });
-    expect(households.items[0]!.headName).toBe(`${badanos.people[0]!.givenName} ${badanos.people[0]!.familyName}`);
+    expect(households.items[0]!.member).toEqual({
+      id: badanos.people[0]!.id,
+      name: `${badanos.people[0]!.givenName} ${badanos.people[0]!.familyName}`,
+      role: 'head',
+      occupationId: badanos.people[0]!.occupationId,
+    });
     expect(households.items[0]!.districtId).toMatch(/^district-641-/);
 
     const buildings = (await get<Page<Building>>(`${CITY}/buildings?limit=3`)).body;
@@ -165,6 +172,22 @@ describe('filters', () => {
     const expected = new Set(badanos.people.filter((person) => person.occupationId === 'armourer').map((person) => person.householdId));
     expect(new Set(armourers.items.map((household) => household.id))).toEqual(expected);
 
+    // Under an occupation or category filter, each row shows the member who matched, not the head.
+    const people = new Map(badanos.people.map((person) => [person.id, person]));
+    expect(armourers.items.every((household) => household.member.occupationId === 'armourer')).toBe(true);
+    expect(armourers.items.some((household) => household.member.role !== 'head')).toBe(true);
+    const military = (await get<Page<HouseholdListItem>>(`${CITY}/households?category=military&limit=500`)).body;
+    expect(military.total).toBeGreaterThan(100);
+    for (const household of military.items) {
+      expect(household.memberIds).toContain(household.member.id);
+      expect(['watchman', 'watch-sergeant', 'gaoler', 'soldier', 'officer']).toContain(household.member.occupationId);
+      expect(household.member.name).toBe(`${people.get(household.member.id)!.givenName} ${people.get(household.member.id)!.familyName}`);
+    }
+    // Without such a filter the row shows the head.
+    expect(wealthy.items.every((household) => household.member.id === household.headId)).toBe(true);
+    const apprentice = (await get<Page<HouseholdListItem>>(`${CITY}/households?occupation=tanner&limit=500`)).body.items.find((household) => household.member.apprentice);
+    expect(people.get(apprentice!.member.id)!.apprentice).toBe(true);
+
     const family = badanos.households[77]!.familyName;
     const named = (await get<Page<HouseholdListItem>>(`${CITY}/households?q=${encodeURIComponent(family.toLowerCase())}&limit=500`)).body;
     expect(named.items.map((household) => household.id)).toContain(badanos.households[77]!.id);
@@ -201,8 +224,34 @@ describe('single records', () => {
     });
   });
 
+  it('says where each member works, and which household employs a servant', async () => {
+    const servant = badanos.people.find((person) => person.occupationId === 'servant')!;
+    const employer = badanos.households.find((household) => household.id === servant.employerHouseholdId)!;
+    const { body } = await get<HouseholdDetail>(`${CITY}/households/${servant.householdId}`);
+    expect(body.workplaces[servant.workplaceId!]).toEqual({
+      type: badanos.buildings.find((building) => building.id === employer.dwellingId)!.type,
+      employer: { householdId: employer.id, familyName: employer.familyName },
+    });
+    const working = body.members.filter((person) => person.workplaceId);
+    expect(Object.keys(body.workplaces).sort()).toEqual([...new Set(working.map((person) => person.workplaceId!))].sort());
+    const tanner = badanos.people.find((person) => person.occupationId === 'tanner')!;
+    const other = (await get<HouseholdDetail>(`${CITY}/households/${tanner.householdId}`)).body;
+    expect(other.workplaces[tanner.workplaceId!]).toEqual({ type: 'tannery' });
+  });
+
+  it('lists the people who work in an employer household\'s home', async () => {
+    const servants = badanos.people.filter((person) => person.occupationId === 'servant');
+    const employerId = servants[0]!.employerHouseholdId!;
+    const { body } = await get<HouseholdDetail>(`${CITY}/households/${employerId}`);
+    expect(body.staff.map((person) => person.id)).toEqual(servants.filter((person) => person.employerHouseholdId === employerId).map((person) => person.id));
+    expect(body.staff.every((person) => person.workplaceId === body.dwelling.id)).toBe(true);
+    expect(body.dwelling.kind).toBe('both');
+    const nobody = badanos.households.find((household) => !servants.some((person) => person.employerHouseholdId === household.id))!;
+    expect((await get<HouseholdDetail>(`${CITY}/households/${nobody.id}`)).body.staff).toEqual([]);
+  });
+
   it('serves a workplace with the people who work there', async () => {
-    const workplace = badanos.buildings.find((building) => building.kind === 'both')!;
+    const workplace = badanos.buildings.find((building) => building.kind === 'both' && building.type === 'bakery')!;
     const { status, body } = await get<BuildingDetail>(`${CITY}/buildings/${workplace.id}`);
     expect(status).toBe(200);
     expect(body.building).toEqual(workplace);

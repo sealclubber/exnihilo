@@ -2,7 +2,7 @@
  * Turns a generated city's records into the text and numbers the inspector
  * shows. Pure, so it can be tested without a browser.
  */
-import type { Building, CitySummary, District, PackLabels, Person } from '@worldsim/core';
+import type { Building, CitySummary, District, HouseholdDetail, HouseholdListItem, PackLabels, Person } from '@worldsim/core';
 
 export interface Bar {
   /** The ID to filter by when the bar is clicked, if it can be. */
@@ -28,6 +28,45 @@ export const formatNumber = (value: number) => value.toLocaleString('en-US');
 
 export function occupationName(id: string | undefined, labels: PackLabels): string {
   return id === undefined ? '' : (labels.occupations[id]?.name ?? id);
+}
+
+/** A worker's occupation as shown: its name, in the pack's apprentice label for an apprentice. */
+export function workName(worker: Pick<Person, 'occupationId' | 'apprentice'>, labels: PackLabels): string {
+  const name = occupationName(worker.occupationId, labels);
+  if (!worker.apprentice || labels.apprenticeLabel === undefined) return name;
+  // The occupation sits mid-phrase in a label such as "Apprentice {occupation}".
+  const startsLabel = labels.apprenticeLabel.startsWith('{occupation}');
+  return labels.apprenticeLabel.replace('{occupation}', startsLabel ? name : name.charAt(0).toLowerCase() + name.slice(1));
+}
+
+function listOf(names: string[]): string {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+/** A person's family ties in words, such as "Partner of Ada; parent of Bo and Cy". */
+export function describeKin(person: Person, household: Person[]): string {
+  const given = (id: string) => household.find((member) => member.id === id)?.givenName ?? id;
+  const ties: string[] = [];
+  if (person.partnerId !== undefined) ties.push(`partner of ${given(person.partnerId)}`);
+  if (person.parentIds.length > 0) ties.push(`child of ${listOf(person.parentIds.map(given))}`);
+  if (person.childIds.length > 0) ties.push(`parent of ${listOf(person.childIds.map(given))}`);
+  const text = ties.join('; ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** The member a household row shows, as "Name, occupation", with the role when it is not the head. */
+export function describeRowMember(member: HouseholdListItem['member'], labels: PackLabels): string {
+  const who = member.role === 'head' ? member.name : `${member.name} (${ROLES[member.role].toLowerCase()})`;
+  return member.occupationId === undefined ? who : `${who}, ${workName(member, labels).toLowerCase()}`;
+}
+
+/** What a member's workplace is called: its building type, or the home of the household that employs them. */
+export function workplaceText(person: Person, detail: Pick<HouseholdDetail, 'workplaces' | 'dwelling'>, labels: PackLabels): string {
+  if (person.workplaceId === undefined) return '';
+  const workplace = detail.workplaces[person.workplaceId];
+  if (workplace?.employer) return `Home of the ${workplace.employer.familyName} household`;
+  const name = buildingTypeName(workplace?.type ?? person.workplaceId, labels);
+  return person.workplaceId === detail.dwelling.id ? `${name} (home)` : name;
 }
 
 export function buildingTypeName(type: string, labels: PackLabels): string {
@@ -138,7 +177,7 @@ export interface MemberText {
   age: string;
   sex: string;
   role: string;
-  /** The occupation's name, or the workforce state of someone who has none. */
+  /** The occupation as shown, or the workforce state of someone who has none. */
   work: string;
 }
 
@@ -150,7 +189,7 @@ export function describeMember(person: Person, labels: PackLabels): MemberText {
     role: ROLES[person.role],
     work:
       person.occupationId !== undefined
-        ? occupationName(person.occupationId, labels)
+        ? workName(person, labels)
         : person.workforceState === 'keeping-house'
           ? 'Keeping house'
           : 'Not working',

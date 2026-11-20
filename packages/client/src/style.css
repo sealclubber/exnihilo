@@ -490,6 +490,11 @@ main {
   font-weight: 500;
 }
 
+#inspector td small {
+  display: block;
+  color: var(--muted);
+}
+
 #inspector td.number {
   font-variant-numeric: tabular-nums;
 }
