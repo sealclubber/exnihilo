@@ -4,6 +4,7 @@
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import {
   type ApiError,
+  LayoutPathError,
   type ImportReport,
   type SettingPack,
   type SettlementBrief,
@@ -96,6 +97,27 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack):
   city('/districts', (view, query) => view.listDistricts(pageOf(query) as PageRequest));
   city('/households/:record', (view, _query, record) => view.household(record));
   city('/buildings/:record', (view, _query, record) => view.building(record));
+
+  // The town's layout, generated with the city and kept in memory beside it.
+  app.get<{ Params: { id: string } }>('/api/settlements/:id/layout', (request, reply) => {
+    const brief = briefs.get(request.params.id);
+    if (!brief) return send(reply, 404, `no settlement has the ID "${request.params.id}"`);
+    return reply.send(cities.get(brief).layout);
+  });
+  app.get<{ Params: { id: string }; Querystring: Query }>('/api/settlements/:id/layout/path', (request, reply) => {
+    const brief = briefs.get(request.params.id);
+    if (!brief) return send(reply, 404, `no settlement has the ID "${request.params.id}"`);
+    const { from, to } = request.query;
+    if (typeof from !== 'string' || typeof to !== 'string' || from === '' || to === '') {
+      return send(reply, 400, 'a path needs two lots: from and to');
+    }
+    try {
+      return reply.send(cities.get(brief).path(from, to));
+    } catch (error) {
+      if (error instanceof LayoutPathError) return send(reply, 404, `${brief.id}: ${error.message}`);
+      throw error;
+    }
+  });
 
   app.setNotFoundHandler((request, reply) => send(reply, 404, `nothing is served at ${request.method} ${request.url}`));
 

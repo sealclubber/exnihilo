@@ -13,12 +13,17 @@ import {
   type Household,
   type HouseholdDetail,
   type HouseholdListItem,
+  type Layout,
+  type LayoutPath,
   type Page,
+  type PathFinder,
   type Person,
   type SettingPack,
   type SettlementBrief,
   allOccupations,
+  createPathFinder,
   generateCity,
+  generateLayout,
 } from '@worldsim/core';
 
 export const DEFAULT_PAGE_SIZE = 50;
@@ -53,9 +58,15 @@ export class CityView {
   private readonly categoryOf: Map<string, CategoryId>;
   /** The people each household employs, by household ID. */
   private readonly staff = new Map<string, Person[]>();
+  private readonly brief: SettlementBrief;
+  private readonly pack: SettingPack;
+  private madeLayout: Layout | undefined;
+  private pathFinder: PathFinder | undefined;
 
-  constructor(city: City, pack: SettingPack) {
+  constructor(city: City, pack: SettingPack, brief: SettlementBrief) {
     this.city = city;
+    this.brief = brief;
+    this.pack = pack;
     this.people = new Map(city.people.map((person) => [person.id, person]));
     this.households = new Map(city.households.map((household) => [household.id, household]));
     this.buildings = new Map(city.buildings.map((building) => [building.id, building]));
@@ -67,6 +78,17 @@ export class CityView {
       if (list) list.push(person);
       else this.staff.set(person.employerHouseholdId, [person]);
     }
+  }
+
+  /** The town's layout, made the first time it is asked for and kept with the city. */
+  get layout(): Layout {
+    return (this.madeLayout ??= generateLayout(this.city, this.brief, this.pack));
+  }
+
+  /** The shortest walking path between two lots. Throws LayoutPathError for a lot that does not exist. */
+  path(fromLotId: string, toLotId: string): LayoutPath {
+    this.pathFinder ??= createPathFinder(this.layout);
+    return this.pathFinder.path(fromLotId, toLotId);
   }
 
   private districtOfHousehold(household: Household): string {
@@ -223,7 +245,7 @@ export class CityCache {
     if (view) {
       this.kept.delete(brief.id);
     } else {
-      view = new CityView(generateCity(brief, this.pack), this.pack);
+      view = new CityView(generateCity(brief, this.pack), this.pack, brief);
       if (this.kept.size >= CITIES_KEPT) this.kept.delete(this.kept.keys().next().value as string);
     }
     // Re-inserting moves the city to the back of the queue for removal.
