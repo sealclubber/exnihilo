@@ -17,10 +17,12 @@ import {
   type LayoutPath,
   type Page,
   type PathFinder,
+  type SettlementLife,
   type Person,
   type SettingPack,
   type SettlementBrief,
   allOccupations,
+  createLife,
   createPathFinder,
   generateCity,
   generateLayout,
@@ -62,6 +64,7 @@ export class CityView {
   private readonly pack: SettingPack;
   private madeLayout: Layout | undefined;
   private pathFinder: PathFinder | undefined;
+  private livedLife: SettlementLife | undefined;
 
   constructor(city: City, pack: SettingPack, brief: SettlementBrief) {
     this.city = city;
@@ -83,6 +86,31 @@ export class CityView {
   /** The town's layout, made the first time it is asked for and kept with the city. */
   get layout(): Layout {
     return (this.madeLayout ??= generateLayout(this.city, this.brief, this.pack));
+  }
+
+  /** The settlement's daily life: plans and whereabouts, derived on demand and never stored. */
+  get life(): SettlementLife {
+    return (this.livedLife ??= createLife({ city: this.city, layout: this.layout, pack: this.pack }));
+  }
+
+  /** A resident by ID. */
+  person(id: string): Person | undefined {
+    return this.people.get(id);
+  }
+
+  /** The types of some buildings, by ID, for naming them. */
+  buildingTypes(ids: Iterable<string | undefined>): Record<string, string> {
+    const types: Record<string, string> = {};
+    for (const id of ids) {
+      const building = id === undefined ? undefined : this.buildings.get(id);
+      if (building) types[building.id] = building.type;
+    }
+    return types;
+  }
+
+  /** A household's record by ID. */
+  householdRecord(id: string): Household | undefined {
+    return this.households.get(id);
   }
 
   /** The shortest walking path between two lots. Throws LayoutPathError for a lot that does not exist. */

@@ -106,6 +106,20 @@ export class WorldStore {
     return ImportReportSchema.parse(JSON.parse(this.meta('report') as string));
   }
 
+  /** The world clock as last stored, if it ever was. */
+  loadClock(): { gameTime: number; rate: number } | undefined {
+    const text = this.meta('clock');
+    if (text === undefined) return undefined;
+    const stored = JSON.parse(text) as { gameTime?: unknown; rate?: unknown };
+    return typeof stored.gameTime === 'number' && typeof stored.rate === 'number' ? { gameTime: stored.gameTime, rate: stored.rate } : undefined;
+  }
+
+  /** Stores the world clock. It is the only state kept besides the imported world. */
+  saveClock(clock: { gameTime: number; rate: number }): void {
+    this.requireWorld();
+    this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run('clock', JSON.stringify(clock));
+  }
+
   /** Every stored row as text, in a fixed order. Two stores with equal dumps hold identical data. */
   dump(): string {
     const meta = this.db.prepare('SELECT key, value FROM meta ORDER BY key').all();

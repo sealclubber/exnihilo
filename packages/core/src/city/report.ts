@@ -21,6 +21,8 @@ export function packLabels(pack: SettingPack): PackLabels {
       [...pack.landmarks, ...pack.workplaces, ...pack.dwellings].map((type) => [type.id, type.name]),
     ),
     districtKinds: Object.fromEntries(pack.districts.kinds.map((kind) => [kind.id, kind.name])),
+    calendar: pack.calendar,
+    visits: Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit.name])),
   };
 }
 

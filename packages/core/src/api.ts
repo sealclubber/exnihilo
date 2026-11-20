@@ -2,6 +2,8 @@
  * Shapes of the server's HTTP responses, shared so the client can type them.
  */
 import type { Building, District, Household, Person } from './city/records.ts';
+import type { DayPlan, Occupant, Trip, Whereabouts } from './life/records.ts';
+import type { Calendar } from './pack/schema.ts';
 import type { CategoryId } from './pack/schema.ts';
 import type { ImportReport, Point, RouteKind, SizeGroup, WorldInfo } from './schema.ts';
 
@@ -45,6 +47,10 @@ export interface PackLabels {
   occupations: Record<string, { name: string; category: CategoryId }>;
   /** How an apprentice's occupation is shown; {occupation} stands for the occupation's name. */
   apprenticeLabel?: string;
+  /** The week, the year and the daylight, for showing game time. */
+  calendar: Calendar;
+  /** The names of the pack's visits, by ID. */
+  visits: Record<string, string>;
   buildingTypes: Record<string, string>;
   districtKinds: Record<string, string>;
 }
@@ -90,4 +96,53 @@ export interface BuildingDetail {
   district: DistrictRef;
   workers: Person[];
   households: HouseholdListItem[];
+}
+
+/** The world clock as the server reports it. */
+export interface ClockState {
+  /** Game seconds since the start of day 1, at the moment of the report. */
+  gameTime: number;
+  /** Game seconds per real second. */
+  rate: number;
+  running: boolean;
+  /** The rates on offer. */
+  rates: number[];
+}
+
+/** The trips under way at some point in a window of game time. */
+export interface TripsWindow {
+  from: number;
+  to: number;
+  trips: Trip[];
+}
+
+/** A person at a moment: who they are and where. */
+export interface PersonNow {
+  time: number;
+  person: Person;
+  whereabouts: Whereabouts;
+  /** The type of each building the answer names, by building ID. */
+  buildings: Record<string, string>;
+}
+
+/** A person's plan for a day. */
+export interface PersonPlan {
+  person: Person;
+  plan: DayPlan;
+  /** The type of each building the plan names, by building ID. */
+  buildings: Record<string, string>;
+}
+
+/** Who is inside a building at a moment. */
+export interface OccupantsNow {
+  time: number;
+  buildingId: string;
+  occupants: Array<Occupant & { person: Person }>;
+}
+
+/** What each member of a household is doing at a moment. */
+export interface HouseholdNow {
+  time: number;
+  householdId: string;
+  members: Whereabouts[];
 }
