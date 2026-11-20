@@ -4,6 +4,8 @@ import type {
   District,
   HouseholdDetail,
   HouseholdListItem,
+  Layout,
+  LayoutPath,
   MapGeometry,
   PackLabels,
   Page,
@@ -53,5 +55,8 @@ export const fetchHouseholds = (id: string, filters: HouseholdFilters, offset: n
   get<Page<HouseholdListItem>>(`${settlement(id)}/city/households?${listQuery(filters, offset, limit)}`);
 export const fetchHousehold = (id: string, householdId: string) =>
   get<HouseholdDetail>(`${settlement(id)}/city/households/${encodeURIComponent(householdId)}`);
+export const fetchLayout = (id: string) => get<Layout>(`${settlement(id)}/layout`);
+export const fetchPath = (id: string, fromLotId: string, toLotId: string) =>
+  get<LayoutPath>(`${settlement(id)}/layout/path?from=${encodeURIComponent(fromLotId)}&to=${encodeURIComponent(toLotId)}`);
 export const fetchBuilding = (id: string, buildingId: string) =>
   get<BuildingDetail>(`${settlement(id)}/city/buildings/${encodeURIComponent(buildingId)}`);

@@ -296,7 +296,7 @@ main {
 #inspector .columns {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(260px, 340px) minmax(260px, 1fr) minmax(320px, 1.4fr);
+  grid-template-columns: minmax(220px, 280px) minmax(360px, 1.5fr) minmax(220px, 300px) minmax(300px, 1fr);
   min-height: 0;
 }
 
@@ -514,4 +514,70 @@ main {
     border-right: none;
     border-bottom: 1px solid var(--line);
   }
+}
+
+/* ---- Town map ---- */
+
+#inspector .town-map {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  background: #f4f1e8;
+  min-height: 320px;
+}
+
+#inspector .town-map canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+#inspector .map-note {
+  position: absolute;
+  inset: 45% 0 auto;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+#inspector .map-tools {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+#inspector .map-tools button {
+  pointer-events: auto;
+  min-width: 32px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+
+#inspector .map-tools button.active {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  color: #fff;
+}
+
+#inspector .path-status {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+#inspector .path-status:empty {
+  display: none;
 }

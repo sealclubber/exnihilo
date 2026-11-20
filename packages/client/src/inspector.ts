@@ -3,7 +3,7 @@
  * list of households, and views of one household or one building.
  */
 import type { BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, PackLabels } from '@worldsim/core';
-import { fetchBuilding, fetchCitySummary, fetchDistricts, fetchHousehold, fetchHouseholds, fetchPackLabels } from './api.ts';
+import { fetchBuilding, fetchCitySummary, fetchDistricts, fetchHousehold, fetchHouseholds, fetchLayout, fetchPackLabels, fetchPath } from './api.ts';
 import {
   type BarSection,
   type HouseholdFilters,
@@ -20,6 +20,7 @@ import {
   workplaceText,
 } from './city-format.ts';
 import { h, link } from './dom.ts';
+import { createTownMap } from './town-map.ts';
 
 const PAGE = 100;
 const OCCUPATIONS_SHOWN = 12;
@@ -48,6 +49,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const listBox = h('ul', { class: 'households' });
   const more = h('button', { class: 'more', attrs: { type: 'button' } }, 'Show more');
   const detailBox = h('div', { class: 'column detail' });
+  const mapBox = h('div', { class: 'column town-map' });
 
   root.replaceChildren(
     h('header', {}, h('button', { class: 'back', onClick: onClose, attrs: { type: 'button' } }, '← Map'), h('div', {}, title, subtitle)),
@@ -55,6 +57,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       'div',
       { class: 'columns' },
       summaryBox,
+      mapBox,
       h('div', { class: 'column list' }, listHeading, search, chipBox, listBox, more),
       detailBox,
     ),
@@ -74,6 +77,11 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   let detailRequest = 0;
 
   const hint = (text: string, kind = 'hint') => h('p', { class: kind }, text);
+  // Clicking a lot shows its building; choosing a household or building shows its lot.
+  const townMap = createTownMap(mapBox, {
+    onLotClick: (lot) => void showBuilding(lot.buildingId),
+    findPath: (from, to) => fetchPath(settlementId, from, to),
+  });
   const districtName = (id: string) => districts.find((district) => district.id === id)?.name ?? id;
   const tierName = (id: string) => labels.statusTiers.find((tier) => tier.id === id)?.name ?? id;
 
@@ -274,11 +282,17 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   async function showHousehold(id: string): Promise<void> {
     selected = id;
     renderList();
-    await showDetail(() => fetchHousehold(settlementId, id), renderHousehold);
+    await showDetail(() => fetchHousehold(settlementId, id), (detail) => {
+      townMap.highlight(detail.dwelling.id);
+      renderHousehold(detail);
+    });
   }
 
   async function showBuilding(id: string): Promise<void> {
-    await showDetail(() => fetchBuilding(settlementId, id), renderBuilding);
+    await showDetail(() => fetchBuilding(settlementId, id), (detail) => {
+      townMap.highlight(detail.building.id);
+      renderBuilding(detail);
+    });
   }
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -310,7 +324,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       listHeading.textContent = 'Households';
       chipBox.replaceChildren();
       more.hidden = true;
-      detailBox.replaceChildren(hint('Choose a household to see its members, their work and their home.'));
+      detailBox.replaceChildren(hint('Choose a household, or click a lot on the map, to see who lives and works there.'));
+      townMap.message('');
       try {
         const [packLabels, citySummary, districtPage] = await Promise.all([fetchPackLabels(), fetchCitySummary(id), fetchDistricts(id)]);
         if (settlementId !== id) return;
@@ -320,6 +335,12 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         title.textContent = summary.settlementName;
         subtitle.textContent = `${formatNumber(summary.population)} residents in ${formatNumber(summary.households)} households`;
         renderSummary();
+        // The map loads beside the lists, not before them.
+        townMap.message('Laying out the town…');
+        void fetchLayout(id).then(
+          (layout) => settlementId === id && townMap.show(layout, districts),
+          (error: Error) => settlementId === id && townMap.message(error.message),
+        );
         await loadHouseholds(false);
       } catch (error) {
         if (settlementId !== id) return;
