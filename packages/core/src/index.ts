@@ -20,3 +20,8 @@ export { checkCity, WORKFORCE_SHARE_LIMITS } from './city/invariants.ts';
 export { nameBaseNames, type NameGenerator, type NameGeneratorFactory } from './city/names.ts';
 export { createRng, stepRng, apportion, shuffle, weightedPicker, type Rng } from './city/random.ts';
 export { describeCity, packLabels } from './city/report.ts';
+export * from './layout/records.ts';
+export * as geometry from './layout/geometry.ts';
+export { checkLayout, distanceToWater, BEARING_TOLERANCE } from './layout/invariants.ts';
+export { generateLayout, LayoutGenerationError, GRID_GENERATOR, type LayoutOptions } from './layout/grid.ts';
+export { createPathFinder, shortestPath, LayoutPathError, type PathFinder } from './layout/path.ts';

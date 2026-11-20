@@ -109,6 +109,35 @@ describe('the medieval pack', () => {
     expect(allOccupations(pack).filter((occupation) => occupation.employer).map((occupation) => occupation.id)).toEqual(['servant']);
   });
 
+  it('holds every layout number, and places every district kind', () => {
+    const { layout } = pack;
+    expect(Object.keys(layout.streetWidths)).toEqual(['arterial', 'street', 'lane', 'bridge']);
+    expect(layout.block).toEqual({ length: 80, depth: 44 });
+    expect(layout.defaultLot).toEqual({ frontage: 8, depth: 20 });
+    expect(layout.riverWidth).toBeGreaterThan(0);
+    expect(layout.density.min).toBeLessThan(layout.density.max);
+    const types = new Set([...pack.workplaces, ...pack.dwellings, ...pack.landmarks].map((type) => type.id));
+    for (const type of Object.keys(layout.lots)) expect(types.has(type), type).toBe(true);
+    // A dwelling that holds several households has a larger lot than one that holds a single household.
+    const area = (type: string) => layout.lots[type]!.frontage * layout.lots[type]!.depth;
+    for (const shared of pack.dwellings.filter((type) => type.households > 1)) {
+      for (const single of pack.dwellings.filter((type) => type.households === 1 && type.status === shared.status)) {
+        expect(area(shared.id), `${shared.id} against ${single.id}`).toBeGreaterThan(area(single.id));
+      }
+    }
+    expect(Object.fromEntries(pack.districts.kinds.map((kind) => [kind.id, kind.placement]))).toEqual({
+      centre: 'centre',
+      craft: 'middle',
+      common: 'middle',
+      upper: 'middle',
+      lower: 'edge',
+      outskirts: 'edge',
+      harbour: 'waterside',
+      shanty: 'edge',
+    });
+    expect(layout.atExits).toEqual(['gatehouse']);
+  });
+
   it('maps every Lomia culture to human by default', () => {
     expect(pack.cultures.default).toBe('human');
     for (const culture of lomiaWorld().cultures.filter((entry) => !entry.isPlaceholder)) {
@@ -176,6 +205,20 @@ describe('pack validation', () => {
     ['an apprentice label without a place for the occupation', (raw) => (raw.pack.apprenticeLabel = 'Apprentice'), /apprenticeLabel "Apprentice" must contain \{occupation\}/],
     ['apprentices with no label to show them by', (raw) => delete raw.pack.apprenticeLabel, /apprenticeLabel is needed/],
     ['elders who could be younger than a parent may be', (raw) => (raw.species.human.ages.elderGap = { min: 10, max: 30 }), /"human" has an elderGap\.min of 10 below its parentMinAge of 18/],
+    ['a lot size of zero', (raw) => (raw.layout.defaultLot = { frontage: 0, depth: 20 }), /^layout at defaultLot\.frontage/],
+    ['a negative lot depth for a building type', (raw) => (raw.layout.lots.tenement = { frontage: 16, depth: -22 }), /^layout at lots\.tenement\.depth/],
+    ['a street width of zero', (raw) => (raw.layout.streetWidths.lane = 0), /^layout at streetWidths\.lane/],
+    ['a negative street width', (raw) => (raw.layout.streetWidths.arterial = -10), /^layout at streetWidths\.arterial/],
+    ['a river with no width', (raw) => (raw.layout.riverWidth = 0), /^layout at riverWidth/],
+    ['a block with no depth', (raw) => (raw.layout.block.depth = 0), /^layout at block\.depth/],
+    ['density limits the wrong way round', (raw) => (raw.layout.density = { min: 500, max: 100 }), /^layout at density/],
+    ['a lot size for something that is not a building type', (raw) => (raw.layout.lots.lighthouse = { frontage: 10, depth: 10 }), /layout: lots has a size for "lighthouse", which is not a building type/],
+    ['a lot too deep for a block', (raw) => (raw.layout.lots.citadel = { frontage: 80, depth: 60 }), /the lot of "citadel" is 80 by 60, which does not fit in a block of 80 by 44/],
+    ['a default lot too long for a block', (raw) => (raw.layout.defaultLot = { frontage: 90, depth: 20 }), /the default lot is 90 by 20, which does not fit in a block/],
+    ['an exit building type that does not exist', (raw) => (raw.layout.atExits = ['tollbooth']), /layout: atExits lists "tollbooth", which is not a building type/],
+    ['a district kind with no placement', (raw) => delete raw.districts.kinds[1].placement, /^districts at kinds\.1\.placement/],
+    ['a district placement the layout does not know', (raw) => (raw.districts.kinds[1].placement = 'suburb'), /^districts at kinds\.1\.placement/],
+    ['a missing layout file', (raw) => delete raw.layout, /^layout: /],
     ['a culture mapped to a missing species', (raw) => (raw.cultures.cultures.Norse = 'elf'), /cultures: "Norse" names the species "elf"/],
     ['a default species that is missing', (raw) => (raw.cultures.default = 'elf'), /the default names the species "elf"/],
     ['a multiplier for an unknown occupation', (raw) => (raw.species.dwarf.multipliers.occupations.wizard = 2), /"dwarf" has a multiplier for the occupation "wizard"/],

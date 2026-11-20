@@ -2,7 +2,7 @@
  * The whole-world run: every settlement of Lomia, generated and checked.
  */
 import { describe, expect, it } from 'vitest';
-import { WORKFORCE_SHARE_LIMITS, checkCity, generateCity } from '../src/index.ts';
+import { WORKFORCE_SHARE_LIMITS, checkCity, checkLayout, createPathFinder, generateCity, generateLayout } from '../src/index.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
 
 describe('every settlement of Lomia', () => {
@@ -33,5 +33,42 @@ describe('every settlement of Lomia', () => {
 
     expect(failures.slice(0, 10)).toEqual([]);
     expect(people).toBe(2_935_089);
+  });
+
+  it('lays out with every layout invariant holding, and a path between lots everywhere', { timeout: 180_000 }, () => {
+    const pack = medievalPack();
+    const { settlements } = lomiaWorld();
+    let lots = 0;
+    let slowest = { seconds: 0, id: '' };
+    let layoutSeconds = 0;
+    const failures: string[] = [];
+    for (const brief of settlements) {
+      try {
+        const city = generateCity(brief, pack);
+        const started = performance.now();
+        const layout = generateLayout(city, brief, pack);
+        const seconds = (performance.now() - started) / 1000;
+        layoutSeconds += seconds;
+        if (seconds > slowest.seconds) slowest = { seconds, id: brief.id };
+        lots += layout.lots.length;
+        if (layout.lots.length !== city.buildings.length) failures.push(`${brief.id}: ${layout.lots.length} lots for ${city.buildings.length} buildings`);
+        // The generator checks itself; the rules are run again here so the test does not rely on that.
+        failures.push(...checkLayout(layout, city, brief, pack).map((problem) => `${brief.id}: ${problem}`));
+        // A path exists from the first lot to a spread of others, the last among them.
+        const finder = createPathFinder(layout);
+        const step = Math.max(1, Math.floor(layout.lots.length / 12));
+        for (let at = layout.lots.length - 1; at >= 0; at -= step) {
+          const path = finder.path(layout.lots[0]!.id, layout.lots[at]!.id);
+          if (!(path.length >= 0) || path.segmentIds.length === 0) failures.push(`${brief.id}: no path to ${layout.lots[at]!.id}`);
+        }
+      } catch (error) {
+        failures.push((error as Error).message);
+      }
+    }
+    console.log(
+      `Laid out ${settlements.length} settlements, ${lots.toLocaleString('en-US')} lots, in ${layoutSeconds.toFixed(1)} s; the slowest was ${slowest.id} at ${slowest.seconds.toFixed(2)} s`,
+    );
+    expect(failures.slice(0, 10)).toEqual([]);
+    expect(slowest.seconds).toBeLessThan(5);
   });
 });
