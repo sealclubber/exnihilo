@@ -44,7 +44,7 @@ read. Importing again replaces the stored world. To store it elsewhere, add
 npm run server
 ```
 
-The API listens on port 3000 on every network interface. Set `PORT`, `HOST`
+The API listens on port 3001 on every network interface. Set `PORT`, `HOST`
 or `WORLDSIM_DB` to change that.
 
 | Request | Returns |
@@ -66,11 +66,11 @@ Then open `http://<that machine>:5173` in a browser, which may be on another
 machine. Drag to pan, scroll to zoom, and click a settlement to see its brief.
 Badanos is at `http://<that machine>:5173/#settlement-641`.
 
-The viewer looks for the API on port 3000 of the host it was loaded from. If
+The viewer looks for the API on port 3001 of the host it was loaded from. If
 the server is somewhere else, say where when starting the viewer:
 
 ```sh
-VITE_API_URL=http://192.168.1.20:3000 npm run client
+VITE_API_URL=http://192.168.1.20:3001 npm run client
 ```
 
 The viewer's development server answers requests made to `localhost` or an IP

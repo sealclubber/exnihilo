@@ -2,11 +2,11 @@ import type { MapGeometry, SettlementBrief, WorldSummary } from '@worldsim/core'
 
 /**
  * Where the server is. Set VITE_API_URL to override; by default the API is
- * expected on port 3000 of the machine this page was loaded from.
+ * expected on port 3001 of the machine this page was loaded from.
  */
 export const API_URL: string =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ||
-  `${location.protocol}//${location.hostname}:3000`;
+  `${location.protocol}//${location.hostname}:3001`;
 
 async function get<T>(path: string): Promise<T> {
   let response: Response;
