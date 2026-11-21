@@ -73,6 +73,11 @@ human:
     # work before sleep.
     minutesBeforeLeaving: 45
     minutesBeforeBed: 60
+    # How someone who is outside moves about the open ground of the lot they
+    # are on: they pause for between min and max minutes, walk to another spot
+    # at `pace` metres per second, and pause again. A pace of 0 means standing
+    # still. Placeholders.
+    outside: {pace: 0.5, pauseMinutes: {min: 2, max: 10}}
 
 # A test species. No culture in the default mapping uses it.
 dwarf:
@@ -122,3 +127,4 @@ dwarf:
     variation: {personalMinutes: 10, dailyMinutes: 5}
     minutesBeforeLeaving: 45
     minutesBeforeBed: 60
+    outside: {pace: 0.4, pauseMinutes: {min: 2, max: 10}}

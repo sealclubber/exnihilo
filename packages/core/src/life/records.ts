@@ -16,17 +16,37 @@ const gameTime = z.number();
 /**
  * Raised whenever the plans for the same inputs would change. Version 1 was
  * the first daily life; version 2 added opening hours, occupations split
- * across shifts, and stays out of doors.
+ * across shifts, and stays out of doors; version 3 has people who are outside
+ * move about the lot's open ground.
  */
-export const LIFE_VERSION = 2;
+export const LIFE_VERSION = 3;
 
-/** Where a stay out of doors is spent: present, with a point, exactly when the stay is outside. */
+/**
+ * Moving about outside: the points a person is at, on the open ground of a
+ * lot, and the game time at which they are at each. Between two points they
+ * move in a straight line; where two times share a point, they pause.
+ */
+export const WanderSchema = z
+  .strictObject({
+    times: z.array(gameTime).min(2),
+    points: z.array(PointSchema).min(2),
+  })
+  .refine((value) => value.times.length === value.points.length, 'a wander has one time for each point')
+  .refine((value) => value.times.every((time, at) => at === 0 || time >= (value.times[at - 1] as number)), 'a wander\'s times never go back');
+export type Wander = z.infer<typeof WanderSchema>;
+
+/** Where a stay out of doors is spent: present, with a wander that covers the stay, exactly when the stay is outside. */
 const outdoors = {
   outside: z.literal(true).optional(),
-  /** A point inside the building's lot, the same for the whole stay. */
+  wander: WanderSchema.optional(),
+};
+const outdoorsTogether = (value: { outside?: true | undefined; wander?: unknown }) => (value.outside === true) === (value.wander !== undefined);
+/** Where someone outside is at one moment. */
+const outdoorsNow = {
+  outside: z.literal(true).optional(),
+  /** Where on the lot's open ground they are at this moment. */
   point: PointSchema.optional(),
 };
-const outdoorsTogether = (value: { outside?: true | undefined; point?: unknown }) => (value.outside === true) === (value.point !== undefined);
 
 export const ActivityKindSchema = z.enum(['sleep', 'home', 'work', 'visit', 'travel']);
 export type ActivityKind = z.infer<typeof ActivityKindSchema>;
@@ -34,7 +54,7 @@ export type ActivityKind = z.infer<typeof ActivityKindSchema>;
 /**
  * Being at a building: asleep or awake at home, at work, or on a visit. A
  * stay is inside the building unless it is marked outside, in which case the
- * person is at a point on its lot and can be seen.
+ * person moves about the open ground of its lot and can be seen.
  */
 export const StaySchema = z.strictObject({
   kind: z.enum(['sleep', 'home', 'work', 'visit']),
@@ -75,7 +95,7 @@ export type Travel = z.infer<typeof TravelSchema>;
 
 export const ActivitySchema = z.discriminatedUnion('kind', [StaySchema, TravelSchema]).refine(
   (activity) => activity.kind === 'travel' || outdoorsTogether(activity),
-  'a stay has a point exactly when it is outside',
+  'a stay has a wander exactly when it is outside',
 );
 export type Activity = z.infer<typeof ActivitySchema>;
 
@@ -95,7 +115,7 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
     kind: z.enum(['sleep', 'home', 'work', 'visit']),
     buildingId: BuildingIdSchema,
     visitId: text.optional(),
-    ...outdoors,
+    ...outdoorsNow,
     /** When the current activity began and when it ends. */
     since: gameTime,
     until: gameTime,
@@ -135,13 +155,17 @@ export const TripSchema = z.strictObject({
 });
 export type Trip = z.infer<typeof TripSchema>;
 
-/** One stay out of doors, whole: who, at which building, at what point, and from when until when. */
+/**
+ * One stay out of doors: who, at which building, from when until when, and the
+ * wander that says where they are meanwhile. A query for a window of game time
+ * gives only the part of the wander that falls within it.
+ */
 export const OutsideStaySchema = z.strictObject({
   personId: PersonIdSchema,
   buildingId: BuildingIdSchema,
   kind: z.enum(['work', 'visit']),
   visitId: text.optional(),
-  point: PointSchema,
+  wander: WanderSchema,
   from: gameTime,
   to: gameTime,
 });

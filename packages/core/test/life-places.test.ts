@@ -28,6 +28,7 @@ import {
   isRestDay,
   parsePack,
   placeFlagsOf,
+  positionOnWander,
   shiftLength,
   startOfDay,
 } from '../src/index.ts';
@@ -82,7 +83,7 @@ const atWork = (life: SettlementLife, people: City['people'], time: number) => p
 
 describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
-    expect(LIFE_VERSION).toBe(2);
+    expect(LIFE_VERSION).toBe(3);
     expect(GENERATOR_VERSION).toBe(2);
     expect(LAYOUT_VERSION).toBe(2);
   });
@@ -301,7 +302,7 @@ describe('opening hours', () => {
 });
 
 describe('being outside', () => {
-  it('puts everyone at an open-air building outside, at a point on its lot that does not move', () => {
+  it('puts everyone at an open-air building outside, on its lot', () => {
     const { city, layout, life } = badanos;
     const lots = new Map(layout.lots.map((lot) => [lot.buildingId, lot.polygon]));
     const stall = city.buildings.find((building) => building.type === 'market-stall')!;
@@ -315,9 +316,12 @@ describe('being outside', () => {
       if (where.kind === 'travel') throw new Error('an occupant is walking');
       expect(where.outside).toBe(true);
       expect(geometry.strictlyInside(where.point!, lots.get(stall.id)!)).toBe(true);
-      // The same point for the whole stay.
+      // On the lot for the whole stay, and asked again, in the same place at the same moment.
       for (const moment of [where.since, (where.since + where.until) / 2, where.until - 1]) {
-        expect(life.whereabouts(occupant.personId, moment)).toMatchObject({ point: where.point, buildingId: stall.id });
+        const then = life.whereabouts(occupant.personId, moment);
+        expect(then).toMatchObject({ outside: true, buildingId: stall.id });
+        expect(geometry.pointInPolygon((then as { point: [number, number] }).point, lots.get(stall.id)!)).toBe(true);
+        expect(life.whereabouts(occupant.personId, moment)).toEqual(then);
       }
     }
     // People at the same stall stand in different places, and the same person stands elsewhere another day.
@@ -344,7 +348,7 @@ describe('being outside', () => {
           const openAir = placeFlagsOf(type(stay.buildingId), pack).openAir;
           const byVisit = stay.visitId !== undefined && visits.get(stay.visitId)!.outside === true;
           const expected = (stay.kind === 'work' || stay.kind === 'visit') && (openAir || byVisit);
-          if ((stay.outside === true) !== expected || (stay.point !== undefined) !== expected) throw new Error(`${plan.personId}, day ${day}: ${JSON.stringify(stay)}`);
+          if ((stay.outside === true) !== expected || (stay.wander !== undefined) !== expected) throw new Error(`${plan.personId}, day ${day}: ${JSON.stringify(stay)}`);
           if (expected) seen.outside++;
           else seen.inside++;
           if (expected && openAir) seen.openAir++;
@@ -427,17 +431,33 @@ describe('being outside', () => {
       const expected = city.people
         .map((person) => life.whereabouts(person.id, time))
         .filter((where) => where.kind !== 'travel' && where.outside)
-        .map((where) => `${where.personId}@${(where as { point: number[] }).point.join()}`);
-      const listed = stays.filter((stay) => stay.from <= time && time < stay.to).map((stay) => `${stay.personId}@${stay.point.join()}`);
-      expect(listed.sort()).toEqual(expected.sort());
+        .map((where) => ({ personId: where.personId, point: (where as { point: [number, number] }).point }))
+        .sort((a, b) => (a.personId < b.personId ? -1 : 1));
+      // Each stay's wander, followed to the moment, puts the person where their whereabouts say.
+      const listed = stays
+        .filter((stay) => stay.from <= time && time < stay.to)
+        .map((stay) => ({ personId: stay.personId, point: positionOnWander(stay.wander, time) }))
+        .sort((a, b) => (a.personId < b.personId ? -1 : 1));
+      expect(listed.map((entry) => entry.personId)).toEqual(expected.map((entry) => entry.personId));
+      listed.forEach((entry, index) => expect(geometry.distance(entry.point, expected[index]!.point)).toBeLessThan(1e-9));
       expect(expected.length).toBeGreaterThan(300);
     }
     expect(stays.every((stay) => stay.to > from && stay.from < to)).toBe(true);
+    // Only the part of each wander that falls in the window is given.
+    for (const stay of stays) {
+      expect(stay.wander.times[0]).toBe(Math.max(from, stay.from));
+      expect(stay.wander.times.at(-1)).toBe(Math.min(to, stay.to));
+    }
     const region = { minX: -100, minY: -100, maxX: 100, maxY: 100 };
     const local = life.outsideStays(from, to, region);
     expect(local.length).toBeGreaterThan(0);
     expect(local.length).toBeLessThan(stays.length);
-    const within = (stay: { point: [number, number] }) => stay.point[0] >= region.minX && stay.point[0] <= region.maxX && stay.point[1] >= region.minY && stay.point[1] <= region.maxY;
+    // A stay is in a region when its building's lot is.
+    const boxes = new Map(badanos.layout.lots.map((lot) => [lot.buildingId, geometry.boxOf(lot.polygon)]));
+    const within = (stay: { buildingId: string }) => {
+      const box = boxes.get(stay.buildingId)!;
+      return box.maxX >= region.minX && box.minX <= region.maxX && box.maxY >= region.minY && box.minY <= region.maxY;
+    };
     expect(local.every(within)).toBe(true);
     expect(stays.filter(within)).toHaveLength(local.length);
     expect(life.outsideStays(at(WORK_DAY, 2), at(WORK_DAY, 3))).toEqual([]);
@@ -452,6 +472,13 @@ describe('being outside', () => {
     for (const stay of stays) {
       expect(stay.from).toBeLessThan(at(3, 0));
       expect(stay.to).toBeGreaterThan(at(3, 5));
+      // One wander for the two hours asked about, joined at midnight without a jump.
+      expect(stay.wander.times[0]).toBe(at(2, 23));
+      expect(stay.wander.times.at(-1)).toBe(at(3, 1));
+      for (const moment of [at(3, 0) - 1, at(3, 0), at(3, 0) + 1]) {
+        expect(geometry.distance(positionOnWander(stay.wander, moment), (life.whereabouts(stay.personId, moment) as { point: [number, number] }).point)).toBeLessThan(1e-9);
+      }
+      expect(geometry.distance(positionOnWander(stay.wander, at(3, 0) - 1), positionOnWander(stay.wander, at(3, 0) + 1))).toBeLessThanOrEqual(2 * 0.5 + 1e-9);
     }
     const checker = createPlanChecker({ city, layout, pack: edited((raw) => (raw.workplaces.find((entry: any) => entry.id === 'watch-house').openAir = true)) });
     const problems = night.flatMap((person) => [...checker.check(life.plan(person.id, 2)), ...checker.checkContinuity(life.plan(person.id, 2), life.plan(person.id, 3))]);
@@ -485,15 +512,33 @@ describe('the plan checker', () => {
 
     const indoors = withStay(atStall);
     delete indoors.stay.outside;
-    delete indoors.stay.point;
+    delete indoors.stay.wander;
     expect(checker.check(indoors.plan).join('\n')).toMatch(/is inside at building-641-\d+, but should be outside/);
 
     const astray = withStay(atStall);
-    astray.stay.point = [1e6, 1e6];
-    expect(checker.check(astray.plan).join('\n')).toMatch(/is outside at a point that is not on the lot of building-641-\d+/);
+    astray.stay.wander!.points[2] = [1e6, 1e6];
+    expect(checker.check(astray.plan).join('\n')).toMatch(/wanders to a point that is not on the open ground of building-641-\d+'s lot/);
+
+    const short = withStay(atStall);
+    short.stay.wander!.times[short.stay.wander!.times.length - 1]! -= 60;
+    expect(checker.check(short.plan).join('\n')).toMatch(/has a wander from \d+ to \d+, not covering the stay from \d+ to \d+/);
+
+    // Hurried: a move that took its time is made in a second.
+    const hurried = withStay((stay) => atStall(stay) && stay.wander!.points.length > 6);
+    const { times, points } = hurried.stay.wander!;
+    const leg = points.findIndex((point, index) => index > 0 && geometry.distance(point, points[index - 1]!) > 1.5);
+    times[leg] = times[leg - 1]! + 1;
+    expect(checker.check(hurried.plan).join('\n')).toMatch(/wanders [\d.]+ m in 1 s, faster than the pace of 0\.5 m\/s/);
+
+    // In a yard with a building on it, a point inside the building is not open ground.
+    const inYard = (stay: Stay) => stay.kind === 'work' && type(stay.buildingId) === 'stockyard';
+    const walled = withStay(inYard);
+    const footprint = layout.lots.find((lot) => lot.buildingId === walled.stay.buildingId)!.footprints[0]!;
+    walled.stay.wander!.points[1] = geometry.polygonCentroid(footprint);
+    expect(checker.check(walled.plan).join('\n')).toMatch(/wanders to a point that is not on the open ground|wanders through a footprint/);
 
     const out = withStay((stay) => stay.kind === 'work' && type(stay.buildingId) === 'tannery');
-    Object.assign(out.stay, { outside: true, point: [0, 0] });
+    Object.assign(out.stay, { outside: true, wander: { times: [out.stay.start, out.stay.end], points: [[0, 0], [0, 0]] } });
     expect(checker.check(out.plan).join('\n')).toMatch(/is outside at building-641-\d+, but should be inside/);
 
     // A drink after work, checked against taverns that do not open until 21:00.
@@ -629,7 +674,7 @@ describe('pack behaviour', () => {
     const changed = town('settlement-641', indoors);
     expect(outsideAtStalls(changed)).toBe(0);
     // Nothing else moves: the same people make the same visits at the same times.
-    const strip = (plans: DayPlan[]) => JSON.stringify(plans.map((plan) => plan.activities.map(({ outside: _outside, point: _point, ...rest }: any) => rest)));
+    const strip = (plans: DayPlan[]) => JSON.stringify(plans.map((plan) => plan.activities.map(({ outside: _outside, wander: _wander, ...rest }: any) => rest)));
     expect(strip(changed.life.plansForDay(WORK_DAY))).toBe(strip(badanos.life.plansForDay(WORK_DAY)));
   });
 

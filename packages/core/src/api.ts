@@ -52,6 +52,8 @@ export interface PackLabels {
   calendar: Calendar;
   /** The avatar's walking speed and how far it perceives, for drawing it. */
   avatar: AvatarSettings;
+  /** The colour each role is drawn in: by category ID, `keeping-house`, `not-working`, and any occupation with a colour of its own. */
+  roleColours: Record<string, string>;
   /** The names of the pack's visits, by ID. */
   visits: Record<string, string>;
   buildingTypes: Record<string, string>;
@@ -120,8 +122,17 @@ export interface ClockState {
 export interface TripsWindow {
   from: number;
   to: number;
-  trips: Trip[];
-  outside: OutsideStay[];
+  trips: Array<Trip & Seen>;
+  outside: Array<OutsideStay & Seen>;
+}
+
+/** What a viewer needs to draw and name someone it can see, without asking who they are. */
+export interface Seen {
+  name: string;
+  /** The key of their colour in the pack's role colours. */
+  role: string;
+  occupationId?: string;
+  apprentice?: boolean;
 }
 
 /** A person at a moment: who they are and where. */

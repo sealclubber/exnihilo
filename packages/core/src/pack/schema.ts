@@ -37,6 +37,7 @@ export const PACK_FILES = [
   'shifts',
   'visits',
   'avatar',
+  'display',
 ] as const;
 export type PackFile = (typeof PACK_FILES)[number];
 
@@ -246,6 +247,11 @@ const SpeciesSchema = z.strictObject({
     /** The least time awake at home before leaving for work, and after work before sleep. */
     minutesBeforeLeaving: minutes,
     minutesBeforeBed: minutes,
+    /**
+     * How a person who is outside moves about the open ground of the lot: the pace in metres per second, and
+     * how long they pause between moves. A pace of zero, or leaving this out, means standing still.
+     */
+    outside: z.strictObject({ pace: z.number().nonnegative(), pauseMinutes: z.strictObject({ min: minutes, max: minutes }) }).optional(),
   }),
 });
 export type Species = z.infer<typeof SpeciesSchema>;
@@ -333,6 +339,17 @@ const AvatarSettingsSchema = z.strictObject({
 });
 export type AvatarSettings = z.infer<typeof AvatarSettingsSchema>;
 
+const colour = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be a colour written "#rrggbb"');
+const DisplaySchema = z.strictObject({
+  /** A colour for each workforce category. */
+  categories: z.strictObject(Object.fromEntries(CATEGORY_IDS.map((category) => [category, colour])) as Record<CategoryId, typeof colour>),
+  keepingHouse: colour,
+  notWorking: colour,
+  /** Single occupations with a colour of their own, which takes priority over their category's. */
+  occupations: z.record(id, colour).optional(),
+});
+export type Display = z.infer<typeof DisplaySchema>;
+
 const TimeSchema = z.strictObject({
   /** Clock rates on offer, in game seconds per real second. */
   rates: z.array(z.number().positive()).min(1),
@@ -398,6 +415,7 @@ const RawPackSchema = z.strictObject({
   calendar: CalendarSchema,
   time: TimeSchema,
   avatar: AvatarSettingsSchema,
+  display: DisplaySchema,
   shifts: z.strictObject({ default: id, shifts: z.record(id, ShiftSchema) }),
   visits: VisitsSchema,
 });
@@ -438,6 +456,21 @@ export function parsePack(raw: unknown): SettingPack {
 /** Every occupation a pack defines, including those only one species has. */
 export function allOccupations(pack: SettingPack): Occupation[] {
   return [...pack.occupations, ...Object.values(pack.species).flatMap((species) => species.occupations ?? [])];
+}
+
+/**
+ * The role a person is shown in: their occupation if the pack gives it a colour of its own, otherwise
+ * their occupation's category, otherwise their workforce state. `occupations` is every occupation by ID.
+ */
+export function roleOf(person: { occupationId?: string | undefined; workforceState: WorkforceState }, pack: SettingPack, occupations: ReadonlyMap<string, Occupation>): string {
+  const occupation = person.occupationId === undefined ? undefined : occupations.get(person.occupationId);
+  if (!occupation) return person.workforceState === 'keeping-house' ? 'keeping-house' : 'not-working';
+  return pack.display.occupations?.[occupation.id] !== undefined ? occupation.id : occupation.category;
+}
+
+/** The colour of each role, by the keys `roleOf` gives. */
+export function roleColours(pack: SettingPack): Record<string, string> {
+  return { ...pack.display.categories, 'keeping-house': pack.display.keepingHouse, 'not-working': pack.display.notWorking, ...pack.display.occupations };
 }
 
 /** The destination that means a person's own dwelling, whatever its type. */
@@ -718,6 +751,11 @@ function crossCheck(pack: SettingPack): string[] {
       }
     }
   }
+  const taken = new Set<string>([...CATEGORY_IDS, 'keeping-house', 'not-working']);
+  for (const occupationId of Object.keys(pack.display.occupations ?? {})) {
+    if (!occupations.some((occupation) => occupation.id === occupationId)) problems.push(`display: occupations gives a colour to "${occupationId}", which is not an occupation`);
+    if (taken.has(occupationId)) problems.push(`display: the occupation "${occupationId}" shares its ID with a category or workforce state, so it cannot have a colour of its own`);
+  }
   if (buildingTypeIds.includes(HOME)) {
     problems.push(`a building type is called "${HOME}", which visits use to mean a person's own dwelling: give it another ID`);
   }
@@ -749,6 +787,8 @@ function crossCheck(pack: SettingPack): string[] {
       problems.push(`species: "${speciesId}" needs walking speeds in rising order of upToAge, the last with no upToAge`);
     }
     if (sleepLength(species) === 0) problems.push(`species: "${speciesId}" has sleep hours of no length`);
+    const pause = species.life.outside?.pauseMinutes;
+    if (pause && pause.min > pause.max) problems.push(`species: "${speciesId}" has a shortest pause outside above its longest`);
   }
 
   // Layout: every lot must fit in a block, since a block is where lots go.

@@ -73,6 +73,16 @@ describe('GET /api/settlements/:id/city', () => {
   });
 });
 
+describe('GET /api/settlements/:id/city/building-types', () => {
+  it('serves the type of every building by ID, for naming lots on the map', async () => {
+    const { status, body } = await get<Record<string, string>>(`${CITY}/building-types`);
+    expect(status).toBe(200);
+    expect(Object.keys(body)).toHaveLength(1772);
+    expect(body['building-641-000001']).toMatch(/^[a-z-]+$/);
+    expect(new Set(Object.values(body)).has('tannery')).toBe(true);
+  });
+});
+
 describe('paged records', () => {
   it('serves people fifty at a time by default, in ID order', async () => {
     const { status, body } = await get<Page<Person>>(`${CITY}/people`);

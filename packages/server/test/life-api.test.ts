@@ -20,10 +20,11 @@ import {
   generateCity,
   generateLayout,
   importAfmg,
+  parsePack,
   startOfDay,
 } from '@worldsim/core';
 import { LOMIA_PATH, loadLomia } from '../../core/test/fixture.ts';
-import { MEDIEVAL_PATH, medievalPack } from '../../core/test/pack.ts';
+import { MEDIEVAL_PATH, medievalPack, rawMedievalPack } from '../../core/test/pack.ts';
 import { MAX_TRIP_WINDOW, buildApp } from '../src/app.ts';
 import { WorldClock } from '../src/clock.ts';
 import { describeSettlementDay } from '../src/day-command.ts';
@@ -64,6 +65,30 @@ describe('GET /api/pack', () => {
     expect(body.calendar).toMatchObject({ sunrise: 6 * 3600, sunset: 19 * 3600 });
     expect(body.visits).toMatchObject({ market: 'Going to market', tavern: 'A drink after work', worship: 'Worship' });
   });
+
+  it('serves the colour of each role, from the pack', async () => {
+    const { body } = await get<PackLabels>('/api/pack');
+    expect(body.roleColours).toEqual({ ...pack.display.categories, 'keeping-house': pack.display.keepingHouse, 'not-working': pack.display.notWorking });
+    expect(body.roleColours.military).toBe('#c62828');
+    expect(new Set(Object.values(body.roleColours)).size).toBe(9);
+  });
+
+  it('gives an occupation with a colour of its own a role of its own', async () => {
+    const raw = rawMedievalPack();
+    raw.display.occupations = { watchman: '#101010' };
+    const own = parsePack(raw);
+    const other = buildApp(world.world, world.report, own, { clock: new WorldClock({ now: () => 0, rates: own.time.rates, defaultRate: 1 }) });
+    await other.ready();
+    const labels = (await other.inject({ method: 'GET', url: '/api/pack' })).json() as PackLabels;
+    expect(labels.roleColours.watchman).toBe('#101010');
+    const window = (await other.inject({ method: 'GET', url: `${LIFE}/trips?from=${at(2, 5, 30)}&to=${at(2, 6, 30)}` })).json() as TripsWindow;
+    const watch = window.trips.filter((trip) => trip.occupationId === 'watchman');
+    expect(watch.length).toBeGreaterThan(10);
+    expect(new Set(watch.map((trip) => trip.role))).toEqual(new Set(['watchman']));
+    // A sergeant keeps the category's colour.
+    expect(window.trips.find((trip) => trip.occupationId === 'watch-sergeant')?.role ?? 'military').toBe('military');
+    await other.close();
+  });
 });
 
 describe('trips in a window', () => {
@@ -76,7 +101,19 @@ describe('trips in a window', () => {
     const trips = expected.trips(from, to);
     expect(body.trips).toHaveLength(trips.length);
     expect(body.trips.length).toBeGreaterThan(500);
-    for (const trip of body.trips.slice(0, 100)) expect(TripSchema.safeParse(trip).success).toBe(true);
+    // Each trip is a trip, with who is making it: their name and the role that colours them.
+    const people = new Map(city.people.map((person) => [person.id, person]));
+    for (const { name, role, occupationId, apprentice, ...trip } of body.trips.slice(0, 200)) {
+      expect(TripSchema.safeParse(trip).success).toBe(true);
+      const person = people.get(trip.personId)!;
+      expect(name).toBe(`${person.givenName} ${person.familyName}`);
+      expect(occupationId).toBe(person.occupationId);
+      expect(apprentice ?? false).toBe(person.apprentice ?? false);
+      expect(role).toBe(person.occupationId ? pack.occupations.find((entry) => entry.id === person.occupationId)!.category : person.workforceState);
+    }
+    const soldiers = body.trips.filter((trip) => trip.occupationId !== undefined && pack.occupations.find((entry) => entry.id === trip.occupationId)?.category === 'military');
+    expect(soldiers.length).toBeGreaterThan(0);
+    expect(new Set(soldiers.map((trip) => trip.role))).toEqual(new Set(['military']));
     expect(body.trips.map((trip) => [trip.personId, trip.departAt, trip.arriveAt])).toEqual(trips.map((trip) => [trip.personId, trip.departAt, trip.arriveAt]));
     const sent = body.trips[0]!;
     const full = trips[0]!;
@@ -94,11 +131,20 @@ describe('trips in a window', () => {
     const stays = expected.outsideStays(from, to);
     expect(body.outside.length).toBeGreaterThan(900);
     expect(body.outside.map((stay) => [stay.personId, stay.buildingId, stay.from, stay.to])).toEqual(stays.map((stay) => [stay.personId, stay.buildingId, stay.from, stay.to]));
-    for (const stay of body.outside.slice(0, 100)) expect(OutsideStaySchema.safeParse(stay).success).toBe(true);
-    // Who, where, from when, until when: a point to a tenth of a metre, and no path.
+    for (const { name, role, occupationId: _occupation, apprentice: _apprentice, ...stay } of body.outside.slice(0, 100)) {
+      expect(OutsideStaySchema.safeParse(stay).success).toBe(true);
+      expect(name.length).toBeGreaterThan(2);
+      expect(role in pack.display.categories || role === 'keeping-house' || role === 'not-working').toBe(true);
+    }
+    // The wander, not positions: the points and times of the window, to the nearest centimetre.
     const sent = body.outside[0]!;
-    expect(sent.point).toEqual(stays[0]!.point.map((value) => Math.round(value * 10) / 10));
-    expect(Object.keys(sent).sort()).toEqual(['buildingId', 'from', 'kind', 'personId', 'point', 'to']);
+    expect(sent.wander.times).toEqual(stays[0]!.wander.times);
+    expect(sent.wander.times[0]).toBe(Math.max(from, sent.from));
+    expect(sent.wander.times.at(-1)).toBe(Math.min(to, sent.to));
+    expect(sent.wander.points).toEqual(stays[0]!.wander.points.map((point) => point.map((value) => Math.round(value * 100) / 100)));
+    expect(Object.keys(sent).sort()).toEqual(['buildingId', 'from', 'kind', 'name', 'occupationId', 'personId', 'role', 'to', 'wander']);
+    // Twenty minutes of someone's day is a handful of points, not their whole day.
+    expect(Math.max(...body.outside.map((stay) => stay.wander.times.length))).toBeLessThan(40);
     // At night nobody is out.
     expect((await get<TripsWindow>(`${LIFE}/trips?from=${at(2, 2)}&to=${at(2, 2, 20)}`)).body.outside).toEqual([]);
     // A region limits the stays as it does the trips.

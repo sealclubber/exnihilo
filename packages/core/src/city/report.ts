@@ -3,7 +3,7 @@
  * viewer needs to label its records.
  */
 import type { PackLabels } from '../api.ts';
-import { type SettingPack, allOccupations } from '../pack/schema.ts';
+import { type SettingPack, allOccupations, roleColours } from '../pack/schema.ts';
 import type { City } from './records.ts';
 
 /** Display names for everything a city's records refer to by ID. */
@@ -23,6 +23,7 @@ export function packLabels(pack: SettingPack): PackLabels {
     districtKinds: Object.fromEntries(pack.districts.kinds.map((kind) => [kind.id, kind.name])),
     calendar: pack.calendar,
     avatar: pack.avatar,
+    roleColours: roleColours(pack),
     visits: Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit.name])),
   };
 }

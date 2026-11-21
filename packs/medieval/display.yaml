@@ -1,0 +1,24 @@
+# How people are coloured on the town map: by what they do.
+#
+#   categories    one colour for each of the seven workforce categories; a
+#                 worker takes the colour of their occupation's category
+#   keepingHouse  people who keep house
+#   notWorking    people who do not work: children, elders, the unable
+#   occupations   optional: a colour for a single occupation, which then takes
+#                 priority over its category's. For example:
+#                   occupations: {watchman: "#b3261e"}
+#
+# Colours are written "#rrggbb". The military is red so that the watch stands
+# out; the rest are muted and chosen to be told apart. The map's legend lists
+# those in use. All are placeholders.
+categories:
+  food: "#7f9a48"
+  utilities: "#4f86a8"
+  services: "#8d6cab"
+  construction: "#b8862f"
+  military: "#c62828"
+  luxury: "#c2679a"
+  trade: "#2f8f7f"
+keepingHouse: "#6f6a5f"
+notWorking: "#a39c8d"
+occupations: {}

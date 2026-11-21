@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.6.0');
+    expect(pack.pack.version).toBe('0.7.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -276,6 +276,12 @@ describe('pack validation', () => {
     ['a footprint coverage above the whole lot', (raw) => (raw.layout.footprints.coverage = 1.2), /^layout at footprints\.coverage/],
     ['a negative footprint coverage', (raw) => (raw.layout.footprints.types.shack = -0.1), /^layout at footprints\.types\.shack/],
     ['a footprint coverage for a type that does not exist', (raw) => (raw.layout.footprints.types.bazaar = 0.5), /layout: footprints has a coverage for "bazaar", which is not a building type/],
+    ['a negative pace outside', (raw) => (raw.species.human.life.outside.pace = -0.5), /^species at human\.life\.outside\.pace/],
+    ['pauses outside the wrong way round', (raw) => (raw.species.human.life.outside.pauseMinutes = { min: 10, max: 2 }), /species: "human" has a shortest pause outside above its longest/],
+    ['a colour that is not one', (raw) => (raw.display.categories.military = 'red'), /^display at categories\.military: must be a colour written "#rrggbb"/],
+    ['a category with no colour', (raw) => delete raw.display.categories.trade, /^display at categories\.trade/],
+    ['a colour for an occupation that does not exist', (raw) => (raw.display.occupations = { jouster: '#112233' }), /display: occupations gives a colour to "jouster", which is not an occupation/],
+    ['a missing display file', (raw) => delete raw.display, /^display: /],
     ['a time of day that is not one', (raw) => (raw.shifts.shifts.day.start = '8am'), /^shifts at shifts\.day\.start: must be a time of day/],
     ['a visit naming a missing building type', (raw) => raw.visits.visits[0].destinations.push('bazaar'), /visits: "market" names the building type "bazaar", which does not exist/],
     ['a visit with its durations the wrong way round', (raw) => (raw.visits.visits[0].durationMinutes = { min: 60, max: 20 }), /visits: "market" has a shortest duration above its longest/],

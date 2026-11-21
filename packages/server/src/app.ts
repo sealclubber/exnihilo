@@ -256,6 +256,7 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
   city('/households', (view, query) => view.listHouseholds(filtersOf(query), pageOf(query) as PageRequest));
   city('/buildings', (view, query) => view.listBuildings(filtersOf(query), pageOf(query) as PageRequest));
   city('/districts', (view, query) => view.listDistricts(pageOf(query) as PageRequest));
+  city('/building-types', (view) => view.allBuildingTypes);
   city('/households/:record', (view, _query, record) => view.household(record));
   city('/buildings/:record', (view, _query, record) => view.building(record));
 
@@ -313,9 +314,16 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     const [minX, minY, maxX, maxY] = edges as number[];
     const region: Region | undefined = given === 4 ? { minX: minX as number, minY: minY as number, maxX: maxX as number, maxY: maxY as number } : undefined;
     // Coordinates are sent to the nearest tenth of a metre, which is plenty for a dot on a map.
-    const trips = view.life.trips(from, to, region).map((trip) => ({ ...trip, length: round(trip.length), points: trip.points.map(([x, y]): [number, number] => [round(x), round(y)]) }));
-    // Stays, not positions: whoever is out of doors in the window, where, and from when until when.
-    const outside = view.life.outsideStays(from, to, region).map((stay) => ({ ...stay, point: [round(stay.point[0]), round(stay.point[1])] as [number, number] }));
+    // Each comes with the person's name and the role that colours them, so the viewer need not ask who anyone is.
+    const trips = view.life.trips(from, to, region).map((trip) => ({ ...trip, ...view.seen(trip.personId), length: round(trip.length), points: trip.points.map(([x, y]): [number, number] => [round(x), round(y)]) }));
+    // The wander, not positions: whoever is out of doors in the window, and the points and times of their moving about
+    // in it. Points are sent to the nearest centimetre, so that someone beside a wall is not shown inside it.
+    const exact = (value: number) => Math.round(value * 100) / 100;
+    const outside = view.life.outsideStays(from, to, region).map((stay) => ({
+      ...stay,
+      ...view.seen(stay.personId),
+      wander: { times: stay.wander.times, points: stay.wander.points.map(([x, y]): [number, number] => [exact(x), exact(y)]) },
+    }));
     return { from, to, trips, outside };
   });
   life('/summary', (view, query) => {

@@ -18,12 +18,15 @@ import {
   type Page,
   type PathFinder,
   type AvatarTown,
+  type Occupation,
+  type Seen,
   type SettlementLife,
   type Person,
   type SettingPack,
   type SettlementBrief,
   allOccupations,
   avatarTown,
+  roleOf,
   createLife,
   createPathFinder,
   generateCity,
@@ -68,6 +71,9 @@ export class CityView {
   private pathFinder: PathFinder | undefined;
   private livedLife: SettlementLife | undefined;
   private townForAvatar: AvatarTown | undefined;
+  private typeOfBuilding: Record<string, string> | undefined;
+  private readonly seenAs = new Map<string, Seen>();
+  private readonly occupations: Map<string, Occupation>;
 
   constructor(city: City, pack: SettingPack, brief: SettlementBrief) {
     this.city = city;
@@ -77,6 +83,7 @@ export class CityView {
     this.households = new Map(city.households.map((household) => [household.id, household]));
     this.buildings = new Map(city.buildings.map((building) => [building.id, building]));
     this.districts = new Map(city.districts.map((district) => [district.id, district]));
+    this.occupations = new Map(allOccupations(pack).map((occupation) => [occupation.id, occupation]));
     this.categoryOf = new Map(allOccupations(pack).map((occupation) => [occupation.id, occupation.category]));
     for (const person of city.people) {
       if (person.employerHouseholdId === undefined) continue;
@@ -94,6 +101,27 @@ export class CityView {
   /** The settlement's daily life: plans and whereabouts, derived on demand and never stored. */
   get life(): SettlementLife {
     return (this.livedLife ??= createLife({ city: this.city, layout: this.layout, pack: this.pack }));
+  }
+
+  /** What a viewer needs to draw and name a resident it can see: their name, and the role that gives them their colour. */
+  seen(personId: string): Seen {
+    let seen = this.seenAs.get(personId);
+    if (!seen) {
+      const person = this.people.get(personId) as Person;
+      seen = {
+        name: `${person.givenName} ${person.familyName}`,
+        role: roleOf(person, this.pack, this.occupations),
+        ...(person.occupationId !== undefined && { occupationId: person.occupationId }),
+        ...(person.apprentice && { apprentice: true }),
+      };
+      this.seenAs.set(personId, seen);
+    }
+    return seen;
+  }
+
+  /** The type of every building, by ID, for naming lots on the map. */
+  get allBuildingTypes(): Record<string, string> {
+    return (this.typeOfBuilding ??= Object.fromEntries(this.city.buildings.map((building) => [building.id, building.type])));
   }
 
   /** A resident by ID. */

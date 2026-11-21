@@ -3,7 +3,7 @@
  * empty list means the plan is sound.
  */
 import type { City } from '../city/records.ts';
-import { distance, pointInPolygon } from '../layout/geometry.ts';
+import { distance, piecesCross, pointInPolygon, strictlyInside } from '../layout/geometry.ts';
 import type { Layout } from '../layout/records.ts';
 import { type SettingPack, type Species, HOME, placeFlagsOf, shiftLength } from '../pack/schema.ts';
 import { SECONDS_PER_DAY, startOfDay } from './calendar.ts';
@@ -142,11 +142,40 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
         if ((activity.outside === true) !== shouldBeOutside) {
           problem(`activity ${at + 1} is ${activity.outside ? 'outside' : 'inside'} at ${activity.buildingId}, but should be ${shouldBeOutside ? 'outside' : 'inside'}`);
         }
-        // An outside stay has a point inside its building's lot.
-        if ((activity.point !== undefined) !== (activity.outside === true)) problem(`activity ${at + 1} must have a point exactly when it is outside`);
+        // An outside stay has a wander: it covers exactly the stay, keeps to the lot's open ground, and is no faster than the pack's pace.
+        if ((activity.wander !== undefined) !== (activity.outside === true)) problem(`activity ${at + 1} must have a wander exactly when it is outside`);
         const lot = lots.get(activity.buildingId);
-        if (activity.point && lot && !pointInPolygon(activity.point, lot.polygon)) {
-          problem(`activity ${at + 1} is outside at a point that is not on the lot of ${activity.buildingId}`);
+        if (activity.wander && lot) {
+          const { times, points } = activity.wander;
+          const pace = (pack.species[person.species] as Species).life.outside?.pace ?? 0;
+          const onGround = (point: [number, number]) => pointInPolygon(point, lot.polygon) && !lot.footprints.some((footprint) => strictlyInside(point, footprint));
+          if (times.length !== points.length || times.length < 2) problem(`activity ${at + 1} has a wander without a time for each point`);
+          else if (times[0] !== activity.start || times[times.length - 1] !== activity.end) {
+            problem(`activity ${at + 1} has a wander from ${times[0]} to ${times[times.length - 1]}, not covering the stay from ${activity.start} to ${activity.end}`);
+          }
+          for (let leg = 0; leg < points.length; leg++) {
+            const point = points[leg] as [number, number];
+            if (!onGround(point)) {
+              problem(`activity ${at + 1} wanders to a point that is not on the open ground of ${activity.buildingId}'s lot`);
+              break;
+            }
+            if (leg === 0) continue;
+            const before = points[leg - 1] as [number, number];
+            const elapsed = (times[leg] as number) - (times[leg - 1] as number);
+            const moved = distance(before, point);
+            if (elapsed < 0) problem(`activity ${at + 1} has a wander whose times go back`);
+            if (moved > pace * elapsed + CLOSE) {
+              problem(`activity ${at + 1} wanders ${moved.toFixed(2)} m in ${elapsed} s, faster than the pace of ${pace} m/s`);
+              break;
+            }
+            // No leg passes through a footprint or leaves the lot.
+            const middle: [number, number] = [(before[0] + point[0]) / 2, (before[1] + point[1]) / 2];
+            const crosses = [lot.polygon, ...lot.footprints].some((outline) => outline.some((corner, index) => piecesCross(before, point, corner, outline[(index + 1) % outline.length] as [number, number])));
+            if (moved > 0 && (crosses || !onGround(middle))) {
+              problem(`activity ${at + 1} wanders through a footprint or off the lot of ${activity.buildingId}`);
+              break;
+            }
+          }
         }
         if (activity.end === activity.start) problem(`activity ${at + 1} is a stay of no length`);
       });
@@ -164,8 +193,12 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
       if (last.kind === 'travel' && first.kind === 'travel') same = last.departAt === first.departAt && last.toBuildingId === first.toBuildingId;
       else if (last.kind === 'travel') same = first.kind !== 'travel' && last.arriveAt === boundary && last.toBuildingId === first.buildingId;
       else if (first.kind === 'travel') same = first.departAt === boundary && first.fromBuildingId === last.buildingId;
-      // Someone outside either side of midnight is at the same point.
-      else same = last.buildingId === first.buildingId && last.point?.[0] === first.point?.[0] && last.point?.[1] === first.point?.[1];
+      // Someone outside either side of midnight is at the same point: one wander ends where the next begins.
+      else {
+        const leftAt = last.wander?.points[last.wander.points.length - 1];
+        const foundAt = first.wander?.points[0];
+        same = last.buildingId === first.buildingId && leftAt?.[0] === foundAt?.[0] && leftAt?.[1] === foundAt?.[1];
+      }
       return same ? [] : [`${earlier.personId}: day ${earlier.day} ends ${describe(last)} but day ${later.day} starts ${describe(first)}`];
     },
   };

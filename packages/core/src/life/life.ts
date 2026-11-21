@@ -20,7 +20,7 @@
  */
 import type { City, Person } from '../city/records.ts';
 import { createRng } from '../city/random.ts';
-import { distance, pointAlongPolyline, pointWithinPolygon } from '../layout/geometry.ts';
+import { boxOf, distance, pointAlongPolyline } from '../layout/geometry.ts';
 import { createPathFinder } from '../layout/path.ts';
 import type { Layout } from '../layout/records.ts';
 import { type NamedShift, type SettingPack, type Species, type Visit, HOME, placeFlagsOf, shiftLength, sleepLength } from '../pack/schema.ts';
@@ -28,7 +28,8 @@ import type { Point } from '../schema.ts';
 import { deriveSeed } from '../seed.ts';
 import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay, weekdayOf } from './calendar.ts';
 import { createWorkingHours } from './hours.ts';
-import type { Activity, DayPlan, DaySummary, Nearby, Occupant, OpenSpan, OutsideStay, Region, Stay, Travel, Trip, TripPath, Whereabouts } from './records.ts';
+import { type Ground, type WanderHabit, clipWander, groundOf, makeWander, positionOnWander } from './wander.ts';
+import type { Activity, DayPlan, DaySummary, Nearby, Occupant, OpenSpan, OutsideStay, Region, Stay, Travel, Trip, TripPath, Wander, Whereabouts } from './records.ts';
 
 export { dutyCount, restDaysUpTo } from './hours.ts';
 
@@ -90,8 +91,6 @@ export function tripDuration(length: number, speed: number): number {
 }
 
 const DAYS_KEPT = 4;
-/** How many points are tried at random in a lot before one is worked out. */
-const POINT_TRIES = 8;
 /** The nearby query's index sorts a day's walks and outside stays into stretches of this many game seconds. */
 const WALK_SLOT = 300;
 const STAY_SLOT = 3600;
@@ -116,6 +115,16 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     else buildingsOfType.set(building.type, [building.id]);
   }
   const openAir = new Set(city.buildings.filter((building) => placeFlagsOf(building.type, pack).openAir).map((building) => building.id));
+  const lotBoxes = new Map<string, Region>();
+  const lotBox = (buildingId: string): Region => {
+    let box = lotBoxes.get(buildingId);
+    if (!box) {
+      const lot = lotOf.get(buildingId);
+      if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
+      lotBoxes.set(buildingId, (box = boxOf(lot.polygon)));
+    }
+    return box;
+  };
   const entranceOf = (buildingId: string): Point => {
     const lot = lotOf.get(buildingId);
     if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
@@ -236,12 +245,27 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     activities: Activity[];
   }
 
-  /** A point inside a building's lot for one stay: drawn from the person, the building and when the stay begins. */
-  const pointFor = (personId: string, buildingId: string, start: number): Point => {
-    const lot = lotOf.get(buildingId);
-    if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
-    const rng = createRng(deriveSeed(String(seed), 'life-outside', `${personId}:${buildingId}:${start}`));
-    return pointWithinPolygon(lot.polygon, () => rng.next(), POINT_TRIES);
+  /** Each lot's open ground, worked out the first time someone is outside on it. */
+  const grounds = new Map<string, Ground>();
+  const habits = new Map<string, WanderHabit | undefined>(
+    Object.entries(pack.species).map(([speciesId, species]) => {
+      const outside = species.life.outside;
+      return [speciesId, outside && { pace: outside.pace, pause: { min: outside.pauseMinutes.min * 60, max: outside.pauseMinutes.max * 60 } }];
+    }),
+  );
+  /**
+   * How a person moves about a building's lot during one stay outside: drawn from the person, the building and
+   * when the stay begins, by a stream of its own.
+   */
+  const wanderFor = (person: Person, buildingId: string, start: number, end: number): Wander => {
+    let ground = grounds.get(buildingId);
+    if (!ground) {
+      const lot = lotOf.get(buildingId);
+      if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
+      grounds.set(buildingId, (ground = groundOf(lot)));
+    }
+    const rng = createRng(deriveSeed(String(seed), 'life-outside', `${person.id}:${buildingId}:${start}`));
+    return makeWander(ground, rng, start, end, habits.get(person.species));
   };
 
   const personalDay = (index: number, day: number): Activity[] => {
@@ -267,7 +291,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       end,
       buildingId,
       ...(visit && { visitId: visit.id }),
-      ...((openAir.has(buildingId) || visit?.outside === true) && { outside: true as const, point: pointFor(person.id, buildingId, start) }),
+      ...((openAir.has(buildingId) || visit?.outside === true) && end > start && { outside: true as const, wander: wanderFor(person, buildingId, start, end) }),
     });
 
     const blocks: Block[] = [];
@@ -448,7 +472,9 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           // The same thing either side of a seam is one activity.
           previous.end = end;
         } else {
-          activities.push({ ...activity, start, end });
+          // A stay outside that is cut at midnight keeps the part of its wander that falls in the day.
+          const wander = activity.kind !== 'travel' && activity.wander && (start !== activity.start || end !== activity.end) ? { wander: clipWander(activity.wander, start, end) } : undefined;
+          activities.push({ ...activity, start, end, ...wander });
         }
       }
     }
@@ -571,7 +597,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         kind: activity.kind,
         buildingId: activity.buildingId,
         ...(activity.visitId !== undefined && { visitId: activity.visitId }),
-        ...(activity.outside && { outside: true as const, point: activity.point as Point }),
+        ...(activity.outside && { outside: true as const, point: positionOnWander(activity.wander as Wander, time) }),
         since: activity.start,
         until: activity.end,
       };
@@ -614,11 +640,17 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         for (const { personId, activities } of plansForDay(day)) {
           for (const activity of activities) {
             if (activity.kind === 'travel' || !activity.outside || activity.end <= from || activity.start >= to) continue;
-            const point = activity.point as Point;
-            if (region && (point[0] < region.minX || point[0] > region.maxX || point[1] < region.minY || point[1] > region.maxY)) continue;
+            // A stay is on its building's lot, so it is in a region when the lot is.
+            if (region) {
+              const box = lotBox(activity.buildingId);
+              if (box.maxX < region.minX || box.minX > region.maxX || box.maxY < region.minY || box.minY > region.maxY) continue;
+            }
+            const wander = activity.wander as Wander;
             const before = latest.get(personId);
-            if (before && before.to === activity.start && before.buildingId === activity.buildingId && before.point[0] === point[0] && before.point[1] === point[1]) {
+            if (before && before.to === activity.start && before.buildingId === activity.buildingId) {
+              // The other half of a stay already found: the wander goes on from where it stopped.
               before.to = activity.end;
+              before.wander = { times: [...before.wander.times, ...wander.times.slice(1)], points: [...before.wander.points, ...wander.points.slice(1)] };
               continue;
             }
             const stay: OutsideStay = {
@@ -626,7 +658,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
               buildingId: activity.buildingId,
               kind: activity.kind as 'work' | 'visit',
               ...(activity.visitId !== undefined && { visitId: activity.visitId }),
-              point,
+              wander,
               from: activity.start,
               to: activity.end,
             };
@@ -635,6 +667,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           }
         }
       }
+      // Only the part of each wander that falls in the window is given.
+      for (const stay of found) stay.wander = clipWander(stay.wander, from, to);
       return found;
     },
 
@@ -695,7 +729,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       }
       for (const { personId, stay } of seen.stays[Math.floor(sinceMidnight / STAY_SLOT)] ?? []) {
         if (time < stay.start || time >= stay.end) continue;
-        const at = stay.point as Point;
+        const at = positionOnWander(stay.wander as Wander, time);
         const away = distance(point, at);
         if (away > radius) continue;
         found.push({
