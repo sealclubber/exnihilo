@@ -147,6 +147,30 @@ export const OutsideStaySchema = z.strictObject({
 });
 export type OutsideStay = z.infer<typeof OutsideStaySchema>;
 
+/** A resident who can be seen near a point at a moment: walking between two buildings, or outside at one. */
+export const NearbySchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    personId: PersonIdSchema,
+    /** In metres, in a straight line. */
+    distance: z.number().nonnegative(),
+    point: PointSchema,
+    kind: z.literal('walking'),
+    fromBuildingId: BuildingIdSchema,
+    toBuildingId: BuildingIdSchema,
+  }),
+  z.strictObject({
+    personId: PersonIdSchema,
+    distance: z.number().nonnegative(),
+    point: PointSchema,
+    kind: z.literal('outside'),
+    buildingId: BuildingIdSchema,
+    /** What they are there for. */
+    activity: z.enum(['work', 'visit']),
+    visitId: text.optional(),
+  }),
+]);
+export type Nearby = z.infer<typeof NearbySchema>;
+
 /** A stretch of game time during which a building is open. */
 export const OpenSpanSchema = z.strictObject({ from: gameTime, to: gameTime });
 export type OpenSpan = z.infer<typeof OpenSpanSchema>;

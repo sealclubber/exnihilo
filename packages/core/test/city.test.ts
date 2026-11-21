@@ -410,7 +410,7 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
       buildings: badanos.buildings.length,
       districts: badanos.districts.length,
       generatorVersion: GENERATOR_VERSION,
-      pack: { name: 'medieval', version: '0.5.0' },
+      pack: { name: 'medieval', version: '0.6.0' },
       seed: badanosBrief.seed,
     });
     const tiers = Object.values(summary.statusTiers);

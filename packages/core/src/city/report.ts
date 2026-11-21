@@ -22,6 +22,7 @@ export function packLabels(pack: SettingPack): PackLabels {
     ),
     districtKinds: Object.fromEntries(pack.districts.kinds.map((kind) => [kind.id, kind.name])),
     calendar: pack.calendar,
+    avatar: pack.avatar,
     visits: Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit.name])),
   };
 }

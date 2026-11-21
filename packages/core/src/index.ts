@@ -31,3 +31,19 @@ export { createLife, walkingSpeed, tripDuration, dutyCount, restDaysUpTo, LifeEr
 export { createWorkingHours, type WorkingHours } from './life/hours.ts';
 export { createPlanChecker, type PlanChecker } from './life/invariants.ts';
 export { describeDay } from './life/report.ts';
+export * from './avatar/records.ts';
+export {
+  AvatarError,
+  arrivalTime,
+  avatarPosition,
+  avatarTown,
+  leave as leaveBuilding,
+  perceive,
+  settle as settleAvatar,
+  spawn as spawnAvatar,
+  stop as stopAvatar,
+  walkToBuilding,
+  walkToPoint,
+  type AvatarTown,
+  type Perception,
+} from './avatar/avatar.ts';

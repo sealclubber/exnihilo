@@ -36,6 +36,7 @@ export const PACK_FILES = [
   'time',
   'shifts',
   'visits',
+  'avatar',
 ] as const;
 export type PackFile = (typeof PACK_FILES)[number];
 
@@ -319,6 +320,14 @@ const CalendarSchema = z
   .refine((value) => value.sunrise < value.sunset, 'sunrise must be before sunset');
 export type Calendar = z.infer<typeof CalendarSchema>;
 
+const AvatarSettingsSchema = z.strictObject({
+  /** Metres per game second. */
+  walkingSpeed: z.number().positive(),
+  /** How far the avatar perceives residents from a street, in metres. */
+  perceptionRadius: metres,
+});
+export type AvatarSettings = z.infer<typeof AvatarSettingsSchema>;
+
 const TimeSchema = z.strictObject({
   /** Clock rates on offer, in game seconds per real second. */
   rates: z.array(z.number().positive()).min(1),
@@ -383,6 +392,7 @@ const RawPackSchema = z.strictObject({
   layout: LayoutSettingsSchema,
   calendar: CalendarSchema,
   time: TimeSchema,
+  avatar: AvatarSettingsSchema,
   shifts: z.strictObject({ default: id, shifts: z.record(id, ShiftSchema) }),
   visits: VisitsSchema,
 });

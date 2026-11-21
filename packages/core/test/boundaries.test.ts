@@ -73,6 +73,12 @@ describe('package boundaries', () => {
     expect(offenders(client, /import\(\s*['"]@worldsim\/core/)).toEqual([]);
   });
 
+  it('keeps the avatar out of daily life and the layout: residents are untouched by it', () => {
+    const untouched = shipped.filter((path) => /core\/src\/(life|layout)\//.test(path));
+    expect(untouched.length).toBeGreaterThan(8);
+    expect(offenders(untouched, /avatar/i)).toEqual([]);
+  });
+
   it('keeps unseeded randomness out of every package', () => {
     expect(offenders(shipped, /Math\.random|randomUUID|getRandomValues/)).toEqual([]);
   });

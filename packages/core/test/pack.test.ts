@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.5.0');
+    expect(pack.pack.version).toBe('0.6.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -268,6 +268,11 @@ describe('pack validation', () => {
     ['a split naming a shift that is not defined', (raw) => (raw.occupations[0].shift = [{ shift: 'day', share: 0.5 }, { shift: 'dusk', share: 0.5 }]), /occupations: "baker" names the shift "dusk", which shifts does not define/],
     ['a visit naming a weekday the calendar lacks', (raw) => (raw.visits.visits[0].weekdays = ['Marketday', 'Caturday']), /visits: "market" names the weekday "Caturday", which the calendar does not have/],
     ['a building type called home', (raw) => (raw.workplaces[0].id = 'home'), /a building type is called "home"/],
+    ['an avatar walking speed of zero', (raw) => (raw.avatar.walkingSpeed = 0), /^avatar at walkingSpeed/],
+    ['a negative avatar walking speed', (raw) => (raw.avatar.walkingSpeed = -1.4), /^avatar at walkingSpeed/],
+    ['a perception radius of zero', (raw) => (raw.avatar.perceptionRadius = 0), /^avatar at perceptionRadius/],
+    ['a negative perception radius', (raw) => (raw.avatar.perceptionRadius = -30), /^avatar at perceptionRadius/],
+    ['a missing avatar file', (raw) => delete raw.avatar, /^avatar: /],
     ['a time of day that is not one', (raw) => (raw.shifts.shifts.day.start = '8am'), /^shifts at shifts\.day\.start: must be a time of day/],
     ['a visit naming a missing building type', (raw) => raw.visits.visits[0].destinations.push('bazaar'), /visits: "market" names the building type "bazaar", which does not exist/],
     ['a visit with its durations the wrong way round', (raw) => (raw.visits.visits[0].durationMinutes = { min: 60, max: 20 }), /visits: "market" has a shortest duration above its longest/],

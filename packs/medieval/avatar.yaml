@@ -1,0 +1,12 @@
+# The avatar: the user's presence in a town.
+#
+#   walkingSpeed      metres per game second. The avatar moves in game time, so
+#                     it is as fast on screen as the clock's rate makes it, like
+#                     everyone else. An adult human resident walks at 1.35.
+#   perceptionRadius  metres. From a street the avatar perceives residents who
+#                     are walking or out of doors within this distance. Inside a
+#                     building it perceives everyone at that building instead.
+#
+# Both values are placeholders.
+walkingSpeed: 1.4
+perceptionRadius: 30

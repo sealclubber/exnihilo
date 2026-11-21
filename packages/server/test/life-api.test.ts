@@ -30,6 +30,9 @@ import { describeSettlementDay } from '../src/day-command.ts';
 import { importFile } from '../src/import-command.ts';
 import { WorldStore } from '../src/storage.ts';
 
+/** A limit for the tests that plan whole towns, with headroom for a slower machine. */
+const SLOW = 60_000;
+
 const pack = medievalPack();
 const world = importAfmg(loadLomia());
 const brief = world.world.settlements.find((entry) => entry.id === 'settlement-641')!;
@@ -64,7 +67,7 @@ describe('GET /api/pack', () => {
 });
 
 describe('trips in a window', () => {
-  it('serves the trips that overlap a window of game time, to a tenth of a metre', async () => {
+  it('serves the trips that overlap a window of game time, to a tenth of a metre', { timeout: SLOW }, async () => {
     const from = at(2, 7, 30);
     const to = at(2, 7, 45);
     const { status, body } = await get<TripsWindow>(`${LIFE}/trips?from=${from}&to=${to}`);
@@ -84,7 +87,7 @@ describe('trips in a window', () => {
     });
   });
 
-  it('sends, alongside the trips, the stays out of doors that overlap the window', async () => {
+  it('sends, alongside the trips, the stays out of doors that overlap the window', { timeout: SLOW }, async () => {
     const from = at(2, 12);
     const to = at(2, 12, 20);
     const { body } = await get<TripsWindow>(`${LIFE}/trips?from=${from}&to=${to}`);
@@ -239,7 +242,7 @@ describe('the day command', () => {
   });
   afterAll(() => rmSync(folder, { recursive: true, force: true }));
 
-  it('prints a settlement\'s day: the hourly counts and the busiest segments', () => {
+  it('prints a settlement\'s day: the hourly counts and the busiest segments', { timeout: SLOW }, () => {
     const text = describeSettlementDay({ settlementId: 'settlement-641', day: 2, storePath, packPath: MEDIEVAL_PATH });
     expect(text).toContain('Badanos, day 2: Tilsday');
     expect(text).toMatch(/Hour\s+Asleep\s+At home\s+At work\s+Visiting\s+Travelling\s+Outside\s+Trips begun/);

@@ -6,7 +6,7 @@
 import type { Point } from '../schema.ts';
 import { distance, polylineLength, projectOnPolyline, slicePolyline } from './geometry.ts';
 import { Heap } from './heap.ts';
-import type { Layout, LayoutPath } from './records.ts';
+import type { Layout, LayoutPath, StreetPath, StreetPosition } from './records.ts';
 
 export class LayoutPathError extends Error {
   constructor(message: string) {
@@ -18,6 +18,15 @@ export class LayoutPathError extends Error {
 export interface PathFinder {
   /** The shortest walking path between two lots, from entrance point to entrance point. */
   path(fromLotId: string, toLotId: string): LayoutPath;
+  /**
+   * The shortest walking path between any two positions on the street graph. Each is a segment and a
+   * point, which is taken to the nearest point of that segment's line. Both may lie on the same segment.
+   */
+  between(from: StreetPosition, to: StreetPosition): StreetPath;
+  /** Where a lot is on the graph: its entrance. */
+  positionOfLot(lotId: string): StreetPosition;
+  /** The nearest point of the nearest segment to any point of the map. */
+  nearestPosition(point: Point): StreetPosition;
 }
 
 /**
@@ -41,6 +50,10 @@ export function createPathFinder(layout: Layout): PathFinder {
     (ways[from] as Array<{ to: number; segment: number }>).push({ to, segment });
     (ways[to] as Array<{ to: number; segment: number }>).push({ to: from, segment });
   });
+  interface Place {
+    segment: number;
+    along: number;
+  }
   const lots = new Map(layout.lots.map((lot) => [lot.id, lot]));
   /** Where a lot's entrance is: its segment, and how far along it from the segment's first junction. */
   const entrance = (lotId: string) => {
@@ -50,6 +63,12 @@ export function createPathFinder(layout: Layout): PathFinder {
     if (segment === undefined) throw new LayoutPathError(`${lot.id} opens onto ${lot.entrance.segmentId}, which does not exist`);
     const along = projectOnPolyline((layout.segments[segment] as Layout['segments'][number]).points, lot.entrance.point).along;
     return { segment, along, point: lot.entrance.point };
+  };
+  /** Where a street position is: its segment, and how far along it the nearest point of the line is. */
+  const place = (position: StreetPosition): Place => {
+    const segment = segmentIndex.get(position.segmentId);
+    if (segment === undefined) throw new LayoutPathError(`there is no segment with the ID "${position.segmentId}"`);
+    return { segment, along: projectOnPolyline((layout.segments[segment] as Layout['segments'][number]).points, position.point).along };
   };
   const line = (segment: number) => (layout.segments[segment] as Layout['segments'][number]).points;
 
@@ -82,6 +101,68 @@ export function createPathFinder(layout: Layout): PathFinder {
     trees.set(source, tree);
     return tree;
   };
+  /** The shortest way from one place on the graph to another. `what` names the two ends, for the error. */
+  const route = (start: Place, goal: Place, what: () => string): StreetPath => {
+    const startLength = lengths[start.segment] as number;
+    const goalLength = lengths[goal.segment] as number;
+    const result = (segments: number[], walked: number[], length: number, points: Point[]): StreetPath => ({
+      segmentIds: segments.map((segment) => (layout.segments[segment] as Layout['segments'][number]).id),
+      walked,
+      length,
+      // Drop points repeated where one segment ends and the next begins.
+      points: points.filter((point, index) => index === 0 || distance(point, points[index - 1] as Point) > 0),
+    });
+
+    // Along the one segment, when both ends are on it.
+    let bestLength = start.segment === goal.segment ? Math.abs(start.along - goal.along) : Infinity;
+    let best: { leave: number; enter: number } | undefined;
+    // Or out through either end of the first segment, across the graph, and in through either end of the last.
+    const [startFrom, startTo] = ends[start.segment] as [number, number];
+    const [goalFrom, goalTo] = ends[goal.segment] as [number, number];
+    for (const [leave, out] of [[startFrom, start.along], [startTo, startLength - start.along]] as const) {
+      const tree = treeFrom(leave);
+      for (const [enter, into] of [[goalFrom, goal.along], [goalTo, goalLength - goal.along]] as const) {
+        const total = out + (tree.cost[enter] as number) + into;
+        if (total < bestLength) {
+          bestLength = total;
+          best = { leave, enter };
+        }
+      }
+    }
+    if (bestLength === Infinity) {
+      throw new LayoutPathError(`no path joins ${what()}: the street graph is not connected`);
+    }
+    if (!best) {
+      return result([start.segment], [bestLength], bestLength, slicePolyline(line(start.segment), start.along, goal.along));
+    }
+
+    // Walk back from the junction entered to the junction left by, then lay the pieces end to end.
+    const { cameBy } = treeFrom(best.leave);
+    const crossed: number[] = [];
+    let junction = best.enter;
+    while (junction !== best.leave) {
+      const segment = cameBy[junction] as number;
+      crossed.push(segment);
+      const [from, to] = ends[segment] as [number, number];
+      junction = junction === to ? from : to;
+    }
+    crossed.reverse();
+    const outBy = best.leave === startFrom && (startFrom !== startTo || start.along <= startLength - start.along) ? 0 : startLength;
+    const points: Point[] = slicePolyline(line(start.segment), start.along, outBy);
+    for (const segment of crossed) {
+      const [from, to] = ends[segment] as [number, number];
+      points.push(...(junction === from ? line(segment) : [...line(segment)].reverse()));
+      junction = junction === from ? to : from;
+    }
+    const inBy = best.enter === goalFrom && (goalFrom !== goalTo || goal.along <= goalLength - goal.along) ? 0 : goalLength;
+    points.push(...slicePolyline(line(goal.segment), inBy, goal.along));
+    return result(
+      [start.segment, ...crossed, goal.segment],
+      [Math.abs(start.along - outBy), ...crossed.map((segment) => lengths[segment] as number), Math.abs(goal.along - inBy)],
+      bestLength,
+      points,
+    );
+  };
   const found = new Map<string, LayoutPath>();
 
   return {
@@ -89,73 +170,33 @@ export function createPathFinder(layout: Layout): PathFinder {
       const key = `${fromLotId}>${toLotId}`;
       const known = found.get(key);
       if (known) return known;
-      const start = entrance(fromLotId);
-      const goal = entrance(toLotId);
-      const startLength = lengths[start.segment] as number;
-      const goalLength = lengths[goal.segment] as number;
-      const result = (segments: number[], walked: number[], length: number, points: Point[]): LayoutPath => {
-        const path: LayoutPath = {
-          fromLotId,
-          toLotId,
-          segmentIds: segments.map((segment) => (layout.segments[segment] as Layout['segments'][number]).id),
-          walked,
-          length,
-          // Drop points repeated where one segment ends and the next begins.
-          points: points.filter((point, index) => index === 0 || distance(point, points[index - 1] as Point) > 0),
-        };
-        found.set(key, path);
-        return path;
-      };
+      const walk = route(entrance(fromLotId), entrance(toLotId), () => `${fromLotId} and ${toLotId}`);
+      const path: LayoutPath = { fromLotId, toLotId, ...walk };
+      found.set(key, path);
+      return path;
+    },
 
-      // Along the one segment, when both entrances are on it.
-      let bestLength = start.segment === goal.segment ? Math.abs(start.along - goal.along) : Infinity;
-      let best: { leave: number; enter: number } | undefined;
-      // Or out through either end of the first segment, across the graph, and in through either end of the last.
-      const [startFrom, startTo] = ends[start.segment] as [number, number];
-      const [goalFrom, goalTo] = ends[goal.segment] as [number, number];
-      for (const [leave, out] of [[startFrom, start.along], [startTo, startLength - start.along]] as const) {
-        const tree = treeFrom(leave);
-        for (const [enter, into] of [[goalFrom, goal.along], [goalTo, goalLength - goal.along]] as const) {
-          const total = out + (tree.cost[enter] as number) + into;
-          if (total < bestLength) {
-            bestLength = total;
-            best = { leave, enter };
-          }
+    between(from, to) {
+      return route(place(from), place(to), () => `${from.segmentId} and ${to.segmentId}`);
+    },
+
+    positionOfLot(lotId) {
+      const { segment, point } = entrance(lotId);
+      return { segmentId: (layout.segments[segment] as Layout['segments'][number]).id, point };
+    },
+
+    nearestPosition(point) {
+      let best: StreetPosition | undefined;
+      let nearest = Infinity;
+      for (const segment of layout.segments) {
+        const found = projectOnPolyline(segment.points, point);
+        if (found.distance < nearest) {
+          nearest = found.distance;
+          best = { segmentId: segment.id, point: found.point };
         }
       }
-      if (bestLength === Infinity) {
-        throw new LayoutPathError(`no path joins ${fromLotId} and ${toLotId}: the street graph is not connected`);
-      }
-      if (!best) {
-        return result([start.segment], [bestLength], bestLength, slicePolyline(line(start.segment), start.along, goal.along));
-      }
-
-      // Walk back from the junction entered to the junction left by, then lay the pieces end to end.
-      const { cameBy } = treeFrom(best.leave);
-      const crossed: number[] = [];
-      let junction = best.enter;
-      while (junction !== best.leave) {
-        const segment = cameBy[junction] as number;
-        crossed.push(segment);
-        const [from, to] = ends[segment] as [number, number];
-        junction = junction === to ? from : to;
-      }
-      crossed.reverse();
-      const outBy = best.leave === startFrom && (startFrom !== startTo || start.along <= startLength - start.along) ? 0 : startLength;
-      const points: Point[] = slicePolyline(line(start.segment), start.along, outBy);
-      for (const segment of crossed) {
-        const [from, to] = ends[segment] as [number, number];
-        points.push(...(junction === from ? line(segment) : [...line(segment)].reverse()));
-        junction = junction === from ? to : from;
-      }
-      const inBy = best.enter === goalFrom && (goalFrom !== goalTo || goal.along <= goalLength - goal.along) ? 0 : goalLength;
-      points.push(...slicePolyline(line(goal.segment), inBy, goal.along));
-      return result(
-        [start.segment, ...crossed, goal.segment],
-        [Math.abs(start.along - outBy), ...crossed.map((segment) => lengths[segment] as number), Math.abs(goal.along - inBy)],
-        bestLength,
-        points,
-      );
+      if (!best) throw new LayoutPathError('the layout has no segments to stand on');
+      return best;
     },
   };
 }

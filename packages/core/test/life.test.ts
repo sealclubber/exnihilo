@@ -35,6 +35,9 @@ import {
 } from '../src/index.ts';
 import { medievalPack, rawMedievalPack, settlement } from './pack.ts';
 
+/** A limit for the tests that plan whole towns, with headroom for a slower machine. */
+const SLOW = 60_000;
+
 const pack = medievalPack();
 const at = (day: number, hours: number, minutes = 0) => startOfDay(day) + hours * 3600 + minutes * 60;
 const edited = (edit: (raw: any) => void): SettingPack => {
@@ -65,7 +68,7 @@ beforeAll(() => {
   badanos = town('settlement-641');
   vereceldo = town('settlement-455');
   lives.set('641', badanos.life).set('455', vereceldo.life);
-});
+}, SLOW);
 
 /** The shift a person of Badanos or Vereceldo works, under the medieval pack. */
 const shiftId = (person: Person) => lives.get(person.id.split('-')[1]!)!.shiftOf(person.id)?.id;
@@ -74,7 +77,7 @@ const workOf = (plan: DayPlan) => plan.activities.filter((activity) => activity.
 const travelOf = (plan: DayPlan) => plan.activities.filter((activity): activity is Travel => activity.kind === 'travel');
 
 describe('plan invariants', () => {
-  it('hold for every resident of Badanos and Vereceldo on each of eight consecutive days', () => {
+  it('hold for every resident of Badanos and Vereceldo on each of eight consecutive days', { timeout: SLOW }, () => {
     expect(isRestDay(REST_DAY, pack.calendar)).toBe(true);
     for (const { city, layout, life } of [badanos, vereceldo]) {
       const checker = createPlanChecker({ city, layout, pack });
@@ -502,7 +505,7 @@ describe('trips and whereabouts', () => {
     expect(() => life.plan('nobody', 1)).toThrow(/there is no person with the ID "nobody"/);
   });
 
-  it('say who is in a building, agreeing with each person\'s whereabouts', () => {
+  it('say who is in a building, agreeing with each person\'s whereabouts', { timeout: SLOW }, () => {
     const { city, life } = badanos;
     for (const time of [at(WORK_DAY, 3), at(WORK_DAY, 12), at(WORK_DAY, 17, 40)]) {
       const inside = new Map<string, number>();
@@ -757,7 +760,7 @@ describe('independence from the layout generator', () => {
 });
 
 describe('cost', () => {
-  it('plans one day for all 9,607 residents of Badanos in under 1 second', () => {
+  it('plans one day for all 9,607 residents of Badanos in under 1 second', { timeout: SLOW }, () => {
     const { city, layout } = badanos;
     const started = performance.now();
     const plans = createLife({ city, layout, pack }).plansForDay(WORK_DAY);

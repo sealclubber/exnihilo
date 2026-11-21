@@ -141,6 +141,26 @@ export const LayoutSchema = z.strictObject({
 });
 export type Layout = z.infer<typeof LayoutSchema>;
 
+/** A position on the street graph: a segment and a point on its line. */
+export const StreetPositionSchema = z.strictObject({
+  segmentId: SegmentIdSchema,
+  point: PointSchema,
+});
+export type StreetPosition = z.infer<typeof StreetPositionSchema>;
+
+/** A walking path between two positions on the street graph. A lot's position is its entrance. */
+export const StreetPathSchema = z.strictObject({
+  /** Every segment walked, in order. The first and last are usually walked only in part. */
+  segmentIds: z.array(SegmentIdSchema),
+  /** How far is walked on each of those segments, in the same order. These sum to the length. */
+  walked: z.array(z.number().nonnegative()),
+  /** In metres. */
+  length: z.number().nonnegative(),
+  /** The line walked. */
+  points: z.array(PointSchema).min(1),
+});
+export type StreetPath = z.infer<typeof StreetPathSchema>;
+
 /** A walking path between two lots, along the street graph. */
 export const LayoutPathSchema = z.strictObject({
   fromLotId: LotIdSchema,

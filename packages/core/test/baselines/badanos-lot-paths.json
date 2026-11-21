@@ -1,0 +1,5 @@
+{
+  "note": "Fingerprint of 4,000 lot-to-lot paths in Badanos (default seed), taken before the path function was generalised to street positions in phase 5. Path i joins lots[(i*37) % n] and lots[(i*101+13) % n].",
+  "settlement": "settlement-641",
+  "pathHash": "b59b78b4e3375253f959b892a779e92a13393c6341e20dc9e23e53afd1b2de92"
+}

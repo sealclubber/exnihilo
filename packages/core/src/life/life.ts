@@ -28,7 +28,7 @@ import type { Point } from '../schema.ts';
 import { deriveSeed } from '../seed.ts';
 import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay, weekdayOf } from './calendar.ts';
 import { createWorkingHours } from './hours.ts';
-import type { Activity, DayPlan, DaySummary, Occupant, OpenSpan, OutsideStay, Region, Stay, Travel, Trip, TripPath, Whereabouts } from './records.ts';
+import type { Activity, DayPlan, DaySummary, Nearby, Occupant, OpenSpan, OutsideStay, Region, Stay, Travel, Trip, TripPath, Whereabouts } from './records.ts';
 
 export { dutyCount, restDaysUpTo } from './hours.ts';
 
@@ -66,6 +66,11 @@ export interface SettlementLife {
   outsideStays(from: number, to: number, region?: Region): OutsideStay[];
   /** The trips under way at any point in a window of game time, optionally only those that pass through a region. */
   trips(from: number, to: number, region?: Region): Trip[];
+  /**
+   * Every resident who can be seen within a distance of a point at a game time, nearest first: those walking
+   * between two buildings and those outside at one. People inside buildings are not among them.
+   */
+  nearby(point: Point, radius: number, time: number): Nearby[];
   /** A day, hour by hour. */
   daySummary(day: number): DaySummary;
   /** How many of a day's trips use each segment, busiest first. */
@@ -87,6 +92,9 @@ export function tripDuration(length: number, speed: number): number {
 const DAYS_KEPT = 4;
 /** How many points are tried at random in a lot before one is worked out. */
 const POINT_TRIES = 8;
+/** The nearby query's index sorts a day's walks and outside stays into stretches of this many game seconds. */
+const WALK_SLOT = 300;
+const STAY_SLOT = 3600;
 
 export function createLife(inputs: LifeInputs): SettlementLife {
   const { city, layout, pack } = inputs;
@@ -487,6 +495,52 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     return { point: pointAlongPolyline(path.points, along), segmentId: path.segmentIds[segment] as string };
   };
 
+  // ---- Who can be seen, by time of day ------------------------------------------------------
+  // For the nearby query: each day's walks and outside stays, sorted into stretches of the day,
+  // so that a question about one moment looks only at the people who are out around then.
+  interface Seen {
+    walks: Array<Array<{ personId: string; travel: Travel; box: Region }>>;
+    stays: Array<Array<{ personId: string; stay: Stay }>>;
+  }
+  const boxes = new WeakMap<TripPath, Region>();
+  const boxOfPath = (path: TripPath): Region => {
+    let box = boxes.get(path);
+    if (!box) {
+      box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const [x, y] of path.points) {
+        if (x < box.minX) box.minX = x;
+        if (x > box.maxX) box.maxX = x;
+        if (y < box.minY) box.minY = y;
+        if (y > box.maxY) box.maxY = y;
+      }
+      boxes.set(path, box);
+    }
+    return box;
+  };
+  const seenByDay = new Map<number, Seen>();
+  const seenOn = (day: number): Seen => {
+    const known = seenByDay.get(day);
+    if (known) return known;
+    const start = startOfDay(day);
+    const seen: Seen = {
+      walks: Array.from({ length: Math.ceil(SECONDS_PER_DAY / WALK_SLOT) }, () => []),
+      stays: Array.from({ length: Math.ceil(SECONDS_PER_DAY / STAY_SLOT) }, () => []),
+    };
+    const file = <T>(slots: T[][], size: number, from: number, to: number, entry: T) => {
+      // The stretches that a span of time, open at its end, touches.
+      const last = Math.min(slots.length - 1, Math.floor((to - 1 - start) / size));
+      for (let slot = Math.max(0, Math.floor((from - start) / size)); slot <= last; slot++) (slots[slot] as T[]).push(entry);
+    };
+    for (const { personId, activities } of plansForDay(day)) {
+      for (const activity of activities) {
+        if (activity.end <= activity.start) continue;
+        if (activity.kind === 'travel') file(seen.walks, WALK_SLOT, activity.start, activity.end, { personId, travel: activity, box: boxOfPath(activity.path) });
+        else if (activity.outside) file(seen.stays, STAY_SLOT, activity.start, activity.end, { personId, stay: activity });
+      }
+    }
+    return keep(seenByDay, day, seen);
+  };
+
   const daysIn = (from: number, to: number): number[] => {
     const days: number[] = [];
     for (let day = dayOf(from); startOfDay(day) < to || day === dayOf(from); day++) days.push(day);
@@ -623,6 +677,38 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         }
       }
       return found;
+    },
+
+    nearby(point, radius, time) {
+      const day = dayOf(time);
+      const seen = seenOn(day);
+      const sinceMidnight = time - startOfDay(day);
+      const [x, y] = point;
+      const found: Nearby[] = [];
+      for (const { personId, travel: walk, box } of seen.walks[Math.floor(sinceMidnight / WALK_SLOT)] ?? []) {
+        if (time < walk.start || time >= walk.end) continue;
+        // A walk whose whole line is out of reach is not worth placing.
+        if (x < box.minX - radius || x > box.maxX + radius || y < box.minY - radius || y > box.maxY + radius) continue;
+        const at = positionOn(walk, time).point;
+        const away = distance(point, at);
+        if (away <= radius) found.push({ personId, distance: away, point: at, kind: 'walking', fromBuildingId: walk.fromBuildingId, toBuildingId: walk.toBuildingId });
+      }
+      for (const { personId, stay } of seen.stays[Math.floor(sinceMidnight / STAY_SLOT)] ?? []) {
+        if (time < stay.start || time >= stay.end) continue;
+        const at = stay.point as Point;
+        const away = distance(point, at);
+        if (away > radius) continue;
+        found.push({
+          personId,
+          distance: away,
+          point: at,
+          kind: 'outside',
+          buildingId: stay.buildingId,
+          activity: stay.kind as 'work' | 'visit',
+          ...(stay.visitId !== undefined && { visitId: stay.visitId }),
+        });
+      }
+      return found.sort((a, b) => a.distance - b.distance || (a.personId < b.personId ? -1 : 1));
     },
 
     daySummary(day) {

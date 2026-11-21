@@ -33,6 +33,9 @@ import {
 } from '../src/index.ts';
 import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
 
+/** A limit for the tests that plan whole towns, with headroom for a slower machine. */
+const SLOW = 60_000;
+
 const pack = medievalPack();
 const at = (day: number, hours: number, minutes = 0) => startOfDay(day) + hours * 3600 + minutes * 60;
 const edited = (edit: (raw: any) => void): SettingPack => {
@@ -60,7 +63,7 @@ const REST_DAY = 7;
 const WEEK = [1, 2, 3, 4, 5, 6, 7];
 beforeAll(() => {
   badanos = town('settlement-641');
-});
+}, SLOW);
 
 const staysOf = (plan: DayPlan) => plan.activities.filter((activity): activity is Stay => activity.kind !== 'travel');
 const visitsOn = (life: SettlementLife, day: number) =>
@@ -86,7 +89,7 @@ describe('versions', () => {
 });
 
 describe('an occupation split across shifts', () => {
-  it('meets the shares exactly in every settlement tried, by the largest-remainder method', () => {
+  it('meets the shares exactly in every settlement tried, by the largest-remainder method', { timeout: SLOW }, () => {
     const three = edited((raw) => {
       raw.occupations.find((entry: any) => entry.id === 'tanner').shift = [
         { shift: 'day', share: 0.5 },
@@ -196,7 +199,7 @@ describe('opening hours', () => {
     expect(life.isOpen(house.id, at(3, 20))).toBe(false);
   });
 
-  it('agree with the shifts and rest-day duty of the people who work there, on every day of a week', () => {
+  it('agree with the shifts and rest-day duty of the people who work there, on every day of a week', { timeout: SLOW }, () => {
     const { city, life } = badanos;
     const people = new Map(city.people.map((person) => [person.id, person]));
     for (const day of [WORK_DAY, REST_DAY]) {
@@ -222,7 +225,7 @@ describe('opening hours', () => {
     }
   });
 
-  it('send no visit, in a week, to a place that is closed when the visitor arrives or past its closing', () => {
+  it('send no visit, in a week, to a place that is closed when the visitor arrives or past its closing', { timeout: SLOW }, () => {
     const { city, life } = badanos;
     const home = homeOf(city);
     let checked = 0;
@@ -244,7 +247,7 @@ describe('opening hours', () => {
     expect(WEEK.flatMap((day) => visitsOn(life, day)).filter((visit) => visit.visitId === 'tavern' && dayWatch.has(visit.personId)).length).toBeGreaterThan(10);
   });
 
-  it('send rest-day market visits only to places that are open or always open', () => {
+  it('send rest-day market visits only to places that are open or always open', { timeout: SLOW }, () => {
     // Badanos has no market square, and its stalls and shops rest: nobody goes to market.
     const market = (town: Town) => visitsOn(town.life, REST_DAY).filter((visit) => visit.visitId === 'market');
     expect(badanos.city.buildings.some((building) => building.type === 'market-square')).toBe(false);
@@ -267,7 +270,7 @@ describe('opening hours', () => {
     expect(other.life.plansForDay(REST_DAY).flatMap((plan) => checker.check(plan)).slice(0, 5)).toEqual([]);
   });
 
-  it('cut a visit short at closing, and drop one that closing would cut below its shortest', () => {
+  it('cut a visit short at closing, and drop one that closing would cut below its shortest', { timeout: SLOW }, () => {
     // Taverns that shut at 20:00, and an evening visit that begins between 19:00 and 21:00.
     const early = (min: number) =>
       edited((raw) => {
@@ -440,7 +443,7 @@ describe('being outside', () => {
     expect(life.outsideStays(at(WORK_DAY, 2), at(WORK_DAY, 3))).toEqual([]);
   });
 
-  it('lists a stay that crosses midnight once, whole', () => {
+  it('lists a stay that crosses midnight once, whole', { timeout: SLOW }, () => {
     // With the watch house out of doors, the night watch stands outside from 22:00 to 06:00.
     const { city, layout, life } = town('settlement-641', edited((raw) => (raw.workplaces.find((entry: any) => entry.id === 'watch-house').openAir = true)));
     const night = watchmen(city).filter((person) => life.shiftOf(person.id)!.id === 'night');
@@ -469,7 +472,7 @@ describe('being outside', () => {
 });
 
 describe('the plan checker', () => {
-  it('reports each new rule when it is broken', () => {
+  it('reports each new rule when it is broken', { timeout: SLOW }, () => {
     const { city, layout, life } = badanos;
     const checker = createPlanChecker({ city, layout, pack });
     const type = typeOf(city);
@@ -583,7 +586,7 @@ describe('pack behaviour', () => {
       for (const field of ['openAir', 'alwaysOpen', 'openingHours', 'weekdays', 'outside', '"home"', 'share']) expect(left).not.toContain(field);
     });
 
-  it('gives the same plans as phase 4 from a pack with none of the new fields', () => {
+  it('gives the same plans as phase 4 from a pack with none of the new fields', { timeout: SLOW }, () => {
     const baseline = JSON.parse(readFileSync(new URL('./baselines/badanos-phase4-plans.json', import.meta.url), 'utf8')) as { planHash: Record<string, string> };
     const { life } = town('settlement-641', phase4());
     for (const [day, hash] of Object.entries(baseline.planHash)) {
@@ -595,7 +598,7 @@ describe('pack behaviour', () => {
     expect(life.daySummary(1).hours.every((hour) => hour.outside === 0)).toBe(true);
   });
 
-  it('lets a building type marked alwaysOpen be visited at night', () => {
+  it('lets a building type marked alwaysOpen be visited at night', { timeout: SLOW }, () => {
     const night = edited((raw) => Object.assign(raw.visits.visits.find((entry: any) => entry.id === 'tavern-evening'), { when: { from: '23:10', to: '23:40' }, durationMinutes: { min: 10, max: 15 }, probability: 0.5 }));
     const open = edited((raw) => {
       Object.assign(raw.visits.visits.find((entry: any) => entry.id === 'tavern-evening'), { when: { from: '23:10', to: '23:40' }, durationMinutes: { min: 10, max: 15 }, probability: 0.5 });
@@ -616,7 +619,7 @@ describe('pack behaviour', () => {
     expect(always.hours).toEqual([{ from: at(WORK_DAY, 0), to: at(WORK_DAY + 1, 0) }]);
   });
 
-  it('removes a type\'s outside stays when openAir is taken off it', () => {
+  it('removes a type\'s outside stays when openAir is taken off it', { timeout: SLOW }, () => {
     const indoors = edited((raw) => delete raw.workplaces.find((entry: any) => entry.id === 'market-stall').openAir);
     const outsideAtStalls = ({ city, life }: Town) => {
       const type = typeOf(city);

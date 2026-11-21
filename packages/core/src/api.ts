@@ -3,7 +3,7 @@
  */
 import type { Building, District, Household, Person } from './city/records.ts';
 import type { DayPlan, Occupant, OpenSpan, OutsideStay, Trip, Whereabouts } from './life/records.ts';
-import type { Calendar } from './pack/schema.ts';
+import type { AvatarSettings, Calendar } from './pack/schema.ts';
 import type { CategoryId } from './pack/schema.ts';
 import type { ImportReport, Point, RouteKind, SizeGroup, WorldInfo } from './schema.ts';
 
@@ -49,6 +49,8 @@ export interface PackLabels {
   apprenticeLabel?: string;
   /** The week, the year and the daylight, for showing game time. */
   calendar: Calendar;
+  /** The avatar's walking speed and how far it perceives, for drawing it. */
+  avatar: AvatarSettings;
   /** The names of the pack's visits, by ID. */
   visits: Record<string, string>;
   buildingTypes: Record<string, string>;
