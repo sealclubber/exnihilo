@@ -16,10 +16,32 @@
 #   destinations     building types the visit can go to. If the settlement has
 #                    none of them, the visit does not happen. `home` means the
 #                    person's own dwelling, which takes no walk to reach.
+#   nearest          optional. true: always the nearest destination that will
+#                    do, as for a well, instead of favouring nearer ones by chance
+#   timesPerDay      optional: {min, max}. The visit is made that many times,
+#                    each at a time of its own in the window, as long as it does
+#                    not collide with anything else. `probability` is then the
+#                    chance that the person makes the visit at all that day.
+#   stops            instead of destinations and durationMinutes: an errand
+#                    with several stops in a row before going home. Each has its
+#                    own destinations and durationMinutes, and optionally a
+#                    `chance` of being made at all and `nearest`. A stop with
+#                    nowhere open to go is skipped.
+#   stroll           instead of destinations: a walk with no destination, out
+#                    from home and back. `minutes` is how long is spent walking,
+#                    `pauseMinutes` how long the walker stops where they turn,
+#                    and `favour` lists public places a stroll goes by way of
+#                    when one is near enough; otherwise it turns at a point on
+#                    a street.
 #   outside          optional. true: the visitor is out of doors, at a point on
 #                    the building's lot, and can be seen on the town map. With
 #                    `home` this is the doorstep or the yard. A visit to an
 #                    open-air building type (workplaces.yaml) is outside anyway.
+#   where            optional, for an outside visit: `ground`, the lot's open
+#                    ground, or `street`, out on the street in front of the
+#                    building. With footprints against the frontage the yard is
+#                    behind the house, so children play and elders sit out in
+#                    the street.
 #
 # All values are placeholders: the ages for play and for sitting out, every
 # probability, every window and every duration are first guesses for review.
@@ -32,6 +54,10 @@
 # and if nowhere is open the visit does not happen. Left out or false, nothing
 # is ever closed.
 openingHours: true
+
+# How far along the street, either way, someone moves about who is out on the
+# street in front of a building, or stopped at a point on a round or a stroll.
+streetReach: 12
 
 # How strongly nearer destinations are favoured: 1 is no preference, 2 means
 # the nearest quarter is chosen half the time, and so on.
@@ -117,6 +143,7 @@ visits:
     durationMinutes: {min: 45, max: 120}
     destinations: [home]
     outside: true
+    where: street
 
   - id: play-afternoon
     name: Playing outside
@@ -127,6 +154,7 @@ visits:
     durationMinutes: {min: 60, max: 150}
     destinations: [home]
     outside: true
+    where: street
 
   # Elders on the doorstep in the early evening.
   - id: doorstep
@@ -138,3 +166,82 @@ visits:
     durationMinutes: {min: 30, max: 90}
     destinations: [home]
     outside: true
+    where: street
+
+  # --- Errands and walks (phase 6B) -----------------------------------------
+  # Reasons to be on the street. Every probability is meant to be one that can
+  # be defended for a town like this; none was raised to make a street busy.
+
+  # Every household needs water every day, and somebody carries it.
+  - id: water
+    name: Fetching water
+    who: {states: [keeping-house], minAge: 13}
+    days: any
+    probability: 0.8
+    timesPerDay: {min: 1, max: 3}
+    when: {from: "06:00", to: "19:00"}
+    durationMinutes: {min: 3, max: 10}
+    destinations: [well]
+    nearest: true
+
+  # Older children are sent to the well too.
+  - id: water-children
+    name: Fetching water
+    who: {states: [not-working], minAge: 9, maxAge: 15}
+    days: any
+    probability: 0.4
+    timesPerDay: {min: 1, max: 2}
+    when: {from: "07:00", to: "18:00"}
+    durationMinutes: {min: 3, max: 10}
+    destinations: [well]
+    nearest: true
+
+  # The round before the evening meal: the market, then perhaps the baker or
+  # the public oven, then perhaps the butcher.
+  - id: marketing
+    name: Marketing for the evening meal
+    who: {states: [keeping-house], minAge: 13}
+    days: work
+    probability: 0.45
+    when: {from: "15:00", to: "17:00"}
+    stops:
+      - {destinations: [market-stall, market-square], durationMinutes: {min: 10, max: 25}}
+      - {destinations: [bakery, public-oven], durationMinutes: {min: 5, max: 10}, chance: 0.6}
+      - {destinations: [butchery], durationMinutes: {min: 5, max: 10}, chance: 0.4}
+
+  - id: bathhouse
+    name: A visit to the bathhouse
+    who: {states: [working, keeping-house, not-working], minAge: 13}
+    days: any
+    probability: 0.04
+    when: {from: "09:00", to: "16:00"}
+    durationMinutes: {min: 40, max: 90}
+    destinations: [bathhouse]
+
+  # The occasional resident with business at one of the halls.
+  - id: hall-business
+    name: Business at the hall
+    who: {states: [working, keeping-house, not-working], minAge: 18}
+    days: work
+    probability: 0.01
+    when: {from: "09:00", to: "15:00"}
+    durationMinutes: {min: 10, max: 40}
+    destinations: [town-hall, guild-hall, adventurers-guild]
+
+  # A walk for its own sake, by way of the square or the waterside where the
+  # town has them.
+  - id: evening-walk
+    name: An evening walk
+    who: {states: [working, keeping-house, not-working], minAge: 14}
+    days: work
+    probability: 0.1
+    when: {from: "17:30", to: "19:30"}
+    stroll: {minutes: {min: 10, max: 30}, pauseMinutes: {min: 2, max: 10}, favour: [market-square, docks]}
+
+  - id: restday-walk
+    name: A rest-day walk
+    who: {states: [working, keeping-house, not-working], minAge: 10}
+    days: rest
+    probability: 0.3
+    when: {from: "13:00", to: "17:00"}
+    stroll: {minutes: {min: 20, max: 60}, pauseMinutes: {min: 5, max: 20}, favour: [market-square, docks]}

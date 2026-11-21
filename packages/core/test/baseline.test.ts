@@ -12,8 +12,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { generateCity, parsePack } from '../src/index.ts';
-import { medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { generateCity } from '../src/index.ts';
+import { medievalPack, medievalPackBefore6B, settlement } from './pack.ts';
 
 const read = (name: string) => JSON.parse(readFileSync(new URL(`./baselines/${name}`, import.meta.url), 'utf8'));
 const first = read('badanos-counts.json');
@@ -69,15 +69,7 @@ describe('Badanos counts, against the saved baselines', () => {
   });
 
   it('are those of the first baseline again when the pack has no civic buildings', () => {
-    const raw = rawMedievalPack();
-    raw.landmarks = raw.landmarks.filter((landmark: any) => landmark.when !== undefined);
-    const posts = new Set(Object.keys(baseline.moved).filter((id) => baseline.moved[id][0] === 0));
-    raw.occupations = raw.occupations.filter((occupation: any) => !posts.has(occupation.id));
-    for (const type of ['well', 'public-oven', 'bathhouse', 'granary', 'infirmary', 'town-hall', 'guild-hall', 'adventurers-guild']) {
-      delete raw.layout.lots[type];
-      delete raw.layout.footprints.types[type];
-    }
-    const without = generateCity(settlement('settlement-641'), parsePack(raw));
+    const without = generateCity(settlement('settlement-641'), medievalPackBefore6B());
     expect(without.summary.occupations).toEqual(first.occupations);
     expect(without.buildings).toHaveLength(1772);
   });

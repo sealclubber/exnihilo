@@ -189,7 +189,7 @@ describe('what the avatar perceives', () => {
       for (const entry of body.nearby) {
         expect(entry.person.id).toBe(entry.personId);
         const named = entry.kind === 'walking' ? [entry.fromBuildingId, entry.toBuildingId] : [entry.buildingId];
-        for (const id of named) expect(body.buildings[id]).toBe(city.buildings.find((building) => building.id === id)!.type);
+        for (const id of named.filter((entry): entry is string => entry !== undefined)) expect(body.buildings[id]).toBe(city.buildings.find((building) => building.id === id)!.type);
       }
       if (body.nearby.length > 0) seenSomeone = true;
     }

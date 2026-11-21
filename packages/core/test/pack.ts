@@ -45,6 +45,19 @@ export function stripPhase6B(raw: any): void {
     delete raw.layout.lots[landmark.id];
     delete raw.layout.footprints.types[landmark.id];
   }
+  // Rounds, and the watch as it was: a day watch to 18:00 and a night watch, half and half.
+  raw.rounds = {};
+  for (const occupation of raw.occupations) delete occupation.round;
+  raw.occupations.find((occupation: any) => occupation.id === 'watchman').shift = [{ shift: 'watch-day', share: 0.5 }, { shift: 'night', share: 0.5 }];
+  raw.shifts.shifts['watch-day'].end = '18:00';
+  delete raw.shifts.shifts['watch-evening'];
+  // Chains, repeats, strolls and stays on the street.
+  raw.visits.visits = raw.visits.visits.filter((visit: any) => visit.stops === undefined && visit.stroll === undefined && visit.timesPerDay === undefined && !['bathhouse', 'hall-business'].includes(visit.id));
+  for (const visit of raw.visits.visits) {
+    delete visit.where;
+    delete visit.nearest;
+  }
+  delete raw.visits.streetReach;
 }
 
 let before6B: SettingPack | undefined;

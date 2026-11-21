@@ -334,14 +334,14 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     const day = numberOf(query, 'day', dayOf(clock.read().gameTime));
     if (typeof day === 'string' || !Number.isInteger(day)) return 'day must be a whole number';
     const plan = view.life.plan(record, day);
-    const named = plan.activities.flatMap((activity) => (activity.kind === 'travel' ? [activity.fromBuildingId, activity.toBuildingId] : [activity.buildingId]));
+    const named = plan.activities.flatMap((activity) => (activity.kind === 'travel' ? [activity.fromBuildingId, activity.toBuildingId] : activity.kind === 'street' ? [] : [activity.buildingId]));
     return { person: view.person(record)!, plan, buildings: view.buildingTypes(named) };
   });
   life('/people/:record/now', (view, query, record): PersonNow | string => {
     const time = timeOf(query);
     if (typeof time === 'string') return time;
     const whereabouts = view.life.whereabouts(record, time);
-    const named = whereabouts.kind === 'travel' ? [whereabouts.fromBuildingId, whereabouts.toBuildingId] : [whereabouts.buildingId];
+    const named = whereabouts.kind === 'travel' ? [whereabouts.fromBuildingId, whereabouts.toBuildingId] : whereabouts.kind === 'street' ? [] : [whereabouts.buildingId];
     return { time, person: view.person(record)!, whereabouts, buildings: view.buildingTypes(named) };
   });
   life('/buildings/:record/occupants', (view, query, record): OccupantsNow | string => {

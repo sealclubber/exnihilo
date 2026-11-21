@@ -454,7 +454,10 @@ describe('people outside', () => {
     const NEAR = 0.02;
     let onYards = 0;
     for (const person of before) {
-      const lot = lots.get(stays.get(person.personId)!.buildingId)!;
+      const stay = stays.get(person.personId)!;
+      // Someone stopped on a street, or out in front of a building, is on the street and not on a lot.
+      if (stay.buildingId === undefined || stay.onStreet) continue;
+      const lot = lots.get(stay.buildingId)!;
       const inLot = geometry.pointInPolygon(person.point, lot.polygon) || geometry.distanceToPolygonEdge(person.point, lot.polygon) <= NEAR;
       const inBuilding = lot.footprints.some((footprint) => geometry.strictlyInside(person.point, footprint) && geometry.distanceToPolygonEdge(person.point, footprint) > NEAR);
       expect(inLot, `${person.personId} is off the lot`).toBe(true);

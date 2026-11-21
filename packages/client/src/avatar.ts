@@ -65,8 +65,13 @@ export function describeAvatar(state: AvatarState, time: number, buildingName?: 
 
 /** What someone near the avatar is doing: "Walking to the tannery", "At work outside the market stall". */
 export function describeNearby(entry: Nearby, buildings: Record<string, string>, labels: PackLabels): string {
-  if (entry.kind === 'walking') return `Walking to the ${place(entry.toBuildingId, buildings, labels)}`;
-  const at = `outside the ${place(entry.buildingId, buildings, labels)}`;
+  if (entry.kind === 'walking') {
+    const walking = entry.round ? 'On their round, walking' : 'Walking';
+    return entry.toBuildingId === undefined ? `${walking} along the street` : `${walking} to the ${place(entry.toBuildingId, buildings, labels)}`;
+  }
+  // At a stop on a street there is no building to name.
+  const at = entry.buildingId === undefined ? 'in the street' : `outside the ${place(entry.buildingId, buildings, labels)}`;
+  if (entry.round) return `On their round, stopped ${at}`;
   return entry.activity === 'work' ? `At work ${at}` : `${labels.visits[entry.visitId ?? ''] ?? 'Visiting'}, ${at}`;
 }
 

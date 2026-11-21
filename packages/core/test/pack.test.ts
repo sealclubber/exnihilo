@@ -157,11 +157,13 @@ describe('the medieval pack', () => {
     const shiftFor = (id: string) => allOccupations(pack).find((occupation) => occupation.id === id)!.shift;
     expect(shiftFor('baker')).toBe('early');
     expect(shiftFor('tavern-keeper')).toBe('evening');
-    expect(shiftFor('watchman')).toEqual([{ shift: 'watch-day', share: 0.5 }, { shift: 'night', share: 0.5 }]);
+    expect(shiftFor('watchman')).toEqual([{ shift: 'watch-day', share: 0.4 }, { shift: 'watch-evening', share: 0.3 }, { shift: 'night', share: 0.3 }]);
     expect(shiftFor('tanner')).toBeUndefined();
     // Rest-day duty for the watch, the taverns and the clergy.
     for (const id of ['tavern-keeper', 'tapster', 'priest']) expect(shifts[shiftFor(id) as string]!.restDays, id).toBe(true);
-    for (const id of ['watch-day', 'night']) expect(shifts[id]!.restDays, id).toBe(true);
+    for (const id of ['watch-day', 'watch-evening', 'night']) expect(shifts[id]!.restDays, id).toBe(true);
+    // The three watches meet end to end round the clock.
+    expect([shifts['watch-day']!.start, shifts['watch-day']!.end, shifts['watch-evening']!.end, shifts.night!.end]).toEqual([6 * 3600, 14 * 3600, 22 * 3600, 6 * 3600]);
 
     const visits = Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit]));
     expect(visits.market).toMatchObject({ who: { states: ['keeping-house'] }, when: { from: 8 * 3600, to: 12 * 3600 } });
@@ -282,6 +284,21 @@ describe('pack validation', () => {
     ['a category with no colour', (raw) => delete raw.display.categories.trade, /^display at categories\.trade/],
     ['a colour for an occupation that does not exist', (raw) => (raw.display.occupations = { jouster: '#112233' }), /display: occupations gives a colour to "jouster", which is not an occupation/],
     ['a missing display file', (raw) => delete raw.display, /^display: /],
+    ['a round that stops at a building type that does not exist', (raw) => raw.rounds.deliveries.at.push('bazaar'), /rounds: "deliveries" stops at the building type "bazaar", which does not exist/],
+    ['an occupation on a round that is not defined', (raw) => (raw.occupations.find((entry: any) => entry.id === 'carter').round = 'pilgrimage'), /occupations: "carter" names the round "pilgrimage", which rounds does not define/],
+    ['a round with more stops at least than at most', (raw) => (raw.rounds.patrol.stops = { min: 9, max: 4 }), /rounds: "patrol" has a least number of stops above its most/],
+    ['a round with a share above the whole shift', (raw) => (raw.rounds.patrol.share = 1.5), /^rounds at patrol\.share/],
+    ['a chain with no stops', (raw) => (raw.visits.visits.find((entry: any) => entry.id === 'marketing').stops = []), /visits: "marketing" is a chain with no stops/],
+    ['a chain stop at a building type that does not exist', (raw) => raw.visits.visits.find((entry: any) => entry.id === 'marketing').stops[0].destinations.push('bazaar'), /visits: "marketing" names the building type "bazaar", which does not exist/],
+    ['a visit that is both a stop and a chain', (raw) => (raw.visits.visits.find((entry: any) => entry.id === 'marketing').destinations = ['tavern']), /visits: "marketing" must be exactly one of/],
+    ['a chain after work', (raw) => (raw.visits.visits.find((entry: any) => entry.id === 'marketing').when = 'after-work'), /visits: "marketing" is a chain, which starts from home at a time of day/],
+    ['a visit with neither stop nor stroll', (raw) => { const visit = raw.visits.visits.find((entry: any) => entry.id === 'bathhouse'); delete visit.destinations; delete visit.durationMinutes; }, /visits: "bathhouse" must be exactly one of/],
+    ['a stroll that favours a building type that does not exist', (raw) => raw.visits.visits.find((entry: any) => entry.id === 'evening-walk').stroll.favour.push('promenade'), /visits: "evening-walk" favours the building type "promenade"/],
+    ['a repeated visit with its times the wrong way round', (raw) => (raw.visits.visits.find((entry: any) => entry.id === 'water').timesPerDay = { min: 3, max: 1 }), /visits: "water" has a least number of times a day above its most/],
+    ['people on the street with no reach given', (raw) => delete raw.visits.streetReach, /visits: "play-morning" puts people on the street, so visits needs a streetReach/],
+    ['a visit on the street that is not outside', (raw) => delete raw.visits.visits.find((entry: any) => entry.id === 'doorstep').outside, /visits: "doorstep" is on the street, so it must be marked outside/],
+    ['a landmark with nothing to say which settlements have it', (raw) => { const hall = raw.landmarks.find((entry: any) => entry.id === 'town-hall'); delete hall.minPopulation; }, /landmarks: "town-hall" needs a "when", a minPopulation or spread: true/],
+    ['a landmark with no district and no spread', (raw) => delete raw.landmarks.find((entry: any) => entry.id === 'granary').district, /landmarks: "granary" needs a district to prefer, or spread: true/],
     ['a time of day that is not one', (raw) => (raw.shifts.shifts.day.start = '8am'), /^shifts at shifts\.day\.start: must be a time of day/],
     ['a visit naming a missing building type', (raw) => raw.visits.visits[0].destinations.push('bazaar'), /visits: "market" names the building type "bazaar", which does not exist/],
     ['a visit with its durations the wrong way round', (raw) => (raw.visits.visits[0].durationMinutes = { min: 60, max: 20 }), /visits: "market" has a shortest duration above its longest/],

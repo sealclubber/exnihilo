@@ -133,8 +133,9 @@ export function groundOf(lot: Lot): Ground {
  * A wander over a lot's open ground for a stay from `start` to `end`: pause, move to another point at the pace
  * given, pause again, until the stay ends. With a pace of zero, or no open ground, the person stays at one point.
  */
-export function makeWander(ground: Ground, rng: Rng, start: number, end: number, habit: WanderHabit | undefined): Wander {
-  let here = ground.place(rng);
+export function makeWander(ground: Ground, rng: Rng, start: number, end: number, habit: WanderHabit | undefined, from?: Point): Wander {
+  // Someone who walked here begins where their walk ended; anyone else, somewhere on the ground.
+  let here = from ?? ground.place(rng);
   const wander: Wander = { times: [start], points: [here] };
   const reach = (time: number, point: Point) => {
     wander.times.push(time);
@@ -172,4 +173,34 @@ export function makeWander(ground: Ground, rng: Rng, start: number, end: number,
     now += taken;
   }
   return wander;
+}
+
+/**
+ * A stretch of street as ground to move about on: the straight piece of a
+ * segment's line that holds a point, as far as `reach` either way along it.
+ * Keeping to one straight piece means that every position between two points
+ * of a wander is on the segment too.
+ */
+export function streetGround(line: readonly Point[], centre: Point, reach: number): Ground & { centre: Point } {
+  // The piece of the line nearest the point.
+  let best = { piece: 0, distance: Infinity, point: line[0] as Point, share: 0 };
+  for (let at = 1; at < line.length; at++) {
+    const a = line[at - 1] as Point;
+    const b = line[at] as Point;
+    const found = projectOnPolyline([a, b], centre);
+    if (found.distance < best.distance) best = { piece: at, distance: found.distance, point: found.point, share: found.along };
+  }
+  const a = line[Math.max(0, best.piece - 1)] as Point;
+  const b = line[best.piece] as Point;
+  const length = line.length > 1 ? distance(a, b) : 0;
+  const from = Math.max(0, best.share - reach);
+  const to = Math.min(length, best.share + reach);
+  const at = (along: number): Point => (length === 0 ? a : [a[0] + ((b[0] - a[0]) * along) / length, a[1] + ((b[1] - a[1]) * along) / length]);
+  return {
+    centre: best.point,
+    holds: (point) => projectOnPolyline([a, b], point).distance <= 1e-6,
+    clear: () => true,
+    open: to > from,
+    place: (rng) => at(from + rng.next() * (to - from)),
+  };
 }

@@ -18,11 +18,19 @@ const place = (buildingId: string, buildings: Buildings, labels: PackLabels) => 
 
 /** A short word for what someone is doing, for a table cell. */
 export function activityWord(kind: Activity['kind']): string {
-  return { sleep: 'Asleep', home: 'At home', work: 'At work', visit: 'Visiting', travel: 'On the street' }[kind];
+  return { sleep: 'Asleep', home: 'At home', work: 'At work', visit: 'Visiting', travel: 'On the street', street: 'On the street' }[kind];
+}
+
+/** Where a walk is going, as the end of a phrase: "home", "to the tannery", or "along the street" when it ends at a point on one. */
+function walkTo(toBuildingId: string | undefined, buildings: Buildings, labels: PackLabels, home?: string): string {
+  if (toBuildingId === undefined) return 'along the street';
+  return toBuildingId === home ? 'home' : `to the ${place(toBuildingId, buildings, labels)}`;
 }
 
 /** Where a stay at a building is spent, as the end of a phrase: "at the tavern", "outside at the market stall", "outside their home". */
-function whereAt(stay: { buildingId: string; outside?: true | undefined }, buildings: Buildings, labels: PackLabels, home?: string): string {
+function whereAt(stay: { buildingId: string; outside?: true | undefined; onStreet?: true | undefined }, buildings: Buildings, labels: PackLabels, home?: string): string {
+  // Out on the street in front of a building, rather than on its lot.
+  if (stay.onStreet) return stay.buildingId === home ? 'in the street outside their home' : `in the street outside the ${place(stay.buildingId, buildings, labels)}`;
   if (stay.buildingId === home) return stay.outside ? 'outside their home' : 'at home';
   return `${stay.outside ? 'outside at' : 'at'} the ${place(stay.buildingId, buildings, labels)}`;
 }
@@ -49,12 +57,16 @@ export function describeActivity(activity: Activity, buildings: Buildings, label
     case 'home':
       return 'At home';
     case 'work':
+      // A stop on a round is work done away from the workplace.
+      if (activity.round) return `On their round: a stop ${whereAt(activity, buildings, labels, home)}`;
       if (activity.outside) return `Work, ${whereAt(activity, buildings, labels, home)}`;
       return activity.buildingId === home ? 'Work, at home' : `Work at the ${place(activity.buildingId, buildings, labels)}`;
     case 'visit':
       return `${labels.visits[activity.visitId ?? ''] ?? 'A visit'}, ${whereAt(activity, buildings, labels, home)}`;
     case 'travel':
-      return `Walk ${activity.toBuildingId === home ? 'home' : `to the ${place(activity.toBuildingId, buildings, labels)}`} (${formatMetres(activity.path.length)})`;
+      return `${activity.round ? 'On their round: walk' : 'Walk'} ${walkTo(activity.toBuildingId, buildings, labels, home)} (${formatMetres(activity.path.length)})`;
+    case 'street':
+      return activity.purpose === 'work' ? 'On their round: a stop in the street' : `${labels.visits[activity.visitId ?? ''] ?? 'A walk'}, pausing in the street`;
   }
 }
 
@@ -67,12 +79,15 @@ export function describeWhereabouts(where: Whereabouts, buildings: Buildings, la
     case 'home':
       return `At home, ${until}`;
     case 'work':
+      if (where.round) return `On their round, stopped ${whereAt(where, buildings, labels, home)}, ${until}`;
       if (where.outside) return `At work, ${whereAt(where, buildings, labels, home)}, ${until}`;
       return `${where.buildingId === home ? 'At work, at home' : `At work at the ${place(where.buildingId, buildings, labels)}`}, ${until}`;
     case 'visit':
       return `${labels.visits[where.visitId ?? ''] ?? 'A visit'}, ${whereAt(where, buildings, labels, home)}, ${until}`;
     case 'travel':
-      return `Walking ${where.toBuildingId === home ? 'home' : `to the ${place(where.toBuildingId, buildings, labels)}`}, arriving at ${formatClock(where.until)}`;
+      return `${where.round ? 'On their round, walking' : 'Walking'} ${walkTo(where.toBuildingId, buildings, labels, home)}, arriving at ${formatClock(where.until)}`;
+    case 'street':
+      return where.purpose === 'work' ? `On their round, stopped in the street, ${until}` : `${labels.visits[where.visitId ?? ''] ?? 'A walk'}, pausing in the street, ${until}`;
   }
 }
 

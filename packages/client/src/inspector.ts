@@ -491,12 +491,12 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     detailShows('Person', `${person.givenName} ${person.familyName}`);
     const buildings = { ...plan.buildings, ...now.buildings };
     const home = plan.plan.activities.find((activity) => activity.kind === 'sleep' || activity.kind === 'home');
-    const homeId = home && home.kind !== 'travel' ? home.buildingId : undefined;
+    const homeId = home && home.kind !== 'travel' && home.kind !== 'street' ? home.buildingId : undefined;
     const follow = h('input', { attrs: { type: 'checkbox', id: 'follow-person' } });
     follow.addEventListener('change', () => {
-      townMap.follow(follow.checked ? { personId: person.id, ...(whereabouts.kind !== 'travel' && { buildingId: whereabouts.buildingId }) } : undefined);
+      townMap.follow(follow.checked ? { personId: person.id, ...(whereabouts.kind !== 'travel' && whereabouts.kind !== 'street' && { buildingId: whereabouts.buildingId }) } : undefined);
     });
-    const where = whereabouts.kind === 'travel' ? undefined : whereabouts.buildingId;
+    const where = whereabouts.kind === 'travel' || whereabouts.kind === 'street' ? undefined : whereabouts.buildingId;
     townMap.highlight(where);
     detailBox.replaceChildren(
       h('h2', {}, `${person.givenName} ${person.familyName}`),
@@ -510,7 +510,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
             h(
               'p',
               { class: 'avatar-actions' },
-              h('button', { attrs: { type: 'button' }, title: 'Walk your avatar to where this person is now', onClick: () => (whereabouts.kind === 'travel' ? act('walk-to-point', { point: whereabouts.point }) : act('walk-to-building', { buildingId: whereabouts.buildingId })) }, 'Walk to them'),
+              h('button', { attrs: { type: 'button' }, title: 'Walk your avatar to where this person is now', onClick: () => (whereabouts.kind === 'travel' || whereabouts.kind === 'street' ? act('walk-to-point', { point: whereabouts.point }) : act('walk-to-building', { buildingId: whereabouts.buildingId })) }, 'Walk to them'),
               homeId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: homeId }) }, 'Walk to their home') : '',
               person.workplaceId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: person.workplaceId as string }) }, 'Walk to their workplace') : '',
             ),

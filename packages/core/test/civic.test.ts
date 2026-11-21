@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { type City, type Landmark, type SettingPack, GENERATOR_VERSION, allOccupations, checkCity, generateCity, generateLayout, parsePack, placeFlagsOf, resolveCount } from '../src/index.ts';
-import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 const SLOW = 180_000;
 const pack = medievalPack();
@@ -16,17 +16,8 @@ const edited = (edit: (raw: any) => void): SettingPack => {
   edit(raw);
   return parsePack(raw);
 };
-/** The pack with no civic buildings, as it was before them. */
-const before = edited((raw) => {
-  const posts = new Set(raw.landmarks.filter((landmark: any) => landmark.when === undefined).flatMap((landmark: any) => landmark.posts.map((post: any) => post.occupation)));
-  const types = raw.landmarks.filter((landmark: any) => landmark.when === undefined).map((landmark: any) => landmark.id);
-  raw.landmarks = raw.landmarks.filter((landmark: any) => landmark.when !== undefined);
-  raw.occupations = raw.occupations.filter((occupation: any) => !posts.has(occupation.id));
-  for (const type of types) {
-    delete raw.layout.lots[type];
-    delete raw.layout.footprints.types[type];
-  }
-});
+/** The pack as it was before phase 6B: no civic buildings, and nothing that sends anyone to one. */
+const before = medievalPackBefore6B();
 const countOf = (city: City, type: string) => city.buildings.filter((building) => building.type === type).length;
 const staffOf = (city: City, landmark: Landmark) => landmark.posts.reduce((sum, post) => sum + (city.summary.occupations[post.occupation] ?? 0), 0);
 

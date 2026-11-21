@@ -63,7 +63,8 @@ beforeAll(() => {
 }, SLOW);
 
 const PACE = pack.species.human!.life.outside!.pace;
-const outsideOf = (plan: DayPlan) => plan.activities.filter((activity): activity is Stay => activity.kind !== 'travel' && activity.outside === true);
+/** A person's stays on the open ground of a lot. Those out on the street in front of a building are another matter: see rounds.test.ts. */
+const outsideOf = (plan: DayPlan) => plan.activities.filter((activity): activity is Stay => activity.kind !== 'travel' && activity.kind !== 'street' && activity.outside === true && !activity.onStreet);
 const onGround = (lot: Lot, point: Point) => pointInPolygon(point, lot.polygon) && !lot.footprints.some((footprint) => strictlyInside(point, footprint));
 const lot = (polygon: Point[], footprints: Point[][], entrance: Point): Lot => ({
   id: 'lot-1-000001',
@@ -229,6 +230,7 @@ describe('residents outside', () => {
     const { life } = badanos;
     let stays = 0;
     let moving = 0;
+    let long = 0;
     for (const day of [1, 7]) {
       for (const plan of life.plansForDay(day)) {
         for (const stay of outsideOf(plan)) {
@@ -236,15 +238,18 @@ describe('residents outside', () => {
           const wander = stay.wander!;
           expect(wander.times[0], plan.personId).toBe(stay.start);
           expect(wander.times.at(-1), plan.personId).toBe(stay.end);
-          if (new Set(wander.points.map((point) => point.join())).size > 1) moving++;
+          // A stay of half an hour or more is long enough to outlast a pause.
+          if (stay.end - stay.start >= 1800) long++;
+          if (stay.end - stay.start >= 1800 && new Set(wander.points.map((point) => point.join())).size > 1) moving++;
         }
         // Nobody indoors has one.
-        for (const activity of plan.activities) if (activity.kind !== 'travel' && !activity.outside) expect(activity).not.toHaveProperty('wander');
+        for (const activity of plan.activities) if (activity.kind !== 'travel' && activity.kind !== 'street' && !activity.outside) expect(activity).not.toHaveProperty('wander');
       }
     }
     expect(stays).toBeGreaterThan(5000);
-    // All but the shortest stays have the person move at least once.
-    expect(moving / stays).toBeGreaterThan(0.95);
+    // In all but a few of the longer stays the person moves at least once.
+    expect(long).toBeGreaterThan(1000);
+    expect(moving / long).toBeGreaterThan(0.95);
   });
 
   it('are, at every sampled moment, inside the lot and outside every footprint', { timeout: SLOW }, () => {
@@ -259,7 +264,7 @@ describe('residents outside', () => {
         for (let step = 0; step < 12; step++) {
           const time = stay.start + ((stay.end - stay.start - 1) * step) / 11;
           const where = life.whereabouts(plan.personId, time);
-          if (where.kind === 'travel' || !where.outside) throw new Error(`${plan.personId} is not outside at ${time}`);
+          if (where.kind === 'travel' || where.kind === 'street' || !where.outside) throw new Error(`${plan.personId} is not outside at ${time}`);
           if (!onGround(ground, where.point!)) throw new Error(`${plan.personId} at ${time} is at ${where.point} on ${ground.id}, which is not open ground`);
           expect(where.point).toEqual(positionOnWander(stay.wander!, time));
           sampled++;
@@ -359,7 +364,7 @@ describe('unchanged behaviour', () => {
       const plans = before.life.plansForDay(Number(day)).map((plan) => ({ ...plan, activities: plan.activities.map(({ wander: _wander, ...rest }: any) => rest) }));
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);
     }
-    expect(LIFE_VERSION).toBe(3);
+    expect(LIFE_VERSION).toBe(4);
     expect(GENERATOR_VERSION).toBe(3);
   });
 });

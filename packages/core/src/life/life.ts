@@ -19,17 +19,17 @@
  * nothing of how a layout was generated.
  */
 import type { City, Person } from '../city/records.ts';
-import { createRng } from '../city/random.ts';
-import { boxOf, distance, pointAlongPolyline } from '../layout/geometry.ts';
+import { type Rng, createRng } from '../city/random.ts';
+import { boxOf, distance, pointAlongPolyline, polylineLength } from '../layout/geometry.ts';
 import { createPathFinder } from '../layout/path.ts';
-import type { Layout } from '../layout/records.ts';
-import { type NamedShift, type SettingPack, type Species, type Visit, HOME, placeFlagsOf, shiftLength, sleepLength } from '../pack/schema.ts';
+import type { Layout, StreetPosition } from '../layout/records.ts';
+import { type NamedShift, type Round, type SettingPack, type Species, type Visit, type VisitStop, HOME, allOccupations, placeFlagsOf, shiftLength, sleepLength, stopsOf } from '../pack/schema.ts';
 import type { Point } from '../schema.ts';
 import { deriveSeed } from '../seed.ts';
 import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay, weekdayOf } from './calendar.ts';
 import { createWorkingHours } from './hours.ts';
-import { type Ground, type WanderHabit, clipWander, groundOf, makeWander, positionOnWander } from './wander.ts';
-import type { Activity, DayPlan, DaySummary, Nearby, Occupant, OpenSpan, OutsideStay, Region, Stay, Travel, Trip, TripPath, Wander, Whereabouts } from './records.ts';
+import { type Ground, type WanderHabit, clipWander, groundOf, makeWander, positionOnWander, streetGround } from './wander.ts';
+import type { Activity, DayPlan, DaySummary, Nearby, Occupant, OpenSpan, OutsideStay, Region, Stay, StreetStop, Travel, Trip, TripPath, Wander, Whereabouts } from './records.ts';
 
 export { dutyCount, restDaysUpTo } from './hours.ts';
 
@@ -91,6 +91,11 @@ export function tripDuration(length: number, speed: number): number {
 }
 
 const DAYS_KEPT = 4;
+/** The shortest spell at the workplace between circuits of a round, and the longest the first spell of a shift is stretched by, in game seconds. */
+const SPELL = 60;
+const FIRST_SPELL = 3600;
+/** How many street points are drawn when looking for where a stroll turns back. */
+const STROLL_TRIES = 6;
 /** The nearby query's index sorts a day's walks and outside stays into stretches of this many game seconds. */
 const WALK_SLOT = 300;
 const STAY_SLOT = 3600;
@@ -144,7 +149,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     sleepLength: number;
     /** Where the personal day starts, in seconds from the start of the calendar day of the same number. */
     anchor: number;
-    work?: { building: string; start: number; end: number };
+    work?: { building: string; start: number; end: number; round?: Round };
   }
   const profiles = new Array<Profile | undefined>(city.people.length);
   const profileOf = (index: number): Profile => {
@@ -162,7 +167,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     if (shift && person.workplaceId !== undefined) {
       const start = shift.start;
       const end = shift.start + shiftLength(shift);
-      work = { building: person.workplaceId, start, end };
+      const round = person.occupationId === undefined ? undefined : roundOf.get(person.occupationId);
+      work = { building: person.workplaceId, start, end, ...(round && { round }) };
       // Sleep is moved, not shortened, as far as the shift requires: up in time to get ready, and not to bed before winding down.
       const earliest = end + species.life.minutesBeforeBed * 60 - (SECONDS_PER_DAY - asleep);
       const latest = start - species.life.minutesBeforeLeaving * 60;
@@ -210,12 +216,12 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     away: number;
   }
   const reachable = new Map<string, Reachable[]>();
-  const destinations = (visit: Visit, from: string): Reachable[] => {
-    const key = `${visit.id}|${from}`;
+  const destinations = (visit: Visit, at: number, from: string): Reachable[] => {
+    const key = `${visit.id}#${at}|${from}`;
     let list = reachable.get(key);
     if (!list) {
       const origin = entranceOf(from);
-      list = (visit.destinations ?? [])
+      list = (stopsOf(visit)[at] as VisitStop).destinations
         .flatMap((type) => buildingsOfType.get(type) ?? [])
         .filter((id) => id !== from && lotOf.has(id))
         .map((id) => ({ id, away: distance(origin, entranceOf(id)) }))
@@ -268,6 +274,97 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     return makeWander(ground, rng, start, end, habits.get(person.species));
   };
 
+  // ---- Streets, and walks that begin or end on one ---------------------------------------------
+  /** Somewhere a walk can begin or end: a building, by its lot's entrance, or a point on a street. */
+  type Spot = { building: string } | { street: StreetPosition };
+  const segmentById = new Map(layout.segments.map((segment) => [segment.id, segment]));
+  const streetReach = pack.visits.streetReach ?? 0;
+  const positionOf = (spot: Spot): StreetPosition => {
+    if ('street' in spot) return spot.street;
+    const lot = lotOf.get(spot.building);
+    if (!lot) throw new LifeError(`${spot.building} has no lot in the layout`);
+    return lot.entrance;
+  };
+  /** A walk between any two spots. Between two buildings it is the same walk, and the same record, as ever. */
+  const hop = (from: Spot, to: Spot, departAt: number, speed: number, round: boolean): Travel => {
+    let path: TripPath;
+    if ('building' in from && 'building' in to) path = pathBetween(from.building, to.building);
+    else path = finder.between(positionOf(from), positionOf(to));
+    const arriveAt = departAt + tripDuration(path.length, speed);
+    return {
+      kind: 'travel',
+      start: departAt,
+      end: arriveAt,
+      ...('building' in from ? { fromBuildingId: from.building } : { fromStreet: from.street }),
+      ...('building' in to ? { toBuildingId: to.building } : { toStreet: to.street }),
+      departAt,
+      arriveAt,
+      path,
+      ...(round && { round: true as const }),
+    };
+  };
+  /**
+   * How a person moves about a short stretch of street during one stay on it: drawn from the person, the
+   * segment and when the stay begins. `from` is where they walked up to, if they walked.
+   */
+  const streetWander = (person: Person, segmentId: string, centre: Point, start: number, end: number, from?: Point): Wander => {
+    const segment = segmentById.get(segmentId);
+    if (!segment) throw new LifeError(`there is no segment with the ID "${segmentId}"`);
+    const rng = createRng(deriveSeed(String(seed), 'life-street', `${person.id}:${segmentId}:${start}`));
+    return makeWander(streetGround(segment.points, centre, streetReach), rng, start, end, habits.get(person.species), from);
+  };
+  /** The streets of a district, or of the whole town for '': each segment with the running total of their lengths, for drawing a point by length. */
+  const streetsBy = new Map<string, { segments: Layout['segments']; upTo: number[] }>();
+  const streetsOf = (districtId: string) => {
+    let streets = streetsBy.get(districtId);
+    if (!streets) {
+      // A district's streets are those its lots open onto.
+      const wanted = districtId === '' ? undefined : new Set(layout.lots.filter((lot) => lot.districtId === districtId).map((lot) => lot.entrance.segmentId));
+      const segments = layout.segments.filter((segment) => !wanted || wanted.has(segment.id));
+      let total = 0;
+      streets = { segments, upTo: segments.map((segment) => (total += polylineLength(segment.points))) };
+      streetsBy.set(districtId, streets);
+    }
+    return streets;
+  };
+  /** A point on a street of a district, or of the town: every metre of street is as likely as any other. */
+  const streetPoint = (districtId: string, rng: Rng): StreetPosition | undefined => {
+    const { segments, upTo } = streetsOf(districtId);
+    const total = upTo[upTo.length - 1];
+    if (total === undefined || total <= 0) return undefined;
+    const along = rng.next() * total;
+    let low = 0;
+    let high = upTo.length - 1;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((upTo[middle] as number) < along) low = middle + 1;
+      else high = middle;
+    }
+    const segment = segments[low] as Layout['segments'][number];
+    return { segmentId: segment.id, point: pointAlongPolyline(segment.points, along - (low === 0 ? 0 : (upTo[low - 1] as number))) };
+  };
+
+  // ---- Rounds ------------------------------------------------------------------------------
+  const districtOf = new Map(city.buildings.map((building) => [building.id, building.districtId]));
+  const roundOf = new Map(allOccupations(pack).flatMap((occupation) => (occupation.round === undefined ? [] : [[occupation.id, pack.rounds[occupation.round] as Round] as const])));
+  /** The buildings a round from a workplace can stop at, nearest the workplace first. */
+  const roundStops = new Map<string, Reachable[]>();
+  const stopsFor = (round: Round, workplace: string): Reachable[] => {
+    const key = `${round.name}|${workplace}`;
+    let list = roundStops.get(key);
+    if (!list) {
+      const origin = entranceOf(workplace);
+      const district = districtOf.get(workplace);
+      list = (round.at === 'street' ? [] : round.at)
+        .flatMap((type) => buildingsOfType.get(type) ?? [])
+        .filter((id) => id !== workplace && lotOf.has(id) && (round.range === 'town' || districtOf.get(id) === district))
+        .map((id) => ({ id, away: distance(origin, entranceOf(id)) }))
+        .sort((a, b) => a.away - b.away || (a.id < b.id ? -1 : 1));
+      roundStops.set(key, list);
+    }
+    return list;
+  };
+
   const personalDay = (index: number, day: number): Activity[] => {
     const profile = profileOf(index);
     const { person, home, speed, species, work } = profile;
@@ -284,43 +381,128 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     const restDay = isRestDay(day, calendar);
     const onDuty = work !== undefined && hours.onDuty(index, day);
 
-    /** Time spent at a building, at work or on a visit: outside if the building is open-air or the visit says so. */
-    const spend = (kind: 'work' | 'visit', start: number, end: number, buildingId: string, visit?: Visit): Stay => ({
-      kind,
+    /**
+     * Time spent at a building, at work or on a visit: outside if the building is open-air or the visit says
+     * so, and then on the lot's open ground, or out on the street in front where the visit says that.
+     */
+    const spend = (kind: 'work' | 'visit', start: number, end: number, buildingId: string, visit?: Visit, round = false): Stay => {
+      const outside = (openAir.has(buildingId) || visit?.outside === true) && end > start;
+      const inFront = outside && visit?.where === 'street';
+      const lot = inFront ? lotOf.get(buildingId) : undefined;
+      return {
+        kind,
+        start,
+        end,
+        buildingId,
+        ...(visit && { visitId: visit.id }),
+        ...(outside && { outside: true as const, wander: lot ? streetWander(person, lot.entrance.segmentId, lot.entrance.point, start, end) : wanderFor(person, buildingId, start, end) }),
+        ...(lot && { onStreet: true as const }),
+        ...(round && { round: true as const }),
+      };
+    };
+    /** A stay at a point on a street, reached on foot. */
+    const pauseAt = (street: StreetPosition, start: number, end: number, purpose: 'work' | 'visit', visit?: Visit): StreetStop => ({
+      kind: 'street',
       start,
       end,
-      buildingId,
+      segmentId: street.segmentId,
+      wander: streetWander(person, street.segmentId, street.point, start, end, street.point),
+      purpose,
       ...(visit && { visitId: visit.id }),
-      ...((openAir.has(buildingId) || visit?.outside === true) && end > start && { outside: true as const, wander: wanderFor(person, buildingId, start, end) }),
+      ...(purpose === 'work' && { round: true as const }),
     });
+    /** Where a walk on from an activity begins: the building, or where on the street the person has got to. */
+    const spotAfter = (activity: Stay | StreetStop): Spot =>
+      activity.kind === 'street' ? { street: { segmentId: activity.segmentId, point: activity.wander.points[activity.wander.points.length - 1] as Point } } : { building: activity.buildingId };
+
+    /**
+     * A shift at a workplace, from arriving to leaving. For most it is one stay. Someone whose work is done on a
+     * round spends part of it on circuits: out from the workplace, from stop to stop, and back, with spells at
+     * the workplace between. A round has a stream of its own, so it never disturbs the rest of the day's plan.
+     */
+    const workSpan = (building: string, arrive: number, leave: number): Activity[] => {
+      const round = work?.round;
+      if (!round || round.share <= 0 || leave - arrive < 4 * SPELL) return [spend('work', arrive, leave, building)];
+      const turn = createRng(deriveSeed(String(seed), 'life-round', `${person.id}:${day}`));
+      const district = round.range === 'town' ? '' : (districtOf.get(building) ?? '');
+      const candidates = stopsFor(round, building);
+      /** One circuit setting out at a time: its legs and stops, or nothing if there is no time for one. */
+      const circuit = (setOut: number): { activities: Activity[]; end: number } | undefined => {
+        const wanted = round.stops.min + Math.floor(turn.next() * (round.stops.max - round.stops.min + 1));
+        const made: Activity[] = [];
+        let here: Spot = { building };
+        let now = setOut;
+        for (let stop = 0; stop < wanted; stop++) {
+          let target: Spot | undefined;
+          if (round.at === 'street') {
+            const street = streetPoint(district, turn);
+            target = street && { street };
+          } else if (candidates.length > 0) {
+            // Nearer places are favoured, as they are for visits.
+            const picked = candidates[Math.min(candidates.length - 1, Math.floor(candidates.length * turn.next() ** pack.visits.nearness))] as Reachable;
+            target = { building: picked.id };
+          }
+          if (!target) break;
+          if ('building' in target && 'building' in here && target.building === here.building) continue;
+          const leg = hop(here, target, now, speed, true);
+          const until = leg.arriveAt + Math.max(1, Math.round((round.stopMinutes.min + turn.next() * (round.stopMinutes.max - round.stopMinutes.min)) * 60));
+          // There must be time to get back, with a spell at the workplace before the shift ends.
+          const back = tripDuration(hop(target, { building }, until, speed, true).path.length + streetReach, speed);
+          if (until + back > leave - SPELL) break;
+          const stay = 'street' in target ? pauseAt(target.street, leg.arriveAt, until, 'work') : spend('work', leg.arriveAt, until, target.building, undefined, true);
+          made.push(leg, stay);
+          here = spotAfter(stay);
+          now = until;
+        }
+        if (made.length === 0) return undefined;
+        const home = hop(here, { building }, now, speed, true);
+        return { activities: [...made, home], end: home.arriveAt };
+      };
+      const activities: Activity[] = [];
+      let since = arrive;
+      // The first spell at the workplace is short or long by chance; each later one is in proportion to the circuit before it.
+      let spell = SPELL + Math.floor(turn.next() * (1 - round.share) * FIRST_SPELL);
+      for (;;) {
+        const setOut = since + spell;
+        if (setOut >= leave - SPELL) break;
+        const made = circuit(setOut);
+        if (!made || made.end > leave - SPELL) break;
+        activities.push(spend('work', since, setOut, building), ...made.activities);
+        since = made.end;
+        spell = Math.max(SPELL, Math.round(((1 - round.share) / round.share) * (made.end - setOut) * (0.5 + turn.next())));
+      }
+      activities.push(spend('work', since, leave, building));
+      return activities;
+    };
 
     const blocks: Block[] = [];
+    const closing = (to: string, at: number) => (to === home || !checksHours ? Infinity : hours.openUntil(to, at));
     /**
-     * Chooses where a visit goes from a starting point, or nothing if there is nowhere. `arrival` says when the
-     * visitor would get to a place, given the length of the walk. Where the pack keeps opening hours, the place
-     * must be open then, and stay open for at least the visit's shortest duration.
+     * Chooses where a stop of a visit goes from a starting point, or nothing if there is nowhere. `arrival` says
+     * when the visitor would get to a place, given the length of the walk. Where the pack keeps opening hours, the
+     * place must be open then, and stay open for at least the stop's shortest duration.
      */
-    const choose = (visit: Visit, from: string, arrival: (to: string, exact: boolean, away: number) => number): { to: string; arriveAt: number; closes: number } | undefined => {
-      let list = destinations(visit, from).filter((entry) => entry.id !== home);
+    const choose = (visit: Visit, at: number, from: string, arrival: (to: string, exact: boolean, away: number) => number): { to: string; arriveAt: number; closes: number } | undefined => {
+      const stop = stopsOf(visit)[at] as VisitStop;
+      let list = destinations(visit, at, from).filter((entry) => entry.id !== home);
       // The person's own dwelling, where the visit allows it, is reached without a walk.
-      if (from === home && (visit.destinations ?? []).includes(HOME)) list = [{ id: home, away: 0 }, ...list];
-      const shortest = (visit.durationMinutes?.min ?? 0) * 60;
-      const closing = (to: string, at: number) => (to === home || !checksHours ? Infinity : hours.openUntil(to, at));
+      if (from === home && stop.destinations.includes(HOME)) list = [{ id: home, away: 0 }, ...list];
+      const shortest = stop.durationMinutes.min * 60;
       // A first sieve by the time a straight walk would take, so that paths are found only for places worth trying.
       if (checksHours) list = list.filter((entry) => closing(entry.id, arrival(entry.id, false, entry.away)) !== undefined);
       while (list.length > 0) {
-        // Raising an even draw to the pack's power leans the choice toward the near end of the list.
-        const picked = Math.min(list.length - 1, Math.floor(list.length * rng.next() ** pack.visits.nearness));
+        // The nearest, where the stop says so. Otherwise raising an even draw to the pack's power leans the choice toward the near end of the list.
+        const picked = stop.nearest ? 0 : Math.min(list.length - 1, Math.floor(list.length * rng.next() ** pack.visits.nearness));
         const { id: to, away } = list[picked] as Reachable;
         const arriveAt = arrival(to, true, away);
         const closes = closing(to, arriveAt);
         if (closes !== undefined && closes - arriveAt >= shortest) return { to, arriveAt, closes };
-        list = list.filter((_, at) => at !== picked);
+        list = list.filter((_, index) => index !== picked);
       }
       return undefined;
     };
-    const stayLength = (visit: Visit) => {
-      const { min, max } = visit.durationMinutes ?? { min: 0, max: 0 };
+    const stayLength = (stop: VisitStop) => {
+      const { min, max } = stop.durationMinutes;
       return Math.round((min + rng.next() * (max - min)) * 60);
     };
     /** The stops after work, each walked to from the last, starting where and when work ends. */
@@ -332,13 +514,13 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         if (visit.when !== 'after-work' || !applies(visit, person, true, restDay, day) || !rng.chance(visit.probability)) continue;
         const origin = where;
         const leaving = now;
-        const chosen = choose(visit, origin, (to, exact, away) =>
+        const chosen = choose(visit, 0, origin, (to, exact, away) =>
           to === origin ? leaving : leaving + tripDuration(exact ? pathBetween(origin, to).length : away, speed),
         );
         if (!chosen) continue;
         const { to, arriveAt, closes } = chosen;
         if (to !== where) activities.push(travel(where, to, now, speed));
-        const until = Math.min(arriveAt + stayLength(visit), closes);
+        const until = Math.min(arriveAt + stayLength(stopsOf(visit)[0] as VisitStop), closes);
         activities.push(spend('visit', arriveAt, until, to, visit));
         where = to;
         now = until;
@@ -352,7 +534,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       if (work.building === home) {
         // Working at home: no commute. Any stop after work is an outing of its own.
         const stops = afterWork(home, leave);
-        blocks.push({ start: arrive, end: leave, activities: [spend('work', arrive, leave, home)] });
+        blocks.push({ start: arrive, end: leave, activities: workSpan(home, arrive, leave) });
         if (stops.activities.length > 0) {
           if (stops.where === home) {
             // Every stop was at home itself, so there is no walk back.
@@ -384,7 +566,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         blocks.push({
           start: there.departAt,
           end: back.arriveAt,
-          activities: [there, spend('work', arrive, leave, work.building), ...stops.activities, back],
+          activities: [there, ...workSpan(work.building, arrive, leave), ...stops.activities, back],
         });
         wake = Math.min(wake, there.departAt - leadTime);
       }
@@ -396,27 +578,89 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     if (last) bed = Math.max(bed, last.end);
     bed = Math.min(Math.max(bed, wake), dayEnd);
 
-    // Visits at a time of day: from home and back, if they fit around everything else.
+    /**
+     * An errand from home: its stops in order, each walked to from the last, and home again. The first stop is
+     * reached at `begin`. A stop that is left out by chance, or has nowhere open to go, is skipped.
+     */
+    const errand = (visit: Visit, begin: number): Block | undefined => {
+      const made: Activity[] = [];
+      let where = home;
+      let now = begin;
+      stopsOf(visit).forEach((stop, at) => {
+        if (stop.chance !== undefined && !rng.chance(stop.chance)) return;
+        const wanted = stayLength(stop);
+        const first = made.length === 0;
+        const origin = where;
+        const leaving = now;
+        const chosen = choose(visit, at, origin, first ? () => begin : (to, exact, away) => (to === origin ? leaving : leaving + tripDuration(exact ? pathBetween(origin, to).length : away, speed)));
+        if (!chosen) return;
+        const { to, arriveAt, closes } = chosen;
+        const until = Math.min(arriveAt + wanted, closes);
+        // The first walk is timed to arrive at the moment chosen; the rest set out when the stop before ends.
+        if (to !== where) made.push(travel(where, to, first ? begin - tripDuration(pathBetween(where, to).length, speed) : now, speed));
+        made.push(spend('visit', arriveAt, until, to, visit));
+        where = to;
+        now = until;
+      });
+      if (made.length === 0) return undefined;
+      if (where !== home) made.push(travel(where, home, now, speed));
+      return { start: (made[0] as Activity).start, end: (made[made.length - 1] as Activity).end, activities: made };
+    };
+    /**
+     * A stroll: out from home at `begin`, by way of a public place the stroll favours if one is near enough and
+     * open, otherwise a point on a street about as far off as the walk allows; a pause there; and home.
+     */
+    const strollOut = (visit: Visit, begin: number): Block | undefined => {
+      const stroll = visit.stroll as NonNullable<Visit['stroll']>;
+      const walking = (stroll.minutes.min + rng.next() * (stroll.minutes.max - stroll.minutes.min)) * 60;
+      const pause = Math.max(1, Math.round((stroll.pauseMinutes.min + rng.next() * (stroll.pauseMinutes.max - stroll.pauseMinutes.min)) * 60));
+      // Out and back: the turning point is at most half the walk away.
+      const reach = (walking * speed) / 2;
+      const origin = entranceOf(home);
+      const places = (stroll.favour ?? []).flatMap((type) => buildingsOfType.get(type) ?? []).filter((id) => id !== home && lotOf.has(id) && distance(origin, entranceOf(id)) <= reach);
+      let target: Spot | undefined;
+      if (places.length > 0) target = { building: places[Math.floor(rng.next() * places.length)] as string };
+      else {
+        // A few points are drawn, and the one nearest to two thirds of the way out is the turning point.
+        let nearest = Infinity;
+        for (let attempt = 0; attempt < STROLL_TRIES; attempt++) {
+          const street = streetPoint('', rng);
+          if (!street) break;
+          const off = Math.abs(distance(origin, street.point) - (reach * 2) / 3);
+          if (off < nearest) {
+            nearest = off;
+            target = { street };
+          }
+        }
+      }
+      if (!target) return undefined;
+      const out = hop({ building: home }, target, begin, speed, false);
+      let until = out.arriveAt + pause;
+      if ('building' in target) {
+        const closes = closing(target.building, out.arriveAt);
+        if (closes === undefined) return undefined;
+        until = Math.min(until, closes);
+      }
+      if (until <= out.arriveAt) return undefined;
+      const stop = 'building' in target ? spend('visit', out.arriveAt, until, target.building, visit) : pauseAt(target.street, out.arriveAt, until, 'visit', visit);
+      const back = hop(spotAfter(stop), { building: home }, until, speed, false);
+      return { start: begin, end: back.arriveAt, activities: [out, stop, back] };
+    };
+
+    // Visits at a time of day: from home and back, if they fit around everything else. One that happens
+    // several times a day is placed at a time of its own each time.
     for (const visit of visits) {
       if (visit.when === 'after-work' || !applies(visit, person, onDuty, restDay, day) || !rng.chance(visit.probability)) continue;
-      const begin = base + visit.when.from + Math.floor(rng.next() * (visit.when.to - visit.when.from));
-      const wanted = stayLength(visit);
-      const chosen = choose(visit, home, () => begin);
-      if (chosen === undefined) continue;
-      const { to } = chosen;
-      const until = Math.min(begin + wanted, chosen.closes);
-      const block: Block =
-        to === home
-          ? { start: begin, end: until, activities: [spend('visit', begin, until, home, visit)] }
-          : (() => {
-              const out = travel(home, to, begin - tripDuration(pathBetween(home, to).length, speed), speed);
-              const back = travel(to, home, until, speed);
-              return { start: out.departAt, end: back.arriveAt, activities: [out, spend('visit', begin, until, to, visit), back] };
-            })();
-      if (block.start < wake || block.end > bed) continue;
-      // Outings may not touch, either: someone home from one walk does not set out on the next in the same second.
-      if (blocks.some((other) => block.start <= other.end && block.end >= other.start)) continue;
-      blocks.push(block);
+      const times = visit.timesPerDay ? visit.timesPerDay.min + Math.floor(rng.next() * (visit.timesPerDay.max - visit.timesPerDay.min + 1)) : 1;
+      for (let time = 0; time < times; time++) {
+        const begin = base + visit.when.from + Math.floor(rng.next() * (visit.when.to - visit.when.from));
+        const block = visit.stroll ? strollOut(visit, begin) : errand(visit, begin);
+        if (!block) continue;
+        if (block.start < wake || block.end > bed) continue;
+        // Outings may not touch, either: someone home from one walk does not set out on the next in the same second.
+        if (blocks.some((other) => block.start <= other.end && block.end >= other.start)) continue;
+        blocks.push(block);
+      }
     }
     blocks.sort((a, b) => a.start - b.start);
 
@@ -468,7 +712,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         // Only what lies within the day is kept; a walk of no length at the very boundary belongs to the day it starts.
         if (end <= start && !(activity.kind === 'travel' && activity.start === activity.end && activity.start >= from && activity.start < to)) continue;
         const previous = activities[activities.length - 1];
-        if (previous && previous.kind !== 'travel' && activity.kind === previous.kind && activity.buildingId === previous.buildingId && previous.visitId === activity.visitId) {
+        if (previous && previous.kind !== 'travel' && previous.kind !== 'street' && activity.kind === previous.kind && activity.buildingId === previous.buildingId && previous.visitId === activity.visitId && !activity.wander) {
           // The same thing either side of a seam is one activity.
           previous.end = end;
         } else {
@@ -526,7 +770,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
   // so that a question about one moment looks only at the people who are out around then.
   interface Seen {
     walks: Array<Array<{ personId: string; travel: Travel; box: Region }>>;
-    stays: Array<Array<{ personId: string; stay: Stay }>>;
+    /** Everyone out of doors who is not walking: on a lot, in front of a building, or at a stop on a street. */
+    stays: Array<Array<{ personId: string; stay: Stay | StreetStop }>>;
   }
   const boxes = new WeakMap<TripPath, Region>();
   const boxOfPath = (path: TripPath): Region => {
@@ -561,7 +806,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       for (const activity of activities) {
         if (activity.end <= activity.start) continue;
         if (activity.kind === 'travel') file(seen.walks, WALK_SLOT, activity.start, activity.end, { personId, travel: activity, box: boxOfPath(activity.path) });
-        else if (activity.outside) file(seen.stays, STAY_SLOT, activity.start, activity.end, { personId, stay: activity });
+        else if (activity.kind === 'street' || activity.outside) file(seen.stays, STAY_SLOT, activity.start, activity.end, { personId, stay: activity });
       }
     }
     return keep(seenByDay, day, seen);
@@ -585,10 +830,25 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           time,
           kind: 'travel',
           ...positionOn(activity, time),
-          fromBuildingId: activity.fromBuildingId,
-          toBuildingId: activity.toBuildingId,
+          ...(activity.fromBuildingId !== undefined ? { fromBuildingId: activity.fromBuildingId } : { fromStreet: activity.fromStreet as StreetPosition }),
+          ...(activity.toBuildingId !== undefined ? { toBuildingId: activity.toBuildingId } : { toStreet: activity.toStreet as StreetPosition }),
+          ...(activity.round && { round: true as const }),
           since: activity.departAt,
           until: activity.arriveAt,
+        };
+      }
+      if (activity.kind === 'street') {
+        return {
+          personId,
+          time,
+          kind: 'street',
+          point: positionOnWander(activity.wander, time),
+          segmentId: activity.segmentId,
+          purpose: activity.purpose,
+          ...(activity.visitId !== undefined && { visitId: activity.visitId }),
+          ...(activity.round && { round: true as const }),
+          since: activity.start,
+          until: activity.end,
         };
       }
       return {
@@ -598,6 +858,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         buildingId: activity.buildingId,
         ...(activity.visitId !== undefined && { visitId: activity.visitId }),
         ...(activity.outside && { outside: true as const, point: positionOnWander(activity.wander as Wander, time) }),
+        ...(activity.onStreet && { onStreet: true as const }),
+        ...(activity.round && { round: true as const }),
         since: activity.start,
         until: activity.end,
       };
@@ -608,7 +870,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       const inside: Occupant[] = [];
       for (const { personId, activities } of plansForDay(dayOf(time))) {
         const activity = activityAt(activities, time);
-        if (activity.kind !== 'travel' && activity.buildingId === buildingId) {
+        if (activity.kind !== 'travel' && activity.kind !== 'street' && activity.buildingId === buildingId) {
           inside.push({
             personId,
             kind: activity.kind,
@@ -639,15 +901,18 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       for (const day of daysIn(from, to)) {
         for (const { personId, activities } of plansForDay(day)) {
           for (const activity of activities) {
-            if (activity.kind === 'travel' || !activity.outside || activity.end <= from || activity.start >= to) continue;
-            // A stay is on its building's lot, so it is in a region when the lot is.
+            if (activity.kind === 'travel' || activity.end <= from || activity.start >= to) continue;
+            if (activity.kind !== 'street' && !activity.outside) continue;
+            const wander = activity.wander as Wander;
+            const where = activity.kind === 'street' ? { segmentId: activity.segmentId } : { buildingId: activity.buildingId };
             if (region) {
-              const box = lotBox(activity.buildingId);
+              // A stay on a lot is in a region when the lot is; one on a street, when the person is.
+              const [px, py] = wander.points[0] as Point;
+              const box = activity.kind === 'street' || activity.onStreet ? { minX: px, maxX: px, minY: py, maxY: py } : lotBox(activity.buildingId);
               if (box.maxX < region.minX || box.minX > region.maxX || box.maxY < region.minY || box.minY > region.maxY) continue;
             }
-            const wander = activity.wander as Wander;
             const before = latest.get(personId);
-            if (before && before.to === activity.start && before.buildingId === activity.buildingId) {
+            if (before && before.to === activity.start && before.buildingId === where.buildingId && before.segmentId === where.segmentId) {
               // The other half of a stay already found: the wander goes on from where it stopped.
               before.to = activity.end;
               before.wander = { times: [...before.wander.times, ...wander.times.slice(1)], points: [...before.wander.points, ...wander.points.slice(1)] };
@@ -655,9 +920,11 @@ export function createLife(inputs: LifeInputs): SettlementLife {
             }
             const stay: OutsideStay = {
               personId,
-              buildingId: activity.buildingId,
-              kind: activity.kind as 'work' | 'visit',
+              ...where,
+              kind: activity.kind === 'street' ? activity.purpose : (activity.kind as 'work' | 'visit'),
               ...(activity.visitId !== undefined && { visitId: activity.visitId }),
+              ...(activity.round && { round: true as const }),
+              ...(activity.kind !== 'street' && activity.onStreet && { onStreet: true as const }),
               wander,
               from: activity.start,
               to: activity.end,
@@ -700,8 +967,9 @@ export function createLife(inputs: LifeInputs): SettlementLife {
             }
             found.push({
               personId,
-              fromBuildingId: activity.fromBuildingId,
-              toBuildingId: activity.toBuildingId,
+              ...(activity.fromBuildingId !== undefined && { fromBuildingId: activity.fromBuildingId }),
+              ...(activity.toBuildingId !== undefined && { toBuildingId: activity.toBuildingId }),
+              ...(activity.round && { round: true as const }),
               departAt: activity.departAt,
               arriveAt: activity.arriveAt,
               length: activity.path.length,
@@ -725,7 +993,16 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         if (x < box.minX - radius || x > box.maxX + radius || y < box.minY - radius || y > box.maxY + radius) continue;
         const at = positionOn(walk, time).point;
         const away = distance(point, at);
-        if (away <= radius) found.push({ personId, distance: away, point: at, kind: 'walking', fromBuildingId: walk.fromBuildingId, toBuildingId: walk.toBuildingId });
+        if (away > radius) continue;
+        found.push({
+          personId,
+          distance: away,
+          point: at,
+          kind: 'walking',
+          ...(walk.fromBuildingId !== undefined && { fromBuildingId: walk.fromBuildingId }),
+          ...(walk.toBuildingId !== undefined && { toBuildingId: walk.toBuildingId }),
+          ...(walk.round && { round: true as const }),
+        });
       }
       for (const { personId, stay } of seen.stays[Math.floor(sinceMidnight / STAY_SLOT)] ?? []) {
         if (time < stay.start || time >= stay.end) continue;
@@ -737,9 +1014,10 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           distance: away,
           point: at,
           kind: 'outside',
-          buildingId: stay.buildingId,
-          activity: stay.kind as 'work' | 'visit',
+          ...(stay.kind === 'street' ? { segmentId: stay.segmentId } : { buildingId: stay.buildingId }),
+          activity: stay.kind === 'street' ? stay.purpose : (stay.kind as 'work' | 'visit'),
           ...(stay.visitId !== undefined && { visitId: stay.visitId }),
+          ...(stay.round && { round: true as const }),
         });
       }
       return found.sort((a, b) => a.distance - b.distance || (a.personId < b.personId ? -1 : 1));
@@ -761,8 +1039,9 @@ export function createLife(inputs: LifeInputs): SettlementLife {
             const from = Math.max(activity.start, start + hour * 3600);
             const to = Math.min(activity.end, start + (hour + 1) * 3600);
             if (to <= from) continue;
-            seconds[activity.kind][hour]! += to - from;
-            if (activity.kind !== 'travel' && activity.outside) outside[hour]! += to - from;
+            // A stop on a street counts as what it is for, work or a visit, and as time out of doors.
+            seconds[activity.kind === 'street' ? activity.purpose : activity.kind][hour]! += to - from;
+            if (activity.kind === 'street' || (activity.kind !== 'travel' && activity.outside)) outside[hour]! += to - from;
           }
         }
       }

@@ -1,2 +1,80 @@
-# Rounds: work done on foot. Filled in below as the pack gains them.
-{}
+# Rounds: work that is done on foot. An occupation names its round in
+# occupations.yaml, and part of each of its shifts is then spent on circuits
+# that start and end at the workplace: out, from stop to stop, and back, with
+# spells at the workplace between.
+#
+#   name         what the worker is doing, for the viewer
+#   share        how much of the shift is spent on rounds
+#   stops        how many stops a circuit has, between min and max
+#   stopMinutes  how long each stop lasts
+#   range        how far it goes: `district`, the district of the workplace,
+#                or `town`
+#   at           what a stop is: `street`, a point on a street; or a list of
+#                building types, of which nearer ones are favoured
+#
+# A round differs from day to day and from worker to worker. A worker on a
+# round is at work, and reacts to nothing. All values are placeholders.
+
+# The watch walks the whole town, day and night, pausing at points on its beat.
+patrol:
+  name: On patrol
+  share: 0.7
+  stops: {min: 4, max: 8}
+  stopMinutes: {min: 2, max: 6}
+  range: town
+  at: street
+
+# Carters take loads between yards, workshops, shops and the market.
+deliveries:
+  name: Making deliveries
+  share: 0.6
+  stops: {min: 2, max: 5}
+  stopMinutes: {min: 5, max: 15}
+  range: town
+  at: [carters-yard, warehouse, market-stall, market-square, docks, granary, mill, brewery, bakery, tannery, forge, weaving-shed, general-shop, tavern, merchants-house]
+
+# Porters carry by hand between the market, the warehouses and the shops.
+carrying:
+  name: Carrying loads
+  share: 0.6
+  stops: {min: 2, max: 4}
+  stopMinutes: {min: 5, max: 10}
+  range: town
+  at: [market-stall, market-square, warehouse, docks, granary, general-shop, tavern, merchants-house, counting-house]
+
+# Pedlars sell from the street, stopping where there is custom.
+hawking:
+  name: Hawking in the streets
+  share: 0.7
+  stops: {min: 4, max: 8}
+  stopMinutes: {min: 5, max: 15}
+  range: town
+  at: street
+
+# Water carriers go between the wells and the houses.
+water-round:
+  name: Carrying water
+  share: 0.75
+  stops: {min: 3, max: 6}
+  stopMinutes: {min: 3, max: 8}
+  range: town
+  at: [well, shack, tenement, cottage, row-house, townhouse, mansion, noble-house, tavern, bathhouse]
+
+# Street sweepers work along the streets of their own part of town.
+sweeping:
+  name: Sweeping the streets
+  share: 0.85
+  stops: {min: 6, max: 12}
+  stopMinutes: {min: 5, max: 15}
+  range: district
+  at: street
+
+# Servants are sent out from the house they serve: to the well, the oven and
+# the shops nearby.
+errands:
+  name: On an errand
+  share: 0.2
+  stops: {min: 1, max: 3}
+  stopMinutes: {min: 5, max: 15}
+  range: district
+  at: [well, public-oven, market-stall, bakery, butchery, general-shop]

@@ -30,7 +30,7 @@ import {
   parsePack,
   shortestPath,
 } from '../src/index.ts';
-import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 const pack = medievalPack();
 const { bearingDifference, exactBearing, distanceBetweenPolylines, crossingsOfPolyline, polylineLength, projectOnPolyline, distance } = geometry;
@@ -417,16 +417,7 @@ describe('footprints', () => {
   it('leave junctions, segments, lots and entrances as they were at layout version 1', () => {
     // The fingerprint is of Badanos as the city generator made it at version 2, before civic buildings:
     // a pack without them gives that city again, and so the same streets, lots and entrances.
-    const without = town('settlement-641', edited((raw) => {
-      const civic = raw.landmarks.filter((landmark: any) => landmark.when === undefined);
-      const posts = new Set(civic.flatMap((landmark: any) => landmark.posts.map((post: any) => post.occupation)));
-      raw.landmarks = raw.landmarks.filter((landmark: any) => landmark.when !== undefined);
-      raw.occupations = raw.occupations.filter((occupation: any) => !posts.has(occupation.id));
-      for (const landmark of civic) {
-        delete raw.layout.lots[landmark.id];
-        delete raw.layout.footprints.types[landmark.id];
-      }
-    }));
+    const without = town('settlement-641', medievalPackBefore6B());
     const baseline = JSON.parse(readFileSync(new URL('./baselines/layout-v1.json', import.meta.url), 'utf8')) as { badanos: string };
     const { summary, ...rest } = without.layout;
     const text = JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) });

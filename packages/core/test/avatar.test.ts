@@ -370,7 +370,7 @@ describe('perception', () => {
     city.people
       .flatMap((person) => {
         const where = life.whereabouts(person.id, time);
-        const seen = where.kind === 'travel' ? where.point : where.outside ? where.point! : undefined;
+        const seen = where.kind === 'travel' || where.kind === 'street' ? where.point : where.outside ? where.point! : undefined;
         if (!seen) return [];
         const away = distance(point, seen);
         return away <= radius ? [{ personId: person.id, distance: away, kind: where.kind === 'travel' ? 'walking' : 'outside' }] : [];
@@ -405,8 +405,14 @@ describe('perception', () => {
     expect(life.nearby([0, 0], 400, at(1, 12, 30)).some((entry) => entry.kind === 'outside')).toBe(true);
     for (const entry of [...found, ...life.nearby([0, 0], 400, at(1, 12, 30))]) {
       const where = life.whereabouts(entry.personId, entry.kind === 'walking' && found.includes(entry) ? time : found.includes(entry) ? time : at(1, 12, 30));
-      if (entry.kind === 'walking') expect(where).toMatchObject({ kind: 'travel', point: entry.point, fromBuildingId: entry.fromBuildingId, toBuildingId: entry.toBuildingId });
-      else expect(where).toMatchObject({ kind: entry.activity, outside: true, point: entry.point, buildingId: entry.buildingId });
+      if (entry.kind === 'walking') {
+        if (where.kind !== 'travel') throw new Error(`${entry.personId} is not walking`);
+        expect(where.point).toEqual(entry.point);
+        expect([where.fromBuildingId, where.toBuildingId, where.round]).toEqual([entry.fromBuildingId, entry.toBuildingId, entry.round]);
+      } else if (entry.buildingId === undefined) {
+        // At a stop on a street: no building, a segment instead.
+        expect(where).toMatchObject({ kind: 'street', purpose: entry.activity, point: entry.point, segmentId: entry.segmentId });
+      } else expect(where).toMatchObject({ kind: entry.activity, outside: true, point: entry.point, buildingId: entry.buildingId });
     }
   });
 
@@ -434,10 +440,10 @@ describe('perception', () => {
         if (seen.where !== 'street') throw new Error('not on a street');
         for (const entry of seen.nearby) {
           const where = life.whereabouts(entry.personId, time);
-          expect(where.kind === 'travel' || where.outside === true, entry.personId).toBe(true);
+          expect(where.kind === 'travel' || where.kind === 'street' || where.outside === true, entry.personId).toBe(true);
         }
-        // At 03:00 that is nobody at all, or the few who are walking then.
-        if (time === at(1, 3)) expect(seen.nearby.every((entry) => entry.kind === 'walking')).toBe(true);
+        // At 03:00 that is nobody at all, or the night watch on its round: walking, or stopped on its beat.
+        if (time === at(1, 3)) expect(seen.nearby.every((entry) => entry.round === true)).toBe(true);
       }
     }
     // The whole town from its centre at 03:00: everyone asleep indoors goes unseen.
@@ -445,7 +451,7 @@ describe('perception', () => {
     if (all.where !== 'street') throw new Error('not on a street');
     const out = city.people.filter((person) => {
       const where = life.whereabouts(person.id, at(1, 3));
-      return where.kind === 'travel' || where.outside;
+      return where.kind === 'travel' || where.kind === 'street' || where.outside;
     });
     expect(all.nearby.map((entry) => entry.personId).sort()).toEqual(out.map((person) => person.id).sort());
     expect(all.nearby.length).toBeLessThan(20);
@@ -523,7 +529,7 @@ describe('unchanged', () => {
   });
 
   it('keeps every version where it was', () => {
-    expect(LIFE_VERSION).toBe(3);
+    expect(LIFE_VERSION).toBe(4);
     expect(LAYOUT_VERSION).toBe(2);
     expect(GENERATOR_VERSION).toBe(3);
   });

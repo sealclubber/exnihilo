@@ -7,7 +7,7 @@
  */
 import { z } from 'zod';
 import { BuildingIdSchema, PersonIdSchema } from '../city/records.ts';
-import { SegmentIdSchema } from '../layout/records.ts';
+import { SegmentIdSchema, StreetPositionSchema } from '../layout/records.ts';
 import { PointSchema } from '../schema.ts';
 
 const text = z.string().min(1);
@@ -17,9 +17,10 @@ const gameTime = z.number();
  * Raised whenever the plans for the same inputs would change. Version 1 was
  * the first daily life; version 2 added opening hours, occupations split
  * across shifts, and stays out of doors; version 3 has people who are outside
- * move about the lot's open ground.
+ * move about the lot's open ground; version 4 added errands that chain and
+ * repeat, strolls, work done on rounds, and stops on the street.
  */
-export const LIFE_VERSION = 3;
+export const LIFE_VERSION = 4;
 
 /**
  * Moving about outside: the points a person is at, on the open ground of a
@@ -48,7 +49,7 @@ const outdoorsNow = {
   point: PointSchema.optional(),
 };
 
-export const ActivityKindSchema = z.enum(['sleep', 'home', 'work', 'visit', 'travel']);
+export const ActivityKindSchema = z.enum(['sleep', 'home', 'work', 'visit', 'travel', 'street']);
 export type ActivityKind = z.infer<typeof ActivityKindSchema>;
 
 /**
@@ -64,8 +65,30 @@ export const StaySchema = z.strictObject({
   /** For a visit: which of the pack's visits it is. */
   visitId: text.optional(),
   ...outdoors,
+  /** Outside, and out on the street in front of the building rather than on its lot: the wander keeps to the entrance segment. */
+  onStreet: z.literal(true).optional(),
+  /** For work: at a stop on a round, away from the workplace. */
+  round: z.literal(true).optional(),
 });
 export type Stay = z.infer<typeof StaySchema>;
+
+/**
+ * Being at a point on a street, with no building: a stop on a round, or a
+ * pause on a stroll. The person is outside and moves about a short stretch of
+ * the segment, as a wander.
+ */
+export const StreetStopSchema = z.strictObject({
+  kind: z.literal('street'),
+  start: gameTime,
+  end: gameTime,
+  segmentId: SegmentIdSchema,
+  wander: WanderSchema,
+  /** What the person is there for: their work, or a visit of the pack's. */
+  purpose: z.enum(['work', 'visit']),
+  visitId: text.optional(),
+  round: z.literal(true).optional(),
+});
+export type StreetStop = z.infer<typeof StreetStopSchema>;
 
 /** The path of a trip: the segments walked, how far on each, and the line. */
 export const TripPathSchema = z.strictObject({
@@ -77,26 +100,36 @@ export const TripPathSchema = z.strictObject({
 export type TripPath = z.infer<typeof TripPathSchema>;
 
 /**
- * Walking from one building to the next. The trip runs from `departAt` to
- * `arriveAt`; `start` and `end` are the part of it that falls in this day's
- * plan, which differ only for a trip that crosses midnight.
+ * Walking from one place to the next. Each end is a building, entered and
+ * left by its lot's entrance, or a point on a street. The trip runs from
+ * `departAt` to `arriveAt`; `start` and `end` are the part of it that falls
+ * in this day's plan, which differ only for a trip that crosses midnight.
  */
 export const TravelSchema = z.strictObject({
   kind: z.literal('travel'),
   start: gameTime,
   end: gameTime,
-  fromBuildingId: BuildingIdSchema,
-  toBuildingId: BuildingIdSchema,
+  /** Where the walk begins: a building, or failing that the street position in `fromStreet`. */
+  fromBuildingId: BuildingIdSchema.optional(),
+  fromStreet: StreetPositionSchema.optional(),
+  /** Where it ends, in the same way. */
+  toBuildingId: BuildingIdSchema.optional(),
+  toStreet: StreetPositionSchema.optional(),
   departAt: gameTime,
   arriveAt: gameTime,
   path: TripPathSchema,
+  /** A leg of a round: the walker is at work. */
+  round: z.literal(true).optional(),
 });
 export type Travel = z.infer<typeof TravelSchema>;
 
-export const ActivitySchema = z.discriminatedUnion('kind', [StaySchema, TravelSchema]).refine(
-  (activity) => activity.kind === 'travel' || outdoorsTogether(activity),
-  'a stay has a wander exactly when it is outside',
-);
+export const ActivitySchema = z
+  .discriminatedUnion('kind', [StaySchema, TravelSchema, StreetStopSchema])
+  .refine((activity) => activity.kind === 'travel' || activity.kind === 'street' || outdoorsTogether(activity), 'a stay has a wander exactly when it is outside')
+  .refine(
+    (activity) => activity.kind !== 'travel' || ((activity.fromBuildingId === undefined) !== (activity.fromStreet === undefined) && (activity.toBuildingId === undefined) !== (activity.toStreet === undefined)),
+    'each end of a walk is a building or a street position, not both and not neither',
+  );
 export type Activity = z.infer<typeof ActivitySchema>;
 
 /** One person's day, from midnight to midnight, with no gaps and no overlaps. */
@@ -116,6 +149,8 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
     buildingId: BuildingIdSchema,
     visitId: text.optional(),
     ...outdoorsNow,
+    onStreet: z.literal(true).optional(),
+    round: z.literal(true).optional(),
     /** When the current activity began and when it ends. */
     since: gameTime,
     until: gameTime,
@@ -126,8 +161,24 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
     kind: z.literal('travel'),
     point: PointSchema,
     segmentId: SegmentIdSchema,
-    fromBuildingId: BuildingIdSchema,
-    toBuildingId: BuildingIdSchema,
+    fromBuildingId: BuildingIdSchema.optional(),
+    fromStreet: StreetPositionSchema.optional(),
+    toBuildingId: BuildingIdSchema.optional(),
+    toStreet: StreetPositionSchema.optional(),
+    round: z.literal(true).optional(),
+    since: gameTime,
+    until: gameTime,
+  }),
+  /** At a point on a street, with no building: a stop on a round, or a pause on a stroll. */
+  z.strictObject({
+    personId: PersonIdSchema,
+    time: gameTime,
+    kind: z.literal('street'),
+    point: PointSchema,
+    segmentId: SegmentIdSchema,
+    purpose: z.enum(['work', 'visit']),
+    visitId: text.optional(),
+    round: z.literal(true).optional(),
     since: gameTime,
     until: gameTime,
   }),
@@ -146,8 +197,11 @@ export type Occupant = z.infer<typeof OccupantSchema>;
 /** One walk, whole: who, between which buildings, when, and along what line. */
 export const TripSchema = z.strictObject({
   personId: PersonIdSchema,
-  fromBuildingId: BuildingIdSchema,
-  toBuildingId: BuildingIdSchema,
+  /** The buildings walked between; one is absent where that end of the walk is a point on a street. */
+  fromBuildingId: BuildingIdSchema.optional(),
+  toBuildingId: BuildingIdSchema.optional(),
+  /** A leg of a round: the walker is at work. */
+  round: z.literal(true).optional(),
   departAt: gameTime,
   arriveAt: gameTime,
   length: z.number().nonnegative(),
@@ -162,9 +216,14 @@ export type Trip = z.infer<typeof TripSchema>;
  */
 export const OutsideStaySchema = z.strictObject({
   personId: PersonIdSchema,
-  buildingId: BuildingIdSchema,
+  /** The building they are at; absent for a stop on a street, which has a segment instead. */
+  buildingId: BuildingIdSchema.optional(),
+  segmentId: SegmentIdSchema.optional(),
   kind: z.enum(['work', 'visit']),
   visitId: text.optional(),
+  round: z.literal(true).optional(),
+  /** At a building, but out on the street in front of it rather than on its lot. */
+  onStreet: z.literal(true).optional(),
   wander: WanderSchema,
   from: gameTime,
   to: gameTime,
@@ -179,18 +238,24 @@ export const NearbySchema = z.discriminatedUnion('kind', [
     distance: z.number().nonnegative(),
     point: PointSchema,
     kind: z.literal('walking'),
-    fromBuildingId: BuildingIdSchema,
-    toBuildingId: BuildingIdSchema,
+    /** The buildings walked between; one is absent where that end of the walk is a point on a street. */
+    fromBuildingId: BuildingIdSchema.optional(),
+    toBuildingId: BuildingIdSchema.optional(),
+    /** Walking a round, at work. */
+    round: z.literal(true).optional(),
   }),
   z.strictObject({
     personId: PersonIdSchema,
     distance: z.number().nonnegative(),
     point: PointSchema,
     kind: z.literal('outside'),
-    buildingId: BuildingIdSchema,
+    /** The building they are at, on its lot or in front of it; absent for someone at a stop on a street, who has a segment instead. */
+    buildingId: BuildingIdSchema.optional(),
+    segmentId: SegmentIdSchema.optional(),
     /** What they are there for. */
     activity: z.enum(['work', 'visit']),
     visitId: text.optional(),
+    round: z.literal(true).optional(),
   }),
 ]);
 export type Nearby = z.infer<typeof NearbySchema>;

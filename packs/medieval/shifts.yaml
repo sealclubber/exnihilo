@@ -41,12 +41,19 @@ shifts:
     restDays: true
     dutyShare: 0.6
 
-  # The day watch. With the night watch below it leaves the evening, from 18:00
-  # to 22:00, to the sergeants: a placeholder, to be settled with the setting.
+  # The watch is kept in three turns, so that it is never off the streets:
+  # day, evening and night. Each is worked on rest days too, by half its men.
   watch-day:
     name: Day watch
     start: "06:00"
-    end: "18:00"
+    end: "14:00"
+    restDays: true
+    dutyShare: 0.5
+
+  watch-evening:
+    name: Evening watch
+    start: "14:00"
+    end: "22:00"
     restDays: true
     dutyShare: 0.5
 

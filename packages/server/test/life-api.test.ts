@@ -142,11 +142,14 @@ describe('trips in a window', () => {
     expect(sent.wander.times[0]).toBe(Math.max(from, sent.from));
     expect(sent.wander.times.at(-1)).toBe(Math.min(to, sent.to));
     expect(sent.wander.points).toEqual(stays[0]!.wander.points.map((point) => point.map((value) => Math.round(value * 100) / 100)));
-    expect(Object.keys(sent).sort()).toEqual(['buildingId', 'from', 'kind', 'name', 'occupationId', 'personId', 'role', 'to', 'wander']);
+    const atBuilding = body.outside.find((stay) => stay.buildingId !== undefined && stay.occupationId !== undefined && !stay.round && !stay.onStreet)!;
+    expect(Object.keys(atBuilding).sort()).toEqual(['buildingId', 'from', 'kind', 'name', 'occupationId', 'personId', 'role', 'to', 'wander']);
     // Twenty minutes of someone's day is a handful of points, not their whole day.
     expect(Math.max(...body.outside.map((stay) => stay.wander.times.length))).toBeLessThan(40);
-    // At night nobody is out.
-    expect((await get<TripsWindow>(`${LIFE}/trips?from=${at(2, 2)}&to=${at(2, 2, 20)}`)).body.outside).toEqual([]);
+    // At night nobody is out but the watch, stopped at points on its beat: on a segment, at no building.
+    const night = (await get<TripsWindow>(`${LIFE}/trips?from=${at(2, 2)}&to=${at(2, 2, 20)}`)).body.outside;
+    expect(night.length).toBeGreaterThan(0);
+    expect(night.every((stay) => stay.occupationId === 'watchman' && stay.round === true && stay.buildingId === undefined && stay.segmentId !== undefined)).toBe(true);
     // A region limits the stays as it does the trips.
     const local = (await get<TripsWindow>(`${LIFE}/trips?from=${from}&to=${to}&minX=0&minY=0&maxX=120&maxY=120`)).body.outside;
     expect(local.length).toBe(expected.outsideStays(from, to, { minX: 0, minY: 0, maxX: 120, maxY: 120 }).length);

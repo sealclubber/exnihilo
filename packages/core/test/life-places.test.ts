@@ -66,7 +66,8 @@ beforeAll(() => {
   badanos = town('settlement-641');
 }, SLOW);
 
-const staysOf = (plan: DayPlan) => plan.activities.filter((activity): activity is Stay => activity.kind !== 'travel');
+/** A plan's stays at buildings. Stops on a street, which have no building, are covered in rounds.test.ts. */
+const staysOf = (plan: DayPlan) => plan.activities.filter((activity): activity is Stay => activity.kind !== 'travel' && activity.kind !== 'street');
 const visitsOn = (life: SettlementLife, day: number) =>
   life.plansForDay(day).flatMap((plan) => staysOf(plan).filter((stay) => stay.kind === 'visit').map((stay) => ({ ...stay, personId: plan.personId })));
 const typeOf = (city: City) => {
@@ -79,11 +80,16 @@ const homeOf = (city: City) => {
   return (personId: string) => dwellings.get(people.get(personId)!.householdId) as string;
 };
 const watchmen = (city: City) => city.people.filter((person) => person.occupationId === 'watchman');
-const atWork = (life: SettlementLife, people: City['people'], time: number) => people.filter((person) => life.whereabouts(person.id, time).kind === 'work');
+/** At work: at the workplace, or out on a round from it. */
+const working = (life: SettlementLife, personId: string, time: number) => {
+  const where = life.whereabouts(personId, time);
+  return where.kind === 'work' || ((where.kind === 'travel' || where.kind === 'street') && where.round === true);
+};
+const atWork = (life: SettlementLife, people: City['people'], time: number) => people.filter((person) => working(life, person.id, time));
 
 describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
-    expect(LIFE_VERSION).toBe(3);
+    expect(LIFE_VERSION).toBe(4);
     expect(GENERATOR_VERSION).toBe(3);
     expect(LAYOUT_VERSION).toBe(2);
   });
@@ -99,8 +105,8 @@ describe('an occupation split across shifts', () => {
       ];
     });
     const towns: Array<[Town, SettingPack, string, string[]]> = [
-      [badanos, pack, 'watchman', ['watch-day', 'night']],
-      [town('settlement-455'), pack, 'watchman', ['watch-day', 'night']],
+      [badanos, pack, 'watchman', ['watch-day', 'watch-evening', 'night']],
+      [town('settlement-455'), pack, 'watchman', ['watch-day', 'watch-evening', 'night']],
       [town('settlement-641', three), three, 'tanner', ['day', 'early', 'evening']],
     ];
     for (const [{ city, life }, packUsed, occupationId, shifts] of towns) {
@@ -118,10 +124,13 @@ describe('an occupation split across shifts', () => {
     for (const person of watchmen(city)) {
       const shift = life.shiftOf(person.id)!;
       for (const day of WEEK) {
-        // Work that begins on a day begins with the person's own shift, give or take their habit.
-        for (const work of life.plan(person.id, day).activities.filter((activity) => activity.kind === 'work' && activity.start > startOfDay(day))) {
-          expect(Math.abs(work.start - (startOfDay(day) + shift.start)), `${person.id}, day ${day}`).toBeLessThanOrEqual(30 * 60);
-        }
+        // A shift that begins on a day begins at the person's own shift, give or take their habit: the first
+        // work after time at home. (Later spells of work follow circuits of the patrol.)
+        const { activities } = life.plan(person.id, day);
+        activities.forEach((activity, index) => {
+          if (activity.kind !== 'work' || activities[index - 1]?.kind !== 'travel' || (activities[index - 1] as { round?: true }).round) return;
+          expect(Math.abs(activity.start - (startOfDay(day) + shift.start)), `${person.id}, day ${day}`).toBeLessThanOrEqual(30 * 60);
+        });
       }
     }
   });
@@ -136,18 +145,21 @@ describe('an occupation split across shifts', () => {
     const other = assignment(12345);
     expect(other).not.toEqual(assignment());
     expect(other.filter((id) => id === 'night')).toHaveLength(assignment().filter((id) => id === 'night').length);
-    // Not simply the first half and the second half.
-    expect(new Set(assignment().slice(0, 20)).size).toBe(2);
+    // Not simply one watch after another down the list.
+    expect(new Set(assignment().slice(0, 20)).size).toBe(3);
   });
 
-  it('puts the day share of the watch at work at 12:30 and the night share at 03:00', () => {
+  it('puts the day share of the watch at work at 12:30, the evening share at 18:00 and the night share at 03:00', () => {
     const { city, life } = badanos;
     const watch = watchmen(city);
-    const [day, night] = apportion(watch.length, [0.5, 0.5]) as [number, number];
+    const [day, evening, night] = apportion(watch.length, [0.4, 0.3, 0.3]) as [number, number, number];
+    // At work means at the watch house or out on patrol from it.
     expect(atWork(life, watch, at(WORK_DAY, 12, 30))).toHaveLength(day);
+    expect(atWork(life, watch, at(WORK_DAY, 18))).toHaveLength(evening);
     expect(atWork(life, watch, at(WORK_DAY + 1, 3))).toHaveLength(night);
-    expect(day).toBeGreaterThan(40);
-    expect(night).toBeGreaterThan(40);
+    expect(day).toBeGreaterThan(30);
+    expect(evening).toBeGreaterThan(25);
+    expect(night).toBeGreaterThan(25);
     // The two never overlap: nobody on the day watch is there at 03:00.
     const there = new Set(atWork(life, watch, at(WORK_DAY + 1, 3)).map((person) => life.shiftOf(person.id)!.id));
     expect(there).toEqual(new Set(['night']));
@@ -155,10 +167,10 @@ describe('an occupation split across shifts', () => {
 
   it('takes rest-day turns within each shift', () => {
     const { city, life } = badanos;
-    for (const id of ['watch-day', 'night']) {
+    for (const id of ['watch-day', 'watch-evening', 'night']) {
       const group = watchmen(city).filter((person) => life.shiftOf(person.id)!.id === id);
       const share = pack.shifts.shifts[id]!.dutyShare!;
-      const time = id === 'night' ? at(REST_DAY + 1, 3) : at(REST_DAY, 12, 30);
+      const time = id === 'night' ? at(REST_DAY + 1, 3) : id === 'watch-evening' ? at(REST_DAY, 18) : at(REST_DAY, 12, 30);
       expect(atWork(life, group, time), id).toHaveLength(dutyCount(group.length, share));
     }
   });
@@ -188,16 +200,23 @@ describe('opening hours', () => {
 
   it('join shifts that meet, and carry a night shift across midnight', () => {
     const { city, life } = badanos;
-    // A watch house with both watches and a sergeant on the day shift.
+    // A watch house with all three watches: day, evening and night meet end to end, so it never shuts.
     const house = city.buildings.find((building) => {
       const shifts = new Set(building.workerIds.map((id) => life.shiftOf(id)?.id));
-      return building.type === 'watch-house' && shifts.has('watch-day') && shifts.has('night');
+      return building.type === 'watch-house' && shifts.has('watch-day') && shifts.has('watch-evening') && shifts.has('night');
     })!;
-    const hours = life.openingHours(house.id, 3);
-    expect(hours[0]).toEqual({ from: at(3, 0), to: at(3, 18) });
-    expect(hours.at(-1)).toEqual({ from: at(3, 22), to: at(4, 0) });
-    expect(life.isOpen(house.id, at(3, 3))).toBe(true);
-    expect(life.isOpen(house.id, at(3, 20))).toBe(false);
+    expect(life.openingHours(house.id, 3)).toEqual([{ from: at(3, 0), to: at(4, 0) }]);
+    for (const hour of [3, 13, 14, 20, 22, 23]) expect(life.isOpen(house.id, at(3, hour)), `${hour}:00`).toBe(true);
+    // One with no evening watch is shut from 17:00, when its day-shift sergeant goes, or 14:00 without one, until 22:00.
+    const gap = city.buildings.find((building) => {
+      const shifts = new Set(building.workerIds.map((id) => life.shiftOf(id)?.id));
+      return building.type === 'watch-house' && shifts.has('night') && !shifts.has('watch-evening');
+    });
+    if (gap) {
+      expect(life.isOpen(gap.id, at(3, 20))).toBe(false);
+      expect(life.openingHours(gap.id, 3).at(-1)).toEqual({ from: at(3, 22), to: at(4, 0) });
+      expect(life.isOpen(gap.id, at(3, 3))).toBe(true);
+    }
   });
 
   it('agree with the shifts and rest-day duty of the people who work there, on every day of a week', { timeout: SLOW }, () => {
@@ -216,8 +235,8 @@ describe('opening hours', () => {
               if (time < from || time >= from + shiftLength(shift)) return false;
               if (!isRestDay(began, pack.calendar)) return true;
               if (!shift.restDays) return false;
-              // On duty that rest day: at work at the middle of the shift.
-              return life.whereabouts(id, from + shiftLength(shift) / 2).kind === 'work' && people.get(id)!.workplaceId === building.id;
+              // On duty that rest day: at work, there or out on a round, at the middle of the shift.
+              return working(life, id, from + shiftLength(shift) / 2) && people.get(id)!.workplaceId === building.id;
             });
           });
           expect(life.isOpen(building.id, time), `${building.id} (${building.type}) on day ${day} at ${hour}`).toBe(expected);
@@ -241,11 +260,11 @@ describe('opening hours', () => {
     expect(checked).toBeGreaterThan(10_000);
     // The watchman who used to drink at 06:16: the night watch comes off duty when the taverns are shut, and goes home.
     const night = new Set(watchmen(city).filter((person) => life.shiftOf(person.id)!.id === 'night').map((person) => person.id));
-    expect(night.size).toBeGreaterThan(40);
+    expect(night.size).toBeGreaterThan(25);
     for (const day of WEEK) expect(visitsOn(life, day).filter((visit) => visit.visitId === 'tavern' && night.has(visit.personId))).toEqual([]);
-    // The day watch, off at 18:00, still can.
-    const dayWatch = new Set(watchmen(city).filter((person) => life.shiftOf(person.id)!.id === 'watch-day').map((person) => person.id));
-    expect(WEEK.flatMap((day) => visitsOn(life, day)).filter((visit) => visit.visitId === 'tavern' && dayWatch.has(visit.personId)).length).toBeGreaterThan(10);
+    // The evening watch, off at 22:00 with the taverns open until 23:00, still can.
+    const evening = new Set(watchmen(city).filter((person) => life.shiftOf(person.id)!.id === 'watch-evening').map((person) => person.id));
+    expect(WEEK.flatMap((day) => visitsOn(life, day)).filter((visit) => visit.visitId === 'tavern' && evening.has(visit.personId)).length).toBeGreaterThan(5);
   });
 
   it('send rest-day market visits only to places that are open or always open', { timeout: SLOW }, () => {
@@ -313,7 +332,7 @@ describe('being outside', () => {
     for (const occupant of there) {
       const where = life.whereabouts(occupant.personId, time);
       expect(WhereaboutsSchema.safeParse(where).success).toBe(true);
-      if (where.kind === 'travel') throw new Error('an occupant is walking');
+      if (where.kind === 'travel' || where.kind === 'street') throw new Error('an occupant is walking');
       expect(where.outside).toBe(true);
       expect(geometry.strictlyInside(where.point!, lots.get(stall.id)!)).toBe(true);
       // On the lot for the whole stay, and asked again, in the same place at the same moment.
@@ -374,9 +393,13 @@ describe('being outside', () => {
       const person = people.get(where.personId)!;
       expect(person.age).toBeGreaterThanOrEqual(play.who.minAge!);
       expect(person.age).toBeLessThanOrEqual(play.who.maxAge!);
-      expect(where).toMatchObject({ outside: true, buildingId: home(person.id) });
-      // A visit to home involves no travel: the day has no walk in it at all.
-      expect(life.plan(person.id, WORK_DAY).activities.some((activity) => activity.kind === 'travel')).toBe(false);
+      // Out on the street in front of their own home.
+      expect(where).toMatchObject({ outside: true, onStreet: true, buildingId: home(person.id) });
+      // A visit to home involves no travel: they are at home before it and after it, with no walk either side.
+      const { activities } = life.plan(person.id, WORK_DAY);
+      const playing = activities.findIndex((activity) => activity.kind === 'visit' && activity.start <= time && time < activity.end);
+      expect(activities[playing - 1]?.kind).toBe('home');
+      expect(activities[playing + 1]?.kind).toBe('home');
     }
     const small = city.people.filter((person) => person.age < play.who.minAge!);
     expect(small.length).toBeGreaterThan(300);
@@ -416,7 +439,7 @@ describe('being outside', () => {
     const time = at(WORK_DAY, 12, 30);
     const where = city.people.map((person) => life.whereabouts(person.id, time));
     const walking = where.filter((entry) => entry.kind === 'travel').length;
-    const outside = where.filter((entry) => entry.kind !== 'travel' && entry.outside).length;
+    const outside = where.filter((entry) => entry.kind === 'street' || (entry.kind !== 'travel' && entry.outside)).length;
     console.log(`Badanos at 12:30 on a work day: ${walking} walking and ${outside} outside, ${walking + outside} to be seen`);
     expect(walking + outside).toBeGreaterThanOrEqual(300);
   });
@@ -430,7 +453,7 @@ describe('being outside', () => {
     for (const time of [from, at(WORK_DAY, 12, 30), to - 1]) {
       const expected = city.people
         .map((person) => life.whereabouts(person.id, time))
-        .filter((where) => where.kind !== 'travel' && where.outside)
+        .filter((where) => where.kind === 'street' || (where.kind !== 'travel' && where.outside))
         .map((where) => ({ personId: where.personId, point: (where as { point: [number, number] }).point }))
         .sort((a, b) => (a.personId < b.personId ? -1 : 1));
       // Each stay's wander, followed to the moment, puts the person where their whereabouts say.
@@ -454,18 +477,28 @@ describe('being outside', () => {
     expect(local.length).toBeLessThan(stays.length);
     // A stay is in a region when its building's lot is.
     const boxes = new Map(badanos.layout.lots.map((lot) => [lot.buildingId, geometry.boxOf(lot.polygon)]));
-    const within = (stay: { buildingId: string }) => {
-      const box = boxes.get(stay.buildingId)!;
+    // A stay is in a region when its building's lot is; one out on a street, when the person is.
+    const within = (stay: (typeof stays)[number]) => {
+      const [x, y] = stay.wander.points[0]!;
+      const box = stay.buildingId === undefined || stay.onStreet ? { minX: x, maxX: x, minY: y, maxY: y } : boxes.get(stay.buildingId)!;
       return box.maxX >= region.minX && box.minX <= region.maxX && box.maxY >= region.minY && box.minY <= region.maxY;
     };
     expect(local.every(within)).toBe(true);
     expect(stays.filter(within)).toHaveLength(local.length);
-    expect(life.outsideStays(at(WORK_DAY, 2), at(WORK_DAY, 3))).toEqual([]);
+    // In the small hours nobody is out but the night watch, at stops on its beat.
+    const small = life.outsideStays(at(WORK_DAY, 2), at(WORK_DAY, 3));
+    expect(small.every((stay) => stay.round === true && stay.buildingId === undefined && stay.segmentId !== undefined)).toBe(true);
+    const watch = new Set(watchmen(city).map((person) => person.id));
+    expect(small.every((stay) => watch.has(stay.personId))).toBe(true);
   });
 
   it('lists a stay that crosses midnight once, whole', { timeout: SLOW }, () => {
-    // With the watch house out of doors, the night watch stands outside from 22:00 to 06:00.
-    const { city, layout, life } = town('settlement-641', edited((raw) => (raw.workplaces.find((entry: any) => entry.id === 'watch-house').openAir = true)));
+    // With the watch house out of doors and no patrol to walk, the night watch stands outside from 22:00 to 06:00.
+    const outdoors = (raw: any) => {
+      raw.workplaces.find((entry: any) => entry.id === 'watch-house').openAir = true;
+      delete raw.occupations.find((entry: any) => entry.id === 'watchman').round;
+    };
+    const { city, layout, life } = town('settlement-641', edited(outdoors));
     const night = watchmen(city).filter((person) => life.shiftOf(person.id)!.id === 'night');
     const stays = life.outsideStays(at(2, 23), at(3, 1)).filter((stay) => night.some((person) => person.id === stay.personId));
     expect(stays).toHaveLength(night.length);
@@ -480,7 +513,7 @@ describe('being outside', () => {
       }
       expect(geometry.distance(positionOnWander(stay.wander, at(3, 0) - 1), positionOnWander(stay.wander, at(3, 0) + 1))).toBeLessThanOrEqual(2 * 0.5 + 1e-9);
     }
-    const checker = createPlanChecker({ city, layout, pack: edited((raw) => (raw.workplaces.find((entry: any) => entry.id === 'watch-house').openAir = true)) });
+    const checker = createPlanChecker({ city, layout, pack: edited(outdoors) });
     const problems = night.flatMap((person) => [...checker.check(life.plan(person.id, 2)), ...checker.checkContinuity(life.plan(person.id, 2), life.plan(person.id, 3))]);
     expect(problems).toEqual([]);
   });
@@ -489,11 +522,16 @@ describe('being outside', () => {
     const { city, life } = badanos;
     const { hours } = life.daySummary(WORK_DAY);
     for (const hour of hours) expect(hour.outside).toBeLessThanOrEqual(hour.atWork + hour.visiting + 1e-6);
-    expect(hours[3]!.outside).toBe(0);
+    // In the small hours only the watch is out, at stops on its beat; by mid-morning the yards and the market are busy.
+    expect(hours[3]!.outside).toBeLessThan(15);
     expect(hours[10]!.outside).toBeGreaterThan(900);
     // An hour's figure is the average over the hour: check one against whereabouts sampled through it.
     const samples = Array.from({ length: 60 }, (_, minute) => at(WORK_DAY, 15, minute) + 30);
-    const sampled = samples.reduce((sum, time) => sum + city.people.filter((person) => (life.whereabouts(person.id, time) as { outside?: true }).outside).length, 0) / samples.length;
+    const out = (personId: string, time: number) => {
+      const where = life.whereabouts(personId, time);
+      return where.kind === 'street' || (where.kind !== 'travel' && where.outside === true);
+    };
+    const sampled = samples.reduce((sum, time) => sum + city.people.filter((person) => out(person.id, time)).length, 0) / samples.length;
     expect(Math.abs(hours[15]!.outside - sampled)).toBeLessThan(5);
   });
 });
@@ -508,7 +546,8 @@ describe('the plan checker', () => {
       const plan = structuredClone(plans.find((entry) => staysOf(entry).some(wanted))!);
       return { plan, stay: staysOf(plan).find(wanted)! };
     };
-    const atStall = (stay: Stay) => stay.kind === 'work' && type(stay.buildingId) === 'market-stall';
+    // A stallholder's own day at the stall, not a carter's brief stop there on a round.
+    const atStall = (stay: Stay) => stay.kind === 'work' && !stay.round && type(stay.buildingId) === 'market-stall' && (stay.wander?.times.length ?? 0) > 6;
 
     const indoors = withStay(atStall);
     delete indoors.stay.outside;
@@ -670,7 +709,7 @@ describe('pack behaviour', () => {
     const indoors = edited((raw) => delete raw.workplaces.find((entry: any) => entry.id === 'market-stall').openAir);
     const outsideAtStalls = ({ city, life }: Town) => {
       const type = typeOf(city);
-      return life.outsideStays(at(WORK_DAY, 0), at(WORK_DAY + 1, 0)).filter((stay) => type(stay.buildingId) === 'market-stall').length;
+      return life.outsideStays(at(WORK_DAY, 0), at(WORK_DAY + 1, 0)).filter((stay) => stay.buildingId !== undefined && type(stay.buildingId) === 'market-stall').length;
     };
     expect(outsideAtStalls(badanos)).toBeGreaterThan(100);
     const changed = town('settlement-641', indoors);
@@ -681,7 +720,8 @@ describe('pack behaviour', () => {
   });
 
   it('accepts home as a destination in any visit', () => {
-    expect(() => edited((raw) => raw.visits.visits.forEach((visit: any) => visit.destinations.push('home')))).not.toThrow();
+    // In a visit of one stop, and in every stop of an errand that chains.
+    expect(() => edited((raw) => raw.visits.visits.forEach((visit: any) => [visit, ...(visit.stops ?? [])].forEach((stop: any) => stop.destinations?.push('home'))))).not.toThrow();
   });
 });
 
