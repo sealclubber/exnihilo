@@ -104,13 +104,20 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
           if (moved > 0 && through(before, point)) return problem(`activity ${at + 1} wanders through a footprint or off ${where}`);
         }
       };
-      /** A wander on a stretch of street: every point on the segment, within the pack's reach of where it centres. */
-      const checkStreetWander = (at: number, activity: Activity, wander: Wander, segmentId: string, centre: Point) => {
+      /**
+       * A wander on a stretch of street: every point on the segment, and within the pack's reach of where it
+       * centres. In front of a building that is the entrance. At a stop on a street the centre is where the person
+       * walked up to, which a plan cut at midnight no longer shows, so the points must lie within one stretch:
+       * no further from the first than twice the reach.
+       */
+      const checkStreetWander = (at: number, activity: Activity, wander: Wander, segmentId: string, centre?: Point) => {
         const segment = segments.get(segmentId);
         if (!segment) return problem(`activity ${at + 1} is on ${segmentId}, which does not exist`);
-        const on = (point: Point) => distanceToPolyline(point, segment.points) <= CLOSE && distance(point, centre) <= streetReach + CLOSE;
+        const from = centre ?? (wander.points[0] as Point);
+        const within = centre ? streetReach : 2 * streetReach;
+        const on = (point: Point) => distanceToPolyline(point, segment.points) <= CLOSE && distance(point, from) <= within + CLOSE;
         const middle = (a: Point, b: Point): Point => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-        checkWander(at, activity, wander, `${segmentId}, within ${streetReach} m of where it stops`, on, (a, b) => !on(middle(a, b)));
+        checkWander(at, activity, wander, centre ? `${segmentId}, within ${streetReach} m of the entrance` : `${segmentId}, within one stretch of ${2 * streetReach} m`, on, (a, b) => !on(middle(a, b)));
       };
       const checkGroundWander = (at: number, activity: Activity, wander: Wander, lot: Lot) => {
         const onGround = (point: Point) => pointInPolygon(point, lot.polygon) && !lot.footprints.some((footprint) => strictlyInside(point, footprint));
@@ -190,7 +197,7 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
 
         if (activity.kind === 'street') {
           // A stop on a street: a point on the segment it names, and a wander about a short stretch of it.
-          checkStreetWander(at, activity, activity.wander, activity.segmentId, activity.wander.points[0] as Point);
+          checkStreetWander(at, activity, activity.wander, activity.segmentId);
           if (activity.end === activity.start) problem(`activity ${at + 1} is a stop of no length`);
           if (activity.purpose === 'work') {
             if (!activity.round) problem(`activity ${at + 1} is work on a street but is not marked as part of a round`);

@@ -121,6 +121,17 @@ enforce them. Do not weaken that test to make a change pass.
 25. **Colours live in the pack.** Code knows categories and workforce states,
     not which one is red. Add nothing to the map that does not carry
     information.
+26. **Crowds are consequences.** Never place, spawn or steer people to make
+    somewhere look busy. If a place is busy, it is because many plans led
+    there, each sensible on its own. Probabilities must be ones you would
+    defend for a town like this; a target is a check on the design, not a
+    quota.
+27. **No plan reads another plan.** Rounds, errands and strolls are derived
+    from the person, the day and the town, never from where others are. A
+    round has a random stream of its own.
+28. **Rounds, chains and strolls are code; who does them is pack.** Code
+    knows that rounds exist. Which occupations patrol, and who fetches
+    water, are pack entries. The watch leaves everyone alone.
 
 ## The layout format
 
@@ -154,7 +165,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 2, 2 and 3.
+  inputs would change. Today they are 3, 2 and 4.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it.

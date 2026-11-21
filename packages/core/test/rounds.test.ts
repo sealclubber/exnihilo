@@ -133,7 +133,7 @@ describe('plan invariants', () => {
     // A stop on a street that is not on its segment.
     const stop = planWith((activity, plan) => activity.kind === 'street' && isWatch(plan) && activity.wander.points.length >= 2);
     (stop.plan.activities[stop.at] as StreetStop).wander.points[1] = [1e6, 1e6];
-    expect(report(stop.plan)).toMatch(/wanders to a point that is not on segment-641-\d+, within 12 m of where it stops/);
+    expect(report(stop.plan)).toMatch(/wanders to a point that is not on segment-641-\d+, within one stretch of 24 m/);
 
     // A patrol leg that ends somewhere off the street.
     const leg = planWith((activity, plan) => activity.kind === 'travel' && activity.round === true && activity.toStreet !== undefined && isWatch(plan));
@@ -173,6 +173,12 @@ describe('plan invariants', () => {
     const stroll = planWith((activity) => activity.kind === 'street' && activity.purpose === 'visit');
     (stroll.plan.activities[stroll.at + 1] as Travel).toBuildingId = city.buildings.find((building) => building.type === 'tannery')!.id;
     expect(report(stroll.plan)).toMatch(/is a pause on a stroll that does not go home/);
+
+    // A child who has strayed down the street from their own door.
+    const strayed = planWith((activity) => activity.kind === 'visit' && activity.visitId === 'play-morning' && activity.wander!.points.length > 2);
+    const points = (strayed.plan.activities[strayed.at] as Stay).wander!.points;
+    points[1] = [points[1]![0] + 40, points[1]![1]];
+    expect(report(strayed.plan)).toMatch(/wanders to a point that is not on segment-641-\d+, within 12 m of the entrance/);
 
     // Out on the street when the visit says the lot, and the other way about.
     const play = planWith((activity) => activity.kind === 'visit' && activity.visitId === 'play-morning');

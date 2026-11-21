@@ -232,6 +232,7 @@ numbers.
 | `time.yaml` | The clock's rate presets and the default rate |
 | `avatar.yaml` | The avatar's walking speed and how far it perceives |
 | `display.yaml` | The colour each role is drawn in: one per workforce category, one each for keeping house and not working, and optionally single occupations |
+| `rounds.yaml` | Rounds, for work done on foot: the share of a shift spent on them, how many stops and how long, how far they range, and whether a stop is a point on a street or a building of given types |
 | `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default. Shifts also decide when each building is open |
 | `visits.yaml` | Whether places keep opening hours (`openingHours`), and each kind of visit: who makes it, on which days and `weekdays`, how likely, when, for how long, to which building types or to `home`, and whether it is spent `outside` |
 | `categories.yaml` | The seven workforce categories and their base shares |
@@ -240,7 +241,7 @@ numbers.
 | `specialties.yaml` | How specialty tags fill the trade category, and which tags are ignored |
 | `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district, and whether it is `openAir` or `alwaysOpen` |
 | `dwellings.yaml` | Housing types by status tier |
-| `landmarks.yaml` | The buildings and fixed posts that flags and status add, with the same `openAir` and `alwaysOpen` flags |
+| `landmarks.yaml` | The buildings and fixed posts that flags and status add, and the civic buildings a settlement has by its size (`minPopulation`, a count per so many residents, `spread` across the districts, posts or none), with the same `openAir` and `alwaysOpen` flags |
 | `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations, and under `outside` the pace and pauses of someone moving about a lot) |
 | `cultures.yaml` | Which species each culture belongs to |
 | `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside |
@@ -276,6 +277,19 @@ in its home; `servant` is the one such occupation in the `medieval` pack.
 
 One tag is ignored by the `medieval` pack and listed for review at the top of
 `specialties.yaml`: `slaves`.
+
+**Civic buildings.** Besides the landmarks its flags give it, a settlement
+has civic buildings by its size (generator version 3): wells, one for every
+250 residents, unstaffed, open-air and always open; public ovens; and above a
+minimum population a bathhouse, a granary, an infirmary, a town hall, a guild
+hall and an adventurers' guild hall. Wells and ovens are spread across the
+districts in proportion to their residents, so every part of town has one.
+Staff are fixed posts that take slots from their own category, so population,
+workforce and the seven category counts did not move in any settlement, while
+occupation counts inside a category did: `badanos-counts-v3.json` lists what
+moved. The adventurers arrive in a later phase; for now their hall has its
+staff. One guild hall stands for all trades: which trade leads a town is not
+modelled.
 
 ## The layout
 
@@ -405,7 +419,37 @@ time)`, `trips(from, to, region?)`, `outsideStays(from, to, region?)`,
 plan must satisfy is in `life/invariants.ts`. Shifts, rest-day duty and
 opening hours are in `life/hours.ts`.
 
-Daily life has its own `LIFE_VERSION`, now 3, in `life/records.ts`. Version 3
+- **Rounds.** Some work is done on foot. An occupation may name a round, and
+  then part of each shift is spent on circuits that start and end at the
+  workplace: out, from stop to stop, and back, with spells at the workplace
+  between. A stop is a building of the round's types, or a point on a street.
+  The watch patrols the whole town in three turns round the clock; carters,
+  porters, pedlars, water carriers, street sweepers and servants have rounds
+  too. A worker on a round is at work, and reacts to nothing. A round has a
+  random stream of its own, by person and day, so it differs from day to day
+  and never disturbs the rest of the plan.
+- **Stops on a street.** A person may be at a point on a street with no
+  building: a stop on a round, or a pause on a stroll. It is a kind of
+  activity of its own, `street`, with a segment and a wander along a short
+  stretch of it. A walk may begin or end at a building or at such a point.
+- **Errands that chain and repeat.** A visit may list several `stops`, each
+  walked to from the last before going home; a stop left out by chance or
+  with nowhere open is skipped. A visit may happen several times a day
+  (`timesPerDay`), each at a time of its own, dropping any that would collide
+  with something else. `nearest: true` always takes the nearest place that
+  will do, as for a well.
+- **Strolls.** A visit may be a walk with no destination: out from home, by
+  way of a public place the stroll favours if one is near enough and open,
+  otherwise a point on a street about as far off as the walk allows; a pause;
+  and home.
+- **Out on the street.** An outside visit may be spent on the street in front
+  of the building (`where: street`) instead of on its lot. Children playing
+  and elders sitting out are in front of their homes, where they can be seen.
+
+Daily life has its own `LIFE_VERSION`, now 4, in `life/records.ts`. Version 4
+added rounds, chains, repeats, strolls and stops on a street; a pack with none
+of those fields gives exactly the plans of version 3, which a fingerprint of
+Badanos's plans holds. Version 3
 added the wander and changed nothing else: a test holds a fingerprint of every
 activity, building, time and trip of Badanos over eight days at version 2. A pack
 with none of the phase 4.5 fields (`openingHours`, `openAir`, `alwaysOpen`,
@@ -430,12 +474,34 @@ the rest day):
 Most of the 1,000 outside at 12:30 are at work in the open-air yards and at
 the 38 market stalls (938); the rest are at market, on errands or playing.
 
-Two things the opening-hours rule does that may surprise. A tavern whose
+One thing the opening-hours rule does that may surprise: a tavern whose
 keeper's household employs a day servant is open from 08:00, because the
-servant works in that building and is on shift. And the day watch (06:00 to
-18:00) and the night watch (22:00 to 06:00) leave the watch houses to the
-sergeants and gaolers from 18:00 to 22:00. Both follow from the pack's
-placeholder shifts and can be changed there.
+servant works in that building and is on shift. The watch is kept in three
+turns since phase 6B (06:00, 14:00 and 22:00), so a watch house with all
+three is never shut.
+
+**What phase 6B changed in Badanos** (default seed, day 1, a work day). Crowds
+are consequences: nothing places anyone to make a street look busy, and no
+plan reads another plan.
+
+| Measure | Before | Target | Now |
+| --- | --- | --- | --- |
+| People walking at 12:30 | 31 (0.3%) | At least 2% of residents | 203 (2.1%) |
+| People walking at 07:50 | 867 | Not lower | 925 |
+| Median perceived from 100 seeded street points at 12:30, within 30 m | 0 | At least 1 | 1 |
+| Watchmen on the streets, on the hour through 24 hours | 0 at most hours | At least 1 at each | Between 7 and 37 |
+| Trips per resident per day | 1.21 | At least double | 3.71 |
+| Trips begun in the day | 11,620 | n/a | 35,655 |
+
+On the rest day there is less walking at the shift hours (26 people on average
+between 07:00 and 08:00, against 343) and more in the afternoon. The busiest
+well has six people at it at one moment of the morning, each of whom went to
+their own nearest well. Over the hour around midday, one of the ten busiest
+streets is one the market stalls open onto.
+
+Across Lomia the midday figure follows size: on average 2.0% of residents are
+walking at 12:30 in capitals and cities, 1.7% in towns and 0.9% in villages,
+which have few carters, porters or watchmen. Trips per resident are 3.9.
 
 The module reads the layout format and uses the path function, and nothing
 from the layout generator.
@@ -559,42 +625,47 @@ visits, weekdays and pack behaviour) and `baselines/badanos-phase4-plans.json`;
 phase 5's are in `avatar.test.ts` in each package (paths between street
 positions, the avatar's actions, perception and its cost; the client's
 arithmetic and wording), `avatar-api.test.ts` (storage, endpoints, notices) and
-`baselines/badanos-lot-paths.json`; phase 6A's are in `wander.test.ts`
+`baselines/badanos-lot-paths.json`; phase 6B's are in `civic.test.ts` (civic
+buildings in every settlement), `rounds.test.ts` (rounds, chains, repeats,
+strolls, the targets, emergence and pack behaviour), `baseline.test.ts` with
+`baselines/badanos-counts-v3.json` (the new baseline and what moved) and
+`baselines/badanos-life-v3.json`; phase 6A's are in `wander.test.ts`
 (moving about outside), `layout.test.ts` and `lomia-cities.test.ts`
 (footprints), `baselines/layout-v1.json` and `baselines/badanos-life-v2.json`
 (what must not have moved), and `packages/client/e2e/viewer.e2e.ts` (the
 viewer).
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
-and checks every invariant on each. With generator version 2 it takes about 9
+and checks every invariant on each. With generator version 3 it takes about 9
 seconds on one core of an Intel Core Ultra 7 265K; generation alone, which
 includes the generator's own check, is about 7.5 seconds, and Pombal, the
 largest settlement at 47,603 people, takes about 0.13 seconds.
 
-Laying out all 682 settlements, 526,006 lots, takes about 6 seconds more,
+Laying out all 682 settlements, now 541,392 lots with the civic buildings, takes about 5 seconds more,
 again including the generator's own check of every layout invariant, which
 now includes the footprints. No settlement takes longer than 0.1 seconds;
 Pombal's 8,413 lots take about that.
 
-Planning one day for all 9,607 residents of Badanos takes about 0.3 seconds,
-against a target of 1; it was 0.12 before phase 4.5 added some 4,800 visits a
-day and the opening-hours checks, and 0.2 before phase 6A added the wanders.
-Pombal's 47,603 residents take about 2.7 seconds for the first day, which
-includes preparing the path tables for its layout, and about 0.9 seconds for
-each day after. Planning one day for every one of Lomia's 2,935,089 residents
-takes about 69 seconds, and every plan in all 682 settlements passes every
-plan rule. That day holds about a million stays outside, with some 72 wander
-points each.
+Planning one day for all 9,607 residents of Badanos takes about 0.5 seconds.
+It was 0.12 before phase 4.5 added some 4,800 visits a day and the
+opening-hours checks, 0.2 before phase 6A added the wanders, and 0.3 before
+phase 6B tripled the trips: 1.7 times slower for three times the walking.
+Pombal's 47,603 residents take about 4 seconds for the first day (it was
+2.7), which includes preparing the path tables for its layout, and about 1.6
+seconds for each day after (it was 0.9). Planning one day for every one of
+Lomia's 2,935,089 residents takes about 115 seconds (it was 69), and every
+plan in all 682 settlements passes every plan rule.
 
-The town map draws 60 frames a second in headless Chromium for both Badanos
-at midday (1,031 people, about 0.3 milliseconds a frame) and Pombal (4,698
-people, about 1 millisecond a frame), against a target of 30. Headless
-Chromium draws no faster than 60.
+Cost tests do not hold the planner to a number of seconds, which fails on a
+slow or busy machine: they time a fixed piece of arithmetic alongside the
+work (`packages/core/test/cost.ts`) and limit the work to a few times that.
+Badanos's day is about 1.7 of these yardsticks, and the limit is 6.
 
-One of the phase 4 gameplan's behaviour thresholds does not quite hold
-everywhere. At 03:00 at least 95% of residents are asleep at home in 669 of
-the 682 settlements, Badanos and Vereceldo among them; in 13 of the 16 forts
-the figure is between 94.8% and 95.0%, because the night watch, which is at
-work then, is about a twentieth of a fort's people. Before the watch was
-split between day and night it was about 90%. The test checks Badanos and
-Vereceldo.
+The town map draws about 60 frames a second in headless Chromium for both
+Badanos at midday (1,044 people, about 0.4 milliseconds a frame) and Pombal
+(5,360 people, about 1.5 milliseconds a frame), against a target of 30.
+Headless Chromium draws no faster than 60.
+
+At 03:00 at least 95% of residents are asleep at home in every one of the 682
+settlements, the forts included, now that the night watch is a third of the
+watch and not half. The test checks Badanos and Vereceldo.
