@@ -25,7 +25,7 @@ describe('fitBox', () => {
 });
 
 describe('finding the lot under the pointer', () => {
-  const lot = (id: string, polygon: Point[]): Lot => ({ id, buildingId: `building-${id}`, polygon, districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [0, 0] } });
+  const lot = (id: string, polygon: Point[]): Lot => ({ id, buildingId: `building-${id}`, polygon, districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [0, 0] }, footprints: [] });
   const lots = [
     lot('square', [[0, 0], [10, 0], [10, 10], [0, 10]]),
     // Five sides, and an L shape: nothing here assumes a rectangle.

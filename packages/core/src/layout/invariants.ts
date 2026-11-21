@@ -169,6 +169,16 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       problem(`${lot.id} does not border ${segment.id}: its entrance is ${distanceToPolygonEdge(lot.entrance.point, lot.polygon).toFixed(2)} m from the lot`);
     }
   }
+  // Footprints lie inside their lot and do not overlap each other; the rest of the lot is open ground.
+  for (const lot of lots) {
+    lot.footprints.forEach((footprint, at) => {
+      if (polygonArea(footprint) <= EPSILON) problem(`${lot.id} has a footprint with no area`);
+      else if (!polygonWithin(footprint, lot.polygon)) problem(`${lot.id} has a footprint that does not lie inside the lot`);
+      for (let other = 0; other < at; other++) {
+        if (polygonsOverlap(footprint, lot.footprints[other] as Point[])) problem(`${lot.id} has footprints that overlap each other`);
+      }
+    });
+  }
   for (const building of city.buildings) {
     if (!lotOfBuilding.has(building.id)) problem(`${building.id} has no lot`);
   }

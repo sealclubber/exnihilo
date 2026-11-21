@@ -84,7 +84,7 @@ describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
     expect(LIFE_VERSION).toBe(2);
     expect(GENERATOR_VERSION).toBe(2);
-    expect(LAYOUT_VERSION).toBe(1);
+    expect(LAYOUT_VERSION).toBe(2);
   });
 });
 

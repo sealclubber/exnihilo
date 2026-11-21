@@ -296,6 +296,11 @@ const LayoutSettingsSchema = z.strictObject({
   defaultLot: LotSizeSchema,
   /** Lot sizes by workplace, dwelling and landmark type. */
   lots: z.record(id, LotSizeSchema),
+  /**
+   * How much of a lot its building covers, as a share of the lot's depth back from the street:
+   * a default, and building types that differ. Left out, lots have no footprints.
+   */
+  footprints: z.strictObject({ coverage: probability, types: z.record(id, probability) }).optional(),
   /** The brief does not carry a river's width, so the pack supplies it. */
   riverWidth: metres,
   /** The lowest and highest acceptable residents per hectare of built area. */
@@ -468,6 +473,16 @@ export function shiftLength(shift: Shift): number {
 export function sleepLength(species: Species): number {
   const { from, to } = species.life.sleep;
   return (to - from + SECONDS_PER_DAY) % SECONDS_PER_DAY;
+}
+
+/**
+ * How much of its lot a building of the given type covers. An open-air type covers none
+ * unless the pack gives it a figure of its own.
+ */
+export function footprintCoverageOf(type: string, pack: SettingPack): number {
+  const settings = pack.layout.footprints;
+  if (!settings) return 0;
+  return settings.types[type] ?? (placeFlagsOf(type, pack).openAir ? 0 : settings.coverage);
 }
 
 /** The lot a building of the given type gets. */
@@ -738,6 +753,9 @@ function crossCheck(pack: SettingPack): string[] {
 
   // Layout: every lot must fit in a block, since a block is where lots go.
   const buildingTypes = new Set(buildingTypeIds);
+  for (const type of Object.keys(pack.layout.footprints?.types ?? {})) {
+    if (!buildingTypes.has(type)) problems.push(`layout: footprints has a coverage for "${type}", which is not a building type`);
+  }
   for (const type of Object.keys(pack.layout.lots)) {
     if (!buildingTypes.has(type)) problems.push(`layout: lots has a size for "${type}", which is not a building type`);
   }

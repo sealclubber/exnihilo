@@ -78,6 +78,40 @@ lots:
   province-hall: {frontage: 24, depth: 44}
   gatehouse: {frontage: 12, depth: 12}
 
+# Footprints: the outline of the building on each lot. The generator draws one
+# rectangle across the lot's street frontage; `coverage` is how far back it
+# reaches, as a share of the lot's depth, and the rest of the lot is open
+# ground: a yard. 0 means no building at all, 1 a building that fills the lot.
+#
+#   coverage  for any building type not listed under `types`
+#   types     building types that differ
+#
+# A type marked openAir in workplaces.yaml or landmarks.yaml has no footprint
+# unless it is listed here: a yard is open ground, with perhaps a shed or a
+# stable at the street. All values are placeholders.
+footprints:
+  coverage: 0.6
+  types:
+    # Dwellings: the poor build over more of less land.
+    shack: 0.7
+    tenement: 0.8
+    mansion: 0.45
+    noble-house: 0.45
+    # Open-air places with something built on them.
+    stockyard: 0.25
+    carters-yard: 0.2
+    boatyard: 0.2
+    masons-yard: 0.15
+    builders-yard: 0.15
+    kiln-yard: 0.3
+    # Big sites with open ground inside them.
+    farmstead: 0.35
+    barracks: 0.5
+    citadel: 0.5
+    palace: 0.5
+    temple: 0.7
+    gatehouse: 1
+
 # The brief says where a river arrives and leaves but not how wide it is.
 riverWidth: 14
 

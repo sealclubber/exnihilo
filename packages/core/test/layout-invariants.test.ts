@@ -52,8 +52,8 @@ function fixture(): { layout: Layout; city: City; brief: SettlementBrief } {
     waters: [],
     lots: [
       // A five-sided lot and a four-sided one that is not a rectangle, side by side south of the street.
-      { id: 'lot-1-000001', buildingId: 'building-1-000001', polygon: [[-40, 5], [-30, 5], [-30, 25], [-35, 28], [-40, 25]], districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [-35, 0] } },
-      { id: 'lot-1-000002', buildingId: 'building-1-000002', polygon: [[-30, 5], [-20, 5], [-18, 25], [-30, 25]], districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [-25, 0] } },
+      { id: 'lot-1-000001', buildingId: 'building-1-000001', polygon: [[-40, 5], [-30, 5], [-30, 25], [-35, 28], [-40, 25]], districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [-35, 0] }, footprints: [[[-40, 5], [-34, 5], [-34, 15], [-40, 15]], [[-33, 18], [-31, 18], [-31, 24], [-34, 26]]] },
+      { id: 'lot-1-000002', buildingId: 'building-1-000002', polygon: [[-30, 5], [-20, 5], [-18, 25], [-30, 25]], districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [-25, 0] }, footprints: [] },
     ],
     districtAreas: [{ districtId: 'district-1-001', polygons: [[[-50, 0], [0, 0], [0, 30], [-50, 30]]], labelPoint: [-25, 15] }],
     summary: {
@@ -119,6 +119,10 @@ describe('broken layouts', () => {
     ['two lots for one building', ({ layout }) => (layout.lots[1]!.buildingId = 'building-1-000001'), /building-1-000001 has more than one lot/],
     ['a lot for a building that does not exist', ({ layout }) => (layout.lots[1]!.buildingId = 'building-1-000009'), /belongs to building-1-000009, which does not exist/],
     ['a lot in a district other than its building\'s', ({ layout, city }) => { city.districts.push({ ...city.districts[0]!, id: 'district-1-002' }); layout.lots[1]!.districtId = 'district-1-002'; }, /lot-1-000002 is in district-1-002 but its building building-1-000002 is in district-1-001/],
+    ['a footprint that reaches outside its lot', ({ layout }) => (layout.lots[0]!.footprints[0] = [[-40, 5], [-28, 5], [-28, 15], [-40, 15]]), /lot-1-000001 has a footprint that does not lie inside the lot/],
+    ['a footprint that pokes through the lot\'s slanted side', ({ layout }) => (layout.lots[1]!.footprints = [[[-22, 20], [-18, 20], [-18, 24], [-22, 24]]]), /lot-1-000002 has a footprint that does not lie inside the lot/],
+    ['footprints that overlap on one lot', ({ layout }) => (layout.lots[0]!.footprints[1] = [[-36, 10], [-31, 10], [-31, 24], [-36, 24]]), /lot-1-000001 has footprints that overlap each other/],
+    ['a footprint with no area', ({ layout }) => (layout.lots[1]!.footprints = [[[-28, 10], [-25, 10], [-22, 10]]]), /lot-1-000002 has a footprint with no area/],
     ['lots that overlap', ({ layout }) => (layout.lots[1]!.polygon = [[-33, 5], [-20, 5], [-18, 25], [-33, 25]]), /lot-1-000001 overlaps lot-1-000002/],
     ['a lot on the roadway', ({ layout }) => (layout.lots[0]!.polygon = [[-40, 2], [-30, 2], [-30, 25], [-40, 25]]), /lot-1-000001 overlaps the roadway of segment-1-000001/],
     ['a lot under a curved street', ({ layout }) => { layout.lots[1]!.polygon = [[20, -30], [40, -30], [40, -8], [20, -8]]; layout.districtAreas[0]!.polygons = [[[-50, -40], [50, -40], [50, 30], [-50, 30]]]; }, /lot-1-000002 overlaps the roadway of segment-1-000002/],

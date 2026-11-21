@@ -1,6 +1,8 @@
 /**
  * The whole-world run: every settlement of Lomia, generated and checked.
  */
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   WORKFORCE_SHARE_LIMITS,
@@ -12,6 +14,8 @@ import {
   createRng,
   generateCity,
   generateLayout,
+  geometry,
+  placeFlagsOf,
 } from '../src/index.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
 
@@ -54,6 +58,10 @@ describe('every settlement of Lomia', () => {
     let slowest = { seconds: 0, id: '' };
     let layoutSeconds = 0;
     const failures: string[] = [];
+    // Everything a layout held at version 1, to compare with a fingerprint taken then.
+    const versionOne = createHash('sha256');
+    let footprints = 0;
+    let openAirLots = 0;
     for (const brief of settlements) {
       try {
         const city = generateCity(brief, pack);
@@ -66,6 +74,17 @@ describe('every settlement of Lomia', () => {
         if (layout.lots.length !== city.buildings.length) failures.push(`${brief.id}: ${layout.lots.length} lots for ${city.buildings.length} buildings`);
         // The generator checks itself; the rules are run again here so the test does not rely on that.
         failures.push(...checkLayout(layout, city, brief, pack).map((problem) => `${brief.id}: ${problem}`));
+        const { summary: _summary, ...rest } = layout;
+        versionOne.update(JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) }));
+        // Footprints lie inside their lots without overlapping (checked above, with the rest), and an open-air building has open ground.
+        const types = new Map(city.buildings.map((building) => [building.id, building.type]));
+        for (const lot of layout.lots) {
+          footprints += lot.footprints.length;
+          if (!placeFlagsOf(types.get(lot.buildingId) as string, pack).openAir) continue;
+          openAirLots++;
+          const built = lot.footprints.reduce((sum, footprint) => sum + geometry.polygonArea(footprint), 0);
+          if (!(built < geometry.polygonArea(lot.polygon) * 0.9)) failures.push(`${brief.id}: ${lot.id} is open-air but has no open ground to speak of`);
+        }
         // A path exists from the first lot to a spread of others, the last among them.
         const finder = createPathFinder(layout);
         const step = Math.max(1, Math.floor(layout.lots.length / 12));
@@ -93,5 +112,10 @@ describe('every settlement of Lomia', () => {
     );
     expect(failures.slice(0, 10)).toEqual([]);
     expect(slowest.seconds).toBeLessThan(5);
+    // Junctions, segments, exits, water, lots, entrances and district areas are those of layout version 1.
+    const baseline = JSON.parse(readFileSync(new URL('./baselines/layout-v1.json', import.meta.url), 'utf8')) as { all: string };
+    expect(versionOne.digest('hex')).toBe(baseline.all);
+    expect(footprints).toBeGreaterThan(400_000);
+    expect(openAirLots).toBeGreaterThan(10_000);
   });
 });

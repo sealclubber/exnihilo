@@ -14,13 +14,15 @@
  *   entrance point on its segment; lots do not connect to each other.
  * - IDs carry the settlement number and are zero-padded: lot-641-000123.
  * - The summary names the generator that produced the layout.
+ * - A lot's footprints, the outlines of its buildings, lie inside the lot and
+ *   do not overlap each other. Everything else in the lot is open ground.
  */
 import { z } from 'zod';
 import { BuildingIdSchema, DistrictIdSchema } from '../city/records.ts';
 import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementIdSchema } from '../schema.ts';
 
 /** Raised whenever a layout for the same inputs would change. */
-export const LAYOUT_VERSION = 1;
+export const LAYOUT_VERSION = 2;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -96,6 +98,12 @@ export const LotSchema = z.strictObject({
   districtId: DistrictIdSchema,
   /** The lot is entered from this point on this segment's centre line. */
   entrance: z.strictObject({ segmentId: SegmentIdSchema, point: PointSchema }),
+  /**
+   * The outlines of the buildings on the lot: zero or more polygons that lie
+   * inside the lot and do not overlap each other. Everything in the lot that
+   * is not footprint is open ground.
+   */
+  footprints: z.array(polygon),
 });
 export type Lot = z.infer<typeof LotSchema>;
 

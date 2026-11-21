@@ -24,7 +24,7 @@
 import type { Building, City, District } from '../city/records.ts';
 import { stepRng } from '../city/random.ts';
 import { idNumber } from '../ids.ts';
-import { type SettingPack, lotSizeOf } from '../pack/schema.ts';
+import { type SettingPack, footprintCoverageOf, lotSizeOf } from '../pack/schema.ts';
 import type { Point, SettlementBrief } from '../schema.ts';
 import {
   EPSILON,
@@ -673,6 +673,13 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
   const buildingOrder = new Map(city.buildings.map((building, index) => [building.id, index]));
   placed.sort((a, b) => (buildingOrder.get(a.building.id) as number) - (buildingOrder.get(b.building.id) as number));
   let builtArea = 0;
+  /** One rectangle across the lot's frontage, as deep as the pack's coverage of the lot; none where the coverage is nothing. */
+  const footprint = (left: number, right: number, top: number, depth: number, north: boolean, coverage: number): Point[][] => {
+    if (coverage <= 0) return [];
+    const near = north ? top : top + depth * (1 - coverage);
+    const far = north ? top + depth * coverage : top + depth;
+    return [[[left, near], [right, near], [right, far], [left, far]]];
+  };
   const lots: Lot[] = placed.map((lot, index) => {
     const i = cellI(lot.cell);
     const j = cellJ(lot.cell);
@@ -692,6 +699,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       ],
       districtId: lot.building.districtId,
       entrance: { segmentId: segmentIds.get(horizontalAt(i, street)) as string, point: [(left + right) / 2, street * pitchY] },
+      footprints: footprint(left, right, top, lot.depth, lot.north, footprintCoverageOf(lot.building.type, pack)),
     };
   });
 

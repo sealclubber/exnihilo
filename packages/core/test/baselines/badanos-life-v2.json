@@ -1,0 +1,14 @@
+{
+  "note": "Fingerprints of every Badanos resident's plan under LIFE_VERSION 2 and pack 0.6.0, default seed, days 1 to 8: every activity with its building and times and every trip, leaving out only where on the lot an outside stay is spent.",
+  "settlement": "settlement-641",
+  "planHash": {
+    "1": "465ab11084cb07e35ddcb0b561cbea420fbc5bf3628c69739ec0d43d2950c440",
+    "2": "19cc243a38883b9d350d6cc2cb428f42453138a85a40d39db297c5b7cd6db262",
+    "3": "0d9e19aebba38ccf63d5383f56ab11dae1eea248daa9058bc8d0a33fd27d5d80",
+    "4": "a77efbd273e53b4ecd3a763e6faa6f2d3101b46173d76c3673371e9c0ed91cf5",
+    "5": "2b5489510473cd9b61ad075f73f7c3017cc72cfc6c9c6545d749036bbfabdb5b",
+    "6": "cb410f62d028b28de531130768f7cf95a55bd221bdfeb75830105f1ad38c99bb",
+    "7": "77f685488171650c6331009e20c7d353a94737dfbdc45b6e29c904fa78a30206",
+    "8": "842a78485c5523e39449221420490ecbd0b21f0ba0dcb8d43412da576593f8d0"
+  }
+}

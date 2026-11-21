@@ -2,6 +2,8 @@
  * Tests of the grid layout generator and the path function on single
  * settlements of Lomia.
  */
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   type City,
@@ -19,6 +21,8 @@ import {
   checkLayout,
   createPathFinder,
   distanceToWater,
+  footprintCoverageOf,
+  placeFlagsOf,
   generateCity,
   generateLayout,
   geometry,
@@ -350,7 +354,7 @@ describe('determinism and isolation', () => {
   it('leaves the city generator at version 2', () => {
     expect(GENERATOR_VERSION).toBe(2);
     expect(badanos.city.summary.generatorVersion).toBe(2);
-    expect(LAYOUT_VERSION).toBe(1);
+    expect(LAYOUT_VERSION).toBe(2);
   });
 
   it('gives a different layout for a different seed, which still passes every invariant', () => {
@@ -362,6 +366,87 @@ describe('determinism and isolation', () => {
     // The brief's facts do not move with the seed.
     expect(other.exits).toEqual(badanos.layout.exits.map((exit, index) => ({ ...exit, junctionId: other.exits[index]!.junctionId })));
     expect(riverOf(other).centreLine[1]).toEqual(riverOf(badanos.layout).centreLine[1]);
+  });
+});
+
+describe('footprints', () => {
+  const typeOf = (town: Town) => {
+    const types = new Map(town.city.buildings.map((building) => [building.id, building.type]));
+    return (lot: Layout['lots'][number]) => types.get(lot.buildingId) as string;
+  };
+  const built = (lot: Layout['lots'][number]) => lot.footprints.reduce((sum, footprint) => sum + geometry.polygonArea(footprint), 0);
+
+  it('give each lot one rectangle across its street frontage, as deep as the pack\'s coverage', () => {
+    const type = typeOf(badanos);
+    const { coverage, types } = pack.layout.footprints!;
+    let checked = 0;
+    for (const lot of badanos.layout.lots) {
+      const share = footprintCoverageOf(type(lot), pack);
+      if (share === 0) {
+        expect(lot.footprints, lot.id).toEqual([]);
+        continue;
+      }
+      expect(lot.footprints, lot.id).toHaveLength(1);
+      const footprint = lot.footprints[0]!;
+      expect(footprint).toHaveLength(4);
+      expect(geometry.polygonWithin(footprint, lot.polygon)).toBe(true);
+      expect(built(lot) / geometry.polygonArea(lot.polygon)).toBeCloseTo(share, 9);
+      // Against the frontage: the footprint's edge nearest the entrance is the lot's own.
+      expect(geometry.distanceToPolygonEdge(lot.entrance.point, footprint)).toBeCloseTo(geometry.distanceToPolygonEdge(lot.entrance.point, lot.polygon), 9);
+      // And as wide as the lot.
+      const xs = (points: Point[]) => [Math.min(...points.map((point) => point[0])), Math.max(...points.map((point) => point[0]))];
+      expect(xs(footprint)).toEqual(xs(lot.polygon));
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(1500);
+    expect(footprintCoverageOf('cottage', pack)).toBe(coverage);
+    expect(footprintCoverageOf('tenement', pack)).toBe(types.tenement);
+  });
+
+  it('leave an open-air building type its open ground: none, or a small footprint where the pack says so', () => {
+    const type = typeOf(badanos);
+    const openAir = badanos.layout.lots.filter((lot) => placeFlagsOf(type(lot), pack).openAir);
+    expect(openAir.length).toBeGreaterThan(100);
+    for (const lot of openAir) expect(built(lot), lot.id).toBeLessThan(geometry.polygonArea(lot.polygon) * 0.5);
+    expect(openAir.filter((lot) => type(lot) === 'market-stall').every((lot) => lot.footprints.length === 0)).toBe(true);
+    expect(openAir.filter((lot) => type(lot) === 'stockyard').every((lot) => lot.footprints.length === 1)).toBe(true);
+    expect(footprintCoverageOf('market-stall', pack)).toBe(0);
+    expect(footprintCoverageOf('stockyard', pack)).toBe(pack.layout.footprints!.types.stockyard);
+  });
+
+  it('leave junctions, segments, lots and entrances as they were at layout version 1', () => {
+    const baseline = JSON.parse(readFileSync(new URL('./baselines/layout-v1.json', import.meta.url), 'utf8')) as { badanos: string };
+    const { summary, ...rest } = badanos.layout;
+    const text = JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) });
+    expect(createHash('sha256').update(text).digest('hex')).toBe(baseline.badanos);
+    expect(summary.layoutVersion).toBe(2);
+  });
+
+  it('change in area, and in nothing else, when a coverage value changes', () => {
+    const strip = (layout: Layout) => JSON.stringify({ ...layout, lots: layout.lots.map(({ footprints: _footprints, ...lot }) => lot) });
+    const roomy = town('settlement-641', edited((raw) => (raw.layout.footprints.coverage = 0.3)));
+    expect(strip(roomy.layout)).toBe(strip(badanos.layout));
+    const type = typeOf(badanos);
+    let changed = 0;
+    badanos.layout.lots.forEach((lot, index) => {
+      const other = roomy.layout.lots[index]!;
+      if (type(lot) in pack.layout.footprints!.types || placeFlagsOf(type(lot), pack).openAir) return expect(other.footprints).toEqual(lot.footprints);
+      expect(built(other)).toBeCloseTo(built(lot) / 2, 6);
+      changed++;
+    });
+    expect(changed).toBeGreaterThan(1000);
+    // One type's own figure changes that type alone.
+    const sheds = town('settlement-641', edited((raw) => (raw.layout.footprints.types['market-stall'] = 0.5)));
+    sheds.layout.lots.forEach((lot, index) => {
+      if (type(lot) === 'market-stall') expect(built(lot)).toBeCloseTo(geometry.polygonArea(lot.polygon) / 2, 6);
+      else expect(lot.footprints).toEqual(badanos.layout.lots[index]!.footprints);
+    });
+  });
+
+  it('are left out altogether by a pack that says nothing of them', () => {
+    const bare = town('settlement-455', edited((raw) => delete raw.layout.footprints));
+    expect(bare.layout.lots.every((lot) => lot.footprints.length === 0)).toBe(true);
+    expect(checkLayout(bare.layout, bare.city, bare.brief, edited((raw) => delete raw.layout.footprints))).toEqual([]);
   });
 });
 
