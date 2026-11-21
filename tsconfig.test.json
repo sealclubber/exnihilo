@@ -1,8 +1,18 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2023", "DOM"],
-    "types": ["node"]
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "types": [
+      "node"
+    ]
   },
-  "include": ["packages/*/test", "vitest.config.ts"]
+  "include": [
+    "packages/*/test",
+    "packages/client/e2e",
+    "vitest.config.ts",
+    "vitest.viewer.config.ts"
+  ]
 }

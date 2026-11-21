@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Activity, Calendar, ClockState, PackLabels, Trip, Whereabouts } from '@worldsim/core';
-import { ClockSync, clockFace, describeRate, formatClock, nextTimeOfDay, tripPosition, tripWindow } from '../src/clock.ts';
+import { ClockSync, clockFace, describeRate, formatClock, nextTimeOfDay, tripPosition, tripWindow, wanderPosition } from '../src/clock.ts';
 import { activityWord, describeActivity, describeHours, describeWhereabouts, timeline } from '../src/life-format.ts';
 import { describeSeen } from '../src/town-format.ts';
 
@@ -172,8 +172,8 @@ describe('daily life in words', () => {
     expect(at({ kind: 'visit', buildingId: 'building-1-000003', visitId: 'tavern', outside: true, point: [1, 2] })).toBe('A drink after work, outside at the tavern, until 17:03');
     expect(at({ kind: 'visit', buildingId: home, visitId: 'play', outside: true, point: [1, 2] })).toBe('Playing outside, outside their home, until 17:03');
     expect(at({ kind: 'visit', buildingId: home, visitId: 'play' })).toBe('Playing outside, at home, until 17:03');
-    expect(describeActivity({ kind: 'work', start: 0, end: 1, buildingId: 'building-1-000002', outside: true, point: [1, 2] }, buildings, labels, home)).toBe('Work, outside at the tannery');
-    expect(describeActivity({ kind: 'visit', start: 0, end: 1, buildingId: home, visitId: 'play', outside: true, point: [1, 2] }, buildings, labels, home)).toBe('Playing outside, outside their home');
+    expect(describeActivity({ kind: 'work', start: 0, end: 1, buildingId: 'building-1-000002', outside: true, wander: { times: [0, 1], points: [[1, 2], [1, 2]] } }, buildings, labels, home)).toBe('Work, outside at the tannery');
+    expect(describeActivity({ kind: 'visit', start: 0, end: 1, buildingId: home, visitId: 'play', outside: true, wander: { times: [0, 1], points: [[1, 2], [1, 2]] } }, buildings, labels, home)).toBe('Playing outside, outside their home');
   });
 
   it('says whether a building is open, and its hours that day', () => {
@@ -188,5 +188,24 @@ describe('daily life in words', () => {
   it('counts the people to be seen, walking and outside apart', () => {
     expect(describeSeen(31, 1000, true)).toBe('31 walking · 1,000 outside');
     expect(describeSeen(4, 0, false)).toBe('4 walking · 0 outside, in view');
+  });
+});
+
+describe('moving about outside', () => {
+  const wander = { times: [100, 160, 180, 240], points: [[0, 0], [0, 0], [10, 0], [10, 0]] as [number, number][] };
+
+  it('puts someone where their wander has them at a game time: pausing at a point, part of the way while moving', () => {
+    expect(wanderPosition(wander, 100)).toEqual([0, 0]);
+    expect(wanderPosition(wander, 150)).toEqual([0, 0]);
+    expect(wanderPosition(wander, 165)).toEqual([2.5, 0]);
+    expect(wanderPosition(wander, 170)).toEqual([5, 0]);
+    expect(wanderPosition(wander, 180)).toEqual([10, 0]);
+    expect(wanderPosition(wander, 200)).toEqual([10, 0]);
+  });
+
+  it('holds them at the ends before it begins and after it is over', () => {
+    expect(wanderPosition(wander, 0)).toEqual([0, 0]);
+    expect(wanderPosition(wander, 9999)).toEqual([10, 0]);
+    expect(wanderPosition({ times: [5, 5], points: [[1, 1], [2, 2]] }, 5)).toEqual([1, 1]);
   });
 });

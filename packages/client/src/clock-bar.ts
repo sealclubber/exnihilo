@@ -13,6 +13,8 @@ export interface ClockBarHandlers {
   change(action: 'run' | 'pause' | 'rate' | 'time', body?: object): Promise<ClockState>;
   /** Called after the clock has changed here or been heard to change. */
   changed(): void;
+  /** Told the day and time as shown, whenever they change. */
+  shown?(face: string): void;
 }
 
 export interface ClockBar {
@@ -91,6 +93,7 @@ export function createClockBar(sync: ClockSync, handlers: ClockBarHandlers): Clo
     const shown = clockFace(now, calendar);
     face.textContent = `${shown.isLight ? '☀' : '☾'} ${shown.dayName}, day ${shown.day.toLocaleString('en-US')} · ${shown.time}${shown.isRestDay ? ' · rest day' : ''}`;
     face.classList.toggle('night', !shown.isLight);
+    handlers.shown?.(`${shown.dayName} ${shown.time}`);
   }, 200);
 
   return {

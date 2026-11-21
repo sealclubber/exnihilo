@@ -2,6 +2,7 @@ import type { SettlementListItem, WorldInfo } from '@worldsim/core';
 import { fetchBrief, fetchMap, fetchWorld } from './api.ts';
 import { describeBrief } from './brief.ts';
 import { createInspector } from './inspector.ts';
+import { createFoldAll, createPane } from './pane.ts';
 import { showBrief, showMessage } from './panel.ts';
 import { pickNearest } from './pick.ts';
 import { type Scene, buildScene, draw } from './render.ts';
@@ -10,7 +11,15 @@ import { type View, fitView, panBy, zoomAt } from './view.ts';
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const canvas = byId<HTMLCanvasElement>('canvas');
 const mapBox = byId('map');
-const panel = byId('panel');
+// The settlement panel is a pane like the rest: it folds away to one line, and the map takes the room.
+const panelHost = byId('panel');
+const panel = document.createElement('div');
+panel.className = 'brief';
+panel.append(...panelHost.childNodes);
+const settlementPane = createPane('settlement', 'Settlement', panel, 'side');
+settlementPane.setSummary('none chosen');
+panelHost.replaceChildren(settlementPane.element);
+document.querySelector('body > header')?.append(createFoldAll());
 const tooltip = byId('tooltip');
 const status = byId('status');
 const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
@@ -99,7 +108,9 @@ async function select(id: string): Promise<void> {
   try {
     const brief = await fetchBrief(id);
     if (selectedId === id) {
-      showBrief(panel, describeBrief(brief, world), () => {
+      const text = describeBrief(brief, world);
+      settlementPane.setSummary(text.title);
+      showBrief(panel, text, () => {
         location.hash = `${id}${CITY_SUFFIX}`;
       });
     }

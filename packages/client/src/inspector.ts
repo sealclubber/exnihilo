@@ -5,6 +5,7 @@
 import type { AvatarPerception, AvatarState, BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
 import {
   fetchBuilding,
+  fetchBuildingTypes,
   fetchCitySummary,
   fetchClock,
   fetchDistricts,
@@ -45,6 +46,8 @@ import { ClockSync, clockFace } from './clock.ts';
 import { createClockBar } from './clock-bar.ts';
 import { h, link } from './dom.ts';
 import { createAroundYou } from './around-you.ts';
+import { legendEntries, renderLegend } from './legend.ts';
+import { createFoldAll, createPane } from './pane.ts';
 import { activityWord, describeHours, describeWhereabouts, timeline } from './life-format.ts';
 import { createTownMap } from './town-map.ts';
 
@@ -70,18 +73,31 @@ export interface Inspector {
 export function createInspector(root: HTMLElement, onClose: () => void): Inspector {
   const title = h('h2');
   const subtitle = h('p', { class: 'subtitle' });
-  const summaryBox = h('div', { class: 'column summary' });
+  const summaryBox = h('div', { class: 'summary' });
   const listHeading = h('h3');
   const search = h('input', { attrs: { type: 'search', placeholder: 'Search by family or personal name', 'aria-label': 'Search households' } });
   const chipBox = h('div', { class: 'chips' });
   const listBox = h('ul', { class: 'households' });
   const more = h('button', { class: 'more', attrs: { type: 'button' } }, 'Show more');
-  const detailBox = h('div', { class: 'column detail' });
-  const mapBox = h('div', { class: 'column town-map' });
+  const detailBox = h('div', { class: 'detail' });
+  const mapBox = h('div', { class: 'town-map' });
+  const listBody = h('div', { class: 'list' }, listHeading, search, chipBox, listBox, more);
+  const legendBody = h('div', { class: 'legend' });
+  // Every pane folds away to one line from its header, and the map takes the room.
+  const summaryPane = createPane('summary', 'Summary', summaryBox, 'column');
+  const listPane = createPane('households', 'Households', listBody, 'column');
+  const detailPane = createPane('detail', 'Details', detailBox, 'column');
+  const legendPane = createPane('legend', 'Legend', legendBody, 'over-map legend-pane');
+  /** What the detail pane is showing, for its title and its one line when folded. */
+  const detailShows = (kind: string, what: string) => {
+    detailPane.setTitle(kind);
+    detailPane.setSummary(what);
+  };
 
   // The world clock: kept in step with the server's over a socket, and shown with its controls.
   const sync = new ClockSync(() => performance.now());
-  const clockBar = createClockBar(sync, { change: postClock, changed: () => townMap.clockChanged() });
+  const clockBar = createClockBar(sync, { change: postClock, changed: () => townMap.clockChanged(), shown: (face) => clockPane.setSummary(face) });
+  const clockPane = createPane('clock', 'Clock', clockBar.element, 'inline');
   const heard = (state: Parameters<ClockSync['apply']>[0]) => {
     sync.apply(state);
     clockBar.refresh();
@@ -95,19 +111,14 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const gameNow = () => Math.floor(sync.now() ?? 0);
 
   root.replaceChildren(
-    h('header', {}, h('button', { class: 'back', onClick: onClose, attrs: { type: 'button' } }, '← Map'), h('div', {}, title, subtitle), clockBar.element),
-    h(
-      'div',
-      { class: 'columns' },
-      summaryBox,
-      mapBox,
-      h('div', { class: 'column list' }, listHeading, search, chipBox, listBox, more),
-      detailBox,
-    ),
+    h('header', {}, h('button', { class: 'back', onClick: onClose, attrs: { type: 'button' } }, '← Map'), h('div', {}, title, subtitle), clockPane.element, createFoldAll()),
+    h('div', { class: 'columns' }, summaryPane.element, mapBox, listPane.element, detailPane.element),
   );
 
   let settlementId = '';
   let labels: PackLabels;
+  /** The type of each building of the town on show, for naming the lot under the cursor. */
+  let buildingTypes: Record<string, string> = {};
   let districts: District[] = [];
   let filters: HouseholdFilters = {};
   let shown: HouseholdListItem[] = [];
@@ -133,7 +144,21 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     onWalkToPoint: (point) => act('walk-to-point', { point }),
     onWalkToBuilding: (buildingId) => act('walk-to-building', { buildingId }),
     onUnfollowAvatar: () => aroundYou.unfollow(),
+    roleColour: (role) => labels?.roleColours[role],
+    personLabel: (person) => (person.occupationId !== undefined && labels ? `${person.name} · ${workName(person, labels)}` : person.name),
+    lotLabel: (lot) => {
+      const type = buildingTypes[lot.buildingId];
+      return type === undefined || !labels ? lot.buildingId : buildingTypeName(type, labels);
+    },
+    onHover: (personId) => showHovered(personId),
   });
+  // For tests and for measuring: what the map last drew. Reading it changes nothing.
+  Object.assign(window, { worldsim: { map: () => townMap.drawn() } });
+  /** Shows, in the lists, who the cursor is on in the map. */
+  const showHovered = (personId: string | undefined) => {
+    for (const row of root.querySelectorAll('[data-person].hovered')) row.classList.remove('hovered');
+    if (personId !== undefined) for (const row of root.querySelectorAll(`[data-person="${personId}"]`)) row.classList.add('hovered');
+  };
 
   // ---- The avatar -----------------------------------------------------------------------
   // The server keeps the avatar's state and says who it perceives. The viewer is sent the state,
@@ -148,7 +173,9 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     onFollow: (on) => townMap.followAvatar(on),
     onPerson: (personId) => void showPerson(personId),
     onBuilding: (buildingId) => void showBuilding(buildingId),
+    onHover: (personId) => townMap.mark(personId),
   });
+  const aroundPane = createPane('around', 'Around you', aroundYou.element, 'over-map around-pane');
   /** Asks the server for one of the avatar's actions, and shows its reason if it refuses. */
   function act(action: AvatarAction, body: object = {}): void {
     aroundYou.note('');
@@ -164,6 +191,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     const seen = here && perception?.settlementId === settlementId ? perception : undefined;
     townMap.setPerceived(new Set(seen ? (seen.where === 'street' ? seen.nearby.map((entry) => entry.personId) : seen.occupants.map((occupant) => occupant.personId)) : []));
     aroundYou.render(avatar, here !== undefined, sync.now() ?? 0, seen, labels);
+    aroundPane.setSummary(aroundYou.count());
   };
   /** Asks who the avatar perceives now. Called about once a real second, and whenever the avatar or the clock changes. */
   function perceive(): void {
@@ -185,7 +213,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   watchAvatar((report) => heardAvatar(report.avatar ?? undefined));
   void fetchAvatar().then((report) => heardAvatar(report.avatar ?? undefined), () => undefined);
   setInterval(perceive, PERCEIVE_EVERY);
-  mapBox.append(aroundYou.element);
+  mapBox.append(legendPane.element, aroundPane.element);
   /** A moment in words, for saying when an answer was true. */
   const asOf = (time: number) => {
     const shown = clockFace(time, labels.calendar);
@@ -193,6 +221,14 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   };
   const districtName = (id: string) => districts.find((district) => district.id === id)?.name ?? id;
   const tierName = (id: string) => labels.statusTiers.find((tier) => tier.id === id)?.name ?? id;
+
+  /** A list row for a household, by the member it shows: hovering it marks that person on the map, if they can be seen. */
+  const hoverable = (personId: string, child: HTMLElement) => {
+    const row = h('li', { attrs: { 'data-person': personId } }, child);
+    row.addEventListener('mouseenter', () => townMap.mark(personId));
+    row.addEventListener('mouseleave', () => townMap.mark(undefined));
+    return row;
+  };
 
   function setFilter(key: keyof HouseholdFilters, value: string | undefined): void {
     filters = { ...filters };
@@ -251,6 +287,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
 
   function renderList(): void {
     listHeading.textContent = `Households (${formatNumber(total)})`;
+    listPane.setSummary(formatNumber(total));
     chipBox.replaceChildren(
       ...filterChips(filters, districts, labels).map((chip) =>
         h('button', { class: 'chip', title: 'Remove this filter', onClick: () => setFilter(chip.key, undefined), attrs: { type: 'button' } }, `${chip.text} ×`),
@@ -258,9 +295,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     );
     listBox.replaceChildren(
       ...shown.map((household) =>
-        h(
-          'li',
-          {},
+        hoverable(
+          household.member.id,
           h(
             'button',
             {
@@ -319,6 +355,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
 
   function renderHousehold(detail: HouseholdDetail, now?: HouseholdNow): void {
     const { household, members, dwelling, district, staff } = detail;
+    detailShows('Household', household.familyName);
     const doing = new Map((now?.members ?? []).map((member) => [member.personId, member]));
     const rows = members.map((person) => {
       const text = describeMember(person, labels);
@@ -361,6 +398,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
 
   function renderBuilding(detail: BuildingDetail, now?: OccupantsNow): void {
     const { building, district, workers, households } = detail;
+    detailShows('Building', buildingTypeName(building.type, labels));
     const inside = now
       ? [
           // Hours are worth showing for a place someone works at or that never closes, not for a plain dwelling.
@@ -450,6 +488,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   /** A person: who they are, what they are doing now, and their day as a timeline. */
   function renderPerson(now: PersonNow, plan: PersonPlan): void {
     const { person, whereabouts, time } = now;
+    detailShows('Person', `${person.givenName} ${person.familyName}`);
     const buildings = { ...plan.buildings, ...now.buildings };
     const home = plan.plan.activities.find((activity) => activity.kind === 'sleep' || activity.kind === 'home');
     const homeId = home && home.kind !== 'travel' ? home.buildingId : undefined;
@@ -530,6 +569,9 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       chipBox.replaceChildren();
       more.hidden = true;
       detailBox.replaceChildren(hint('Choose a household, or click a lot on the map, to see who lives and works there.'));
+      detailShows('Details', 'nothing chosen');
+      buildingTypes = {};
+      legendBody.replaceChildren();
       townMap.message('');
       try {
         const [packLabels, citySummary, districtPage] = await Promise.all([fetchPackLabels(), fetchCitySummary(id), fetchDistricts(id)]);
@@ -540,6 +582,11 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         title.textContent = summary.settlementName;
         subtitle.textContent = `${formatNumber(summary.population)} residents in ${formatNumber(summary.households)} households`;
         renderSummary();
+        summaryPane.setSummary(`${summary.settlementName}, ${formatNumber(summary.population)} residents`);
+        const colours = legendEntries(summary, labels);
+        renderLegend(legendBody, colours);
+        legendPane.setSummary(`${colours.length} colours`);
+        void fetchBuildingTypes(id).then((types) => settlementId === id && (buildingTypes = types), () => undefined);
         // The map loads beside the lists, not before them.
         townMap.message('Laying out the town…');
         void fetchLayout(id).then(

@@ -6,7 +6,7 @@
  * and the trips for a window of game time, and works out where on its path
  * each trip has reached.
  */
-import type { Calendar, ClockState, Point, Trip } from '@worldsim/core';
+import type { Calendar, ClockState, Point, Trip, Wander } from '@worldsim/core';
 
 const SECONDS_PER_DAY = 86_400;
 
@@ -129,4 +129,29 @@ export function tripPosition(trip: Trip, time: number): Point | undefined {
     }
   }
   return points[points.length - 1] as Point;
+}
+
+/**
+ * Where someone moving about outside is at a game time, on the wander they
+ * were sent: at a point while they pause, part of the way to the next while
+ * they move. Before the wander begins they are at its first point; after it
+ * ends, at its last.
+ */
+export function wanderPosition(wander: Wander, time: number): Point {
+  const { times, points } = wander;
+  const last = times.length - 1;
+  if (time <= (times[0] as number)) return points[0] as Point;
+  if (time >= (times[last] as number)) return points[last] as Point;
+  let low = 0;
+  let high = last;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if ((times[middle] as number) <= time) low = middle;
+    else high = middle - 1;
+  }
+  const [ax, ay] = points[low] as Point;
+  const [bx, by] = points[low + 1] as Point;
+  const span = (times[low + 1] as number) - (times[low] as number);
+  const share = span === 0 ? 0 : (time - (times[low] as number)) / span;
+  return [ax + (bx - ax) * share, ay + (by - ay) * share];
 }

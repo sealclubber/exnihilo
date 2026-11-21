@@ -85,6 +85,7 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET .../city/districts` | Its districts, in pages |
 | `GET .../city/households/<id>` | One household with its members and its home |
 | `GET .../city/buildings/<id>` | One building with the people who work and live there |
+| `GET .../city/building-types` | The type of every building, by ID, for naming lots on the map |
 | `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas and a summary |
 | `GET .../layout/path?from=<lot>&to=<lot>` | The shortest walking path between two lots: the segments in order, the length in metres, and the line walked |
 
@@ -97,7 +98,7 @@ with Ctrl-C so the clock is stored on the way out.
 | `POST /api/clock/rate` with `{"rate": 30}` | Sets the rate, in game seconds per real second, to one of the pack's presets |
 | `POST /api/clock/time` with `{"gameTime": 86400}` | Sets the game time, forward or back |
 | WebSocket `/api/clock/stream` | The clock's state on connecting, then again after every change |
-| `GET .../life/trips?from=&to=` | Everyone who can be seen in a window of game time: the trips under way, and the stays out of doors (who, where, from when, until when). Optionally only those in a region (`minX`, `minY`, `maxX`, `maxY`) |
+| `GET .../life/trips?from=&to=` | Everyone who can be seen in a window of game time: the trips under way, and the stays out of doors with the part of each person's wander that falls in the window. Each comes with the person's name and the role that colours them. Optionally only those in a region (`minX`, `minY`, `maxX`, `maxY`) |
 | `GET .../life/people/<id>/plan?day=` | A person's plan for a day, by default the clock's day |
 | `GET .../life/people/<id>/now` | Where a person is and what they are doing |
 | `GET .../life/buildings/<id>/occupants` | Who is at a building, inside or outside on its lot, whether it is open, and its hours that day |
@@ -164,10 +165,15 @@ it is a rest day, and the time, with the map darkened at night. **Run** and
 **Pause** start and stop it; the rate buttons set how fast game time passes
 (1× is real time, 30× is a game day in 48 real minutes, 3,600× a game day in
 24 real seconds); **Morning**, **Midday** and **Evening** jump to the next
-sunrise, midday or sunset. Residents who are walking somewhere are dark moving
+sunrise, midday or sunset. Residents who are walking somewhere are moving
 dots. Residents who are out of doors at a place, such as a market stall, a
-yard or their own doorstep, are smaller brown dots that stay where they are.
-The corner of the map counts the two apart. Clicking either kind of dot opens
+yard or their own doorstep, are small squares that move about the open ground
+of that lot. Everyone is coloured by role: their occupation's category, or
+keeping house, or not working; the **Legend** lists the colours in use, and
+the military is red so that the watch stands out. A lot is drawn as open
+ground, faintly, with its building solid on it, so a house and its yard can be
+told apart. The corner of the map counts walkers and those outside apart.
+Clicking either kind of person opens
 that person: who they are, what they are doing now, and today's plan as a
 timeline, with **Follow on the map** to keep the map centred on them. Clicking
 a lot also shows who is there now, whether the building is open and its hours
@@ -225,6 +231,7 @@ numbers.
 | `calendar.yaml` | The days of the week and which are rest days, the days in a year, sunrise and sunset |
 | `time.yaml` | The clock's rate presets and the default rate |
 | `avatar.yaml` | The avatar's walking speed and how far it perceives |
+| `display.yaml` | The colour each role is drawn in: one per workforce category, one each for keeping house and not working, and optionally single occupations |
 | `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default. Shifts also decide when each building is open |
 | `visits.yaml` | Whether places keep opening hours (`openingHours`), and each kind of visit: who makes it, on which days and `weekdays`, how likely, when, for how long, to which building types or to `home`, and whether it is spent `outside` |
 | `categories.yaml` | The seven workforce categories and their base shares |
@@ -234,10 +241,10 @@ numbers.
 | `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district, and whether it is `openAir` or `alwaysOpen` |
 | `dwellings.yaml` | Housing types by status tier |
 | `landmarks.yaml` | The buildings and fixed posts that flags and status add, with the same `openAir` and `alwaysOpen` flags |
-| `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations) |
+| `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations, and under `outside` the pace and pauses of someone moving about a lot) |
 | `cultures.yaml` | Which species each culture belongs to |
 | `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside |
-| `layout.yaml` | Every length behind a town's layout: street widths, block dimensions, lot sizes by building type, the river's width, density limits |
+| `layout.yaml` | Every length behind a town's layout: street widths, block dimensions, lot sizes by building type, how much of a lot its building covers (`footprints`), the river's width, density limits |
 
 Each file starts with a comment describing its fields. All the numbers are
 placeholders meant to be tuned by eye:
@@ -286,7 +293,7 @@ centre, x east and y south.
 | Segment | The two junctions it joins, a polyline, a kind (arterial, street, lane or bridge), a width, and the route it carries if any |
 | Exit | The junction where one of the brief's routes leaves town, with the route's ID, name, kind and bearing |
 | Water | A river as a centre line with a width, or the sea as a polygon |
-| Lot | Its building, a polygon, its district, and an entrance: a segment and a point on it |
+| Lot | Its building, a polygon, its district, an entrance (a segment and a point on it), and its footprints: the outlines of the buildings on it |
 | District area | The polygons that enclose a district's lots, and a label point |
 | Summary | Counts, the bounding box, built area, residents per hectare, the layout version, the generator's name, the pack and the seed |
 
@@ -295,10 +302,19 @@ building; no lot overlapping another, a roadway or water; every entrance on a
 segment that borders its lot; a connected street graph; an exit within 20
 degrees of each of the brief's route bearings; the river and the sea where the
 brief puts them; only bridges crossing water; a port's waterside district at
-the water; each district in one piece; and a plausible density. Shapes are
+the water; each district in one piece; a plausible density; and footprints
+that lie inside their lot without overlapping each other, everything else in
+the lot being open ground. Shapes are
 general: nothing that reads a layout may assume straight streets or
 rectangular lots, and the tests bend streets and use five-sided lots to hold
 the viewer, the invariants and the path function to that.
+
+**Footprints.** The grid generator draws one rectangle across each lot's
+street frontage, as deep as the pack's `coverage` for the building type, and
+leaves the rest as a yard. An open-air type has no footprint unless the pack
+gives it one, such as a stable at the front of a stockyard. `LAYOUT_VERSION`
+is 2; junctions, segments, lots and entrances are those of version 1, which a
+fingerprint of all 682 settlements holds.
 
 **The generator** (`layout/grid.ts`, named `grid` in a layout's summary) is
 deliberately regular: a street grid around the centre, a river bending beside
@@ -367,9 +383,15 @@ midnight-to-midnight slice across the personal days that overlap it.
   outside. It is outside when the building's type is marked `openAir` or the
   visit is marked `outside`: stallholders and yard workers, people at the
   market, children playing by their home, elders on the doorstep. An outside
-  stay has a point inside the building's lot, derived from the person, the
-  building and when the stay begins, which does not move during the stay.
-  Sleep and time at home are always indoors.
+  stay has a **wander**: a sequence of points on the open ground of the
+  building's lot, with the game time at which the person is at each, covering
+  the whole stay. Between points they move in a straight line at the pack's
+  slow pace; where two times share a point they pause. Position at a time is
+  interpolation, so it is still a pure function of game time. A wander is
+  drawn from the person, the building and when the stay begins, by a stream
+  of its own, never passes through a footprint or off the lot, and on a lot
+  with no open ground is one fixed point at the frontage. A pace of zero means
+  standing still. Sleep and time at home are always indoors.
 - **Sleep** is at home, at the species' usual hours, moved but not shortened
   to fit the shift: the night watch sleeps by day.
 - **Trips** follow the path function between two lots' entrances and take the
@@ -383,7 +405,9 @@ time)`, `trips(from, to, region?)`, `outsideStays(from, to, region?)`,
 plan must satisfy is in `life/invariants.ts`. Shifts, rest-day duty and
 opening hours are in `life/hours.ts`.
 
-Daily life has its own `LIFE_VERSION`, now 2, in `life/records.ts`. A pack
+Daily life has its own `LIFE_VERSION`, now 3, in `life/records.ts`. Version 3
+added the wander and changed nothing else: a test holds a fingerprint of every
+activity, building, time and trip of Badanos over eight days at version 2. A pack
 with none of the phase 4.5 fields (`openingHours`, `openAir`, `alwaysOpen`,
 `outside`, `weekdays`, `home`, split shifts) gives exactly the plans of
 version 1; a test holds a fingerprint of Badanos's phase 4 plans to prove it.
@@ -421,9 +445,9 @@ can be seen within a distance of a point at a moment, nearest first: those
 walking between two buildings and those outside at one, never anyone indoors.
 It keeps an index per day of who is walking or outside in each stretch of the
 day, so a question looks only at the people who are out around then and not
-at every resident. Once a day's index is built, a query takes about 0.05
-milliseconds in Badanos and 0.2 to 0.7 in Pombal, against a target of 10;
-building it means planning the day, about 0.2 seconds for Badanos and 2.5
+at every resident. Once a day's index is built, a query takes about 0.08
+milliseconds in Badanos and 0.8 to 1 in Pombal, against a target of 10;
+building it means planning the day, about 0.3 seconds for Badanos and 2.7
 for Pombal.
 
 **The clock** lives in the server (`packages/server/src/clock.ts`). Its state
@@ -475,6 +499,17 @@ do for residents.
   stored state that is not imported. It is written whenever it changes,
   restored on start, and cleared when a world is imported again.
 
+**Reading the map.** Moving the cursor onto a person draws a box round them
+with their name and occupation; onto a lot, its outline and its building's
+name; onto the avatar, "You". The nearest person within a generous reach
+wins. Hovering an entry in the around-you panel or a household row marks that
+person on the map if they can be seen, and hovering someone on the map lights
+their entry. Hovering never selects or moves anything. Every pane folds away
+to one line from its header (the summary, the household list, the details,
+the legend, around you, the clock, and the settlement panel beside the world
+map), the map takes the room, each pane's state is remembered across reloads,
+and **Fold all** folds or unfolds them all.
+
 **In the viewer.** **Spawn** in the map's tools, then a click, places the
 avatar on the nearest street; so does **Spawn here** after clicking open
 ground or a street. The avatar is a blue dot with a circle showing how far it
@@ -495,7 +530,16 @@ view. A person's panel offers **Walk to them**, **Walk to their home** and
 npm test            # every test in every package
 npm run typecheck   # strict TypeScript across packages and tests
 npm run check       # both
+npm run test:viewer # the viewer in a headless browser
 ```
+
+`npm run test:viewer` starts a server and the viewer on ports of their own,
+imports Lomia into a temporary world file, and drives the real viewer in
+headless Chromium: panes, the hover marker, colour by role, the legend, people
+moving about outside, and the frame rate. It needs a browser, which
+`npx playwright install chromium` fetches once, so it is not part of
+`npm run check`. The town map reports what it last drew through
+`window.worldsim.map()`, which is what these tests read.
 
 The acceptance tests of every gameplan run against the Lomia fixture. Phase 1's
 are in `packages/core/test/importer.test.ts`; phase 2's are in
@@ -515,7 +559,11 @@ visits, weekdays and pack behaviour) and `baselines/badanos-phase4-plans.json`;
 phase 5's are in `avatar.test.ts` in each package (paths between street
 positions, the avatar's actions, perception and its cost; the client's
 arithmetic and wording), `avatar-api.test.ts` (storage, endpoints, notices) and
-`baselines/badanos-lot-paths.json`.
+`baselines/badanos-lot-paths.json`; phase 6A's are in `wander.test.ts`
+(moving about outside), `layout.test.ts` and `lomia-cities.test.ts`
+(footprints), `baselines/layout-v1.json` and `baselines/badanos-life-v2.json`
+(what must not have moved), and `packages/client/e2e/viewer.e2e.ts` (the
+viewer).
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
 and checks every invariant on each. With generator version 2 it takes about 9
@@ -523,18 +571,25 @@ seconds on one core of an Intel Core Ultra 7 265K; generation alone, which
 includes the generator's own check, is about 7.5 seconds, and Pombal, the
 largest settlement at 47,603 people, takes about 0.13 seconds.
 
-Laying out all 682 settlements, 526,006 lots, takes about 5 seconds more,
-again including the generator's own check of every layout invariant. No
-settlement takes longer than 0.1 seconds; Pombal's 8,413 lots take about that.
+Laying out all 682 settlements, 526,006 lots, takes about 6 seconds more,
+again including the generator's own check of every layout invariant, which
+now includes the footprints. No settlement takes longer than 0.1 seconds;
+Pombal's 8,413 lots take about that.
 
-Planning one day for all 9,607 residents of Badanos takes about 0.2 seconds,
-against a target of 1; it was about 0.12 before phase 4.5, which added some
-4,800 visits a day and the opening-hours checks. Pombal's 47,603 residents
-take about 2.5 seconds for the first day, which includes preparing the path
-tables for its layout, and about 0.8 seconds for each day after. Planning one
-day for every one of Lomia's 2,935,089 residents takes about 49 seconds, and
-every plan of a work day and a rest day in all 682 settlements passes every
-plan rule.
+Planning one day for all 9,607 residents of Badanos takes about 0.3 seconds,
+against a target of 1; it was 0.12 before phase 4.5 added some 4,800 visits a
+day and the opening-hours checks, and 0.2 before phase 6A added the wanders.
+Pombal's 47,603 residents take about 2.7 seconds for the first day, which
+includes preparing the path tables for its layout, and about 0.9 seconds for
+each day after. Planning one day for every one of Lomia's 2,935,089 residents
+takes about 69 seconds, and every plan in all 682 settlements passes every
+plan rule. That day holds about a million stays outside, with some 72 wander
+points each.
+
+The town map draws 60 frames a second in headless Chromium for both Badanos
+at midday (1,031 people, about 0.3 milliseconds a frame) and Pombal (4,698
+people, about 1 millisecond a frame), against a target of 30. Headless
+Chromium draws no faster than 60.
 
 One of the phase 4 gameplan's behaviour thresholds does not quite hold
 everywhere. At 03:00 at least 95% of residents are asleep at home in 669 of

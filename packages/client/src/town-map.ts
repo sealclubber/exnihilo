@@ -10,33 +10,47 @@
  * along the trips the server sends, by the clock; nothing here plans or
  * decides where anyone goes.
  */
-import type { AvatarState, District, Layout, LayoutPath, Lot, OutsideStay, Point, Region, Trip } from '@worldsim/core';
+import type { AvatarState, District, Layout, LayoutPath, Lot, OutsideStay, Point, Region, Seen, Trip } from '@worldsim/core';
 import { avatarPlace, followScale } from './avatar.ts';
-import { tripPosition, tripWindow } from './clock.ts';
+import { tripPosition, tripWindow, wanderPosition } from './clock.ts';
 import { describeSeen } from './town-format.ts';
 import { h } from './dom.ts';
 import { describePath, districtColours, fitBox, formatMetres, lotAt, scaleBar } from './town-format.ts';
 import { type View, panBy, toMap, toScreen, zoomAt } from './view.ts';
 
-const LAND = '#f4f1e8';
-const WATER = '#9cc3e6';
+// A small palette, flat fills and thin lines: every mark says something.
+const LAND = '#f6f4ee';
+const WATER = '#a9cbe8';
 const INK = '#23272e';
-const NIGHT = 'rgba(18, 28, 60, 0.38)';
+/** Night dims the town without hiding it; people are drawn over the dimming, so they stay as clear as by day. */
+const NIGHT = 'rgba(22, 32, 64, 0.26)';
+/** Streets are told apart by tone and by their own width: the arterials that carry the routes are warmest. */
 const SEGMENT_COLOURS: Record<Layout['segments'][number]['kind'], string> = {
-  arterial: '#8a5a2b',
-  street: '#b9b4a8',
-  lane: '#d2cec3',
-  bridge: '#c0392b',
+  arterial: '#d8c6a4',
+  street: '#dcd8ce',
+  lane: '#e6e3da',
+  bridge: '#9a8f7d',
 };
+/** A lot's open ground is its district's colour, faint; a building on it is the same colour, solid. */
+const GROUND_ALPHA = 0.3;
+const OUTLINE = 'rgba(35, 39, 46, 0.3)';
 const CLICK_SLOP = 4;
 const DOT_RADIUS = 2.6;
-/** People out of doors at a place are drawn smaller than walkers, in another colour. */
-const OUTSIDE_RADIUS = 1.9;
+/** Someone out of doors at a place is a small square; someone walking is a dot. Shape tells them apart, colour tells their role. */
+const OUTSIDE_HALF = 2.1;
 /** Someone standing on a lot is picked only by a click close to them, so that the lot itself can still be clicked. */
 const OUTSIDE_REACH = 4;
-const OUTSIDE_INK = '#b4530a';
-const OUTSIDE_INK_NIGHT = '#ffb86b';
 const DOT_REACH = 8;
+/** Hovering is more generous than clicking, since it changes nothing: the nearest person within this many pixels is marked. */
+const HOVER_REACH = 12;
+const HOVER_BOX = 7;
+const UNKNOWN_ROLE = '#555555';
+/**
+ * People keep much the same size on screen at every zoom, so they stay easy to click: zoomed in they grow a
+ * little, up to this many times, and never shrink.
+ */
+const MOST_GROWTH = 2.2;
+const GROWTH_PER_SCALE = 0.35;
 const AVATAR_INK = '#1d4ed8';
 const AVATAR_RADIUS = 5;
 /** The ring around a resident the avatar perceives. */
@@ -61,6 +75,37 @@ export interface TownMap {
   setPerceived(personIds: ReadonlySet<string>): void;
   /** Keeps the map centred on the avatar, at a zoom where a street fills the view. */
   followAvatar(on: boolean): void;
+  /** Marks a person as the hover marker would, when they are hovered somewhere else on the page; nothing clears it. */
+  mark(personId: string | undefined): void;
+  /** What the last frame drew, for tests and for measuring: nothing here changes the map. */
+  drawn(): Drawn;
+}
+
+/** A person as the map drew them. */
+export interface DrawnPerson {
+  personId: string;
+  /** On the canvas, in CSS pixels. */
+  x: number;
+  y: number;
+  /** On the map, in metres. */
+  point: Point;
+  colour: string;
+  shape: 'dot' | 'square';
+}
+
+export interface Drawn {
+  people: DrawnPerson[];
+  /** What the hover marker is on, and the label it shows. */
+  hover: { kind: 'person' | 'avatar' | 'lot'; id: string; label: string } | undefined;
+  avatar: { x: number; y: number } | undefined;
+  /** The person marked from a list elsewhere on the page, if they can be seen. */
+  marked: string | undefined;
+  /** How many frames have been drawn since the map was shown, and the real milliseconds spent drawing them. */
+  frames: number;
+  drawMs: number;
+  /** The canvas's size in CSS pixels, and the view: screen = map × scale + offset. */
+  size: { width: number; height: number };
+  view: { scale: number; x: number; y: number };
 }
 
 export interface TownMapHandlers {
@@ -73,7 +118,15 @@ export interface TownMapHandlers {
   /** Whether the sun is up at a game time. */
   isLight(time: number): boolean;
   /** Asked for the trips under way in a window of game time that pass through a region, and the stays out of doors in it. */
-  loadTrips(from: number, to: number, region: Region): Promise<{ trips: Trip[]; outside: OutsideStay[] }>;
+  loadTrips(from: number, to: number, region: Region): Promise<{ trips: Array<Trip & Seen>; outside: Array<OutsideStay & Seen> }>;
+  /** The colour of a role, from the pack; nothing for a role the pack does not know. */
+  roleColour(role: string): string | undefined;
+  /** The label for a person under the cursor: their name and occupation. */
+  personLabel(person: Seen): string;
+  /** The label for a lot under the cursor: its building's name. */
+  lotLabel(lot: Lot): string;
+  /** Told who the cursor is on, or that it is on nobody. Hovering changes nothing else. */
+  onHover(personId: string | undefined): void;
   onPersonClick(personId: string): void;
   /** Asked to place the avatar on the street nearest a point of the map. */
   onSpawn(point: Point): void;
@@ -104,7 +157,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   let layout: Layout | undefined;
   let districtNames = new Map<string, string>();
   /** Paths are built once per layout, in map coordinates, and redrawn under the view's transform. */
-  let lotPaths: Array<{ colour: string; path: Path2D }> = [];
+  let lotPaths: Array<{ colour: string; ground: Path2D; built: Path2D }> = [];
   let segmentPaths: Array<{ colour: string; width: number; path: Path2D }> = [];
   let lotCentres = new Map<string, Point>();
   let view: View = { scale: 1, x: 0, y: 0 };
@@ -118,12 +171,19 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   let looping = false;
 
   // The trips on hand: those of a window of game time, through a region of the map.
-  let trips: { from: number; to: number; region: Region; list: Trip[]; outside: OutsideStay[] } | undefined;
+  let trips: { from: number; to: number; region: Region; list: Array<Trip & Seen>; outside: Array<OutsideStay & Seen> } | undefined;
   let asking = false;
   let asked = 0;
   let notBefore = 0;
   /** The dots drawn in the last frame, for finding the one under a click. */
-  let dots: Array<{ personId: string; x: number; y: number; reach: number }> = [];
+  let dots: Array<DrawnPerson & { reach: number; who: Seen }> = [];
+  /** Where the cursor is over the map, when it is; and who or what the hover marker is on. */
+  let cursor: { x: number; y: number } | undefined;
+  let hover: Drawn['hover'];
+  let marked: string | undefined;
+  let drawnAvatar: { x: number; y: number } | undefined;
+  let frames = 0;
+  let drawMs = 0;
   let followed: { personId: string; buildingId?: string } | undefined;
   let avatar: { state: AvatarState; radius: number } | undefined;
   let perceived: ReadonlySet<string> = new Set();
@@ -170,12 +230,19 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       target.lineWidth = Math.max(width, px);
       target.stroke(line);
     }
-    for (const { colour, path: shape } of lotPaths) {
+    // A lot is open ground, drawn faintly, with its buildings drawn solidly on it: a yard and a house can be told apart.
+    const hairline = Math.min(0.4, px);
+    for (const { colour, ground, built } of lotPaths) {
+      target.globalAlpha = GROUND_ALPHA;
       target.fillStyle = colour;
-      target.fill(shape);
-      target.strokeStyle = 'rgba(35, 39, 46, 0.45)';
-      target.lineWidth = Math.min(0.5, 1.5 * px);
-      target.stroke(shape);
+      target.fill(ground);
+      target.globalAlpha = 1;
+      target.strokeStyle = OUTLINE;
+      target.lineWidth = hairline;
+      target.stroke(ground);
+      target.fillStyle = colour;
+      target.fill(built);
+      target.stroke(built);
     }
 
     const outline = (lot: Lot, colour: string) => {
@@ -293,7 +360,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
         position = tripPosition(walking, time);
         followed.buildingId = walking.toBuildingId;
       } else if (standing) {
-        position = standing.point;
+        position = wanderPosition(standing.wander, time);
         followed.buildingId = standing.buildingId;
       } else if (followed.buildingId !== undefined) {
         position = lotCentres.get(followed.buildingId);
@@ -321,6 +388,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     }
 
     if (!baseStale && time === lastTime && light === lastLight) return;
+    const began = performance.now();
     lastTime = time;
     lastLight = light;
     if (baseStale) drawBase();
@@ -335,32 +403,54 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
 
     dots = [];
     if (time !== undefined && trips) {
-      // Those out of doors at a place first, so that walkers pass over them.
+      const onScreen = (x: number, y: number) => x >= -5 && y >= -5 && x <= size.width + 5 && y <= size.height + 5;
+      const colourOf = (role: string) => handlers.roleColour(role) ?? UNKNOWN_ROLE;
+      const grown = Math.min(MOST_GROWTH, Math.max(1, view.scale * GROWTH_PER_SCALE));
+      const half = OUTSIDE_HALF * grown;
+      const radius = DOT_RADIUS * grown;
+      // People are gathered by colour, so that each colour is filled once. Those out of doors at a place are
+      // small squares, drawn first so that walkers, who are dots, pass over them.
+      const squares = new Map<string, Path2D>();
+      const circles = new Map<string, Path2D>();
+      const shapeFor = (shapes: Map<string, Path2D>, colour: string) => {
+        let shape = shapes.get(colour);
+        if (!shape) shapes.set(colour, (shape = new Path2D()));
+        return shape;
+      };
       let standing = 0;
-      ctx.fillStyle = light ? OUTSIDE_INK : OUTSIDE_INK_NIGHT;
-      ctx.beginPath();
       for (const stay of trips.outside) {
         if (time < stay.from || time >= stay.to) continue;
         standing++;
-        const [x, y] = toScreen(view, stay.point);
-        dots.push({ personId: stay.personId, x, y, reach: OUTSIDE_REACH });
-        if (x < -5 || y < -5 || x > size.width + 5 || y > size.height + 5) continue;
-        ctx.moveTo(x + OUTSIDE_RADIUS, y);
-        ctx.arc(x, y, OUTSIDE_RADIUS, 0, Math.PI * 2);
+        // Where their moving about has taken them by now.
+        const point = wanderPosition(stay.wander, time);
+        const [x, y] = toScreen(view, point);
+        const colour = colourOf(stay.role);
+        dots.push({ personId: stay.personId, x, y, point, colour, shape: 'square', reach: OUTSIDE_REACH * grown, who: stay });
+        if (onScreen(x, y)) shapeFor(squares, colour).rect(x - half, y - half, half * 2, half * 2);
       }
-      ctx.fill();
-      ctx.fillStyle = light ? INK : '#ffe9a8';
-      ctx.beginPath();
       for (const trip of trips.list) {
-        const at = tripPosition(trip, time);
-        if (!at) continue;
-        const [x, y] = toScreen(view, at);
-        dots.push({ personId: trip.personId, x, y, reach: DOT_REACH });
-        if (x < -5 || y < -5 || x > size.width + 5 || y > size.height + 5) continue;
-        ctx.moveTo(x + DOT_RADIUS, y);
-        ctx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
+        // Someone who has arrived is no longer walking: they are indoors, or drawn where they stay outside.
+        if (time >= trip.arriveAt) continue;
+        const point = tripPosition(trip, time);
+        if (!point) continue;
+        const [x, y] = toScreen(view, point);
+        const colour = colourOf(trip.role);
+        dots.push({ personId: trip.personId, x, y, point, colour, shape: 'dot', reach: DOT_REACH * grown, who: trip });
+        if (!onScreen(x, y)) continue;
+        const shape = shapeFor(circles, colour);
+        shape.moveTo(x + radius, y);
+        shape.arc(x, y, radius, 0, Math.PI * 2);
       }
-      ctx.fill();
+      // A thin dark edge keeps every colour clear of the ground beneath it, by day and by night.
+      ctx.lineWidth = 0.75;
+      ctx.strokeStyle = 'rgba(35, 39, 46, 0.6)';
+      for (const shapes of [squares, circles]) {
+        for (const [colour, shape] of shapes) {
+          ctx.fillStyle = colour;
+          ctx.fill(shape);
+          ctx.stroke(shape);
+        }
+      }
       const whole = contains(trips.region, layout.summary.bounds);
       streetCount.textContent = describeSeen(dots.length - standing, standing, whole);
     } else {
@@ -405,7 +495,76 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       ctx.strokeStyle = place.kind === 'street' ? '#ffffff' : AVATAR_INK;
       ctx.lineWidth = place.kind === 'street' ? 2 : 3;
       ctx.stroke();
+      drawnAvatar = { x, y };
+    } else {
+      drawnAvatar = undefined;
     }
+
+    // The hover marker: a box and a label on the person under the cursor, or an outline and a name on the lot.
+    // The nearest person within reach wins, then the avatar, then the lot. Hovering changes nothing but this.
+    const before = hover?.kind === 'person' ? hover.id : undefined;
+    hover = undefined;
+    if (cursor && !drag) {
+      let nearest: (typeof dots)[number] | undefined;
+      let least = HOVER_REACH;
+      for (const dot of dots) {
+        const away = Math.hypot(dot.x - cursor.x, dot.y - cursor.y);
+        if (away <= least) {
+          least = away;
+          nearest = dot;
+        }
+      }
+      if (nearest) hover = { kind: 'person', id: nearest.personId, label: handlers.personLabel(nearest.who) };
+      else if (drawnAvatar && Math.hypot(drawnAvatar.x - cursor.x, drawnAvatar.y - cursor.y) <= HOVER_REACH) hover = { kind: 'avatar', id: 'avatar', label: 'You' };
+      else {
+        const lot = lotAt(layout.lots, toMap(view, cursor.x, cursor.y));
+        if (lot) hover = { kind: 'lot', id: lot.id, label: handlers.lotLabel(lot) };
+      }
+    }
+    const after = hover?.kind === 'person' ? hover.id : undefined;
+    if (after !== before) handlers.onHover(after);
+    const tag = (text: string, x: number, y: number) => {
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = INK;
+      ctx.fillText(text, x, y);
+    };
+    const box = (x: number, y: number, label: string) => {
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x - HOVER_BOX, y - HOVER_BOX, HOVER_BOX * 2, HOVER_BOX * 2);
+      tag(label, x + HOVER_BOX + 5, y);
+    };
+    // Someone hovered in a list is marked the same way, if they can be seen.
+    if (marked !== undefined && marked !== after) {
+      const dot = dots.find((entry) => entry.personId === marked);
+      if (dot) box(dot.x, dot.y, handlers.personLabel(dot.who));
+    }
+    if (hover?.kind === 'person') {
+      const dot = dots.find((entry) => entry.personId === hover!.id);
+      if (dot) box(dot.x, dot.y, hover.label);
+    } else if (hover?.kind === 'avatar' && drawnAvatar) {
+      box(drawnAvatar.x, drawnAvatar.y, hover.label);
+    } else if (hover?.kind === 'lot') {
+      const lot = layout.lots.find((entry) => entry.id === hover!.id);
+      if (lot) {
+        const corners = lot.polygon.map((point) => toScreen(view, point));
+        ctx.beginPath();
+        corners.forEach(([x, y], index) => (index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+        ctx.closePath();
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        tag(hover.label, Math.max(...corners.map(([x]) => x)) + 6, Math.min(...corners.map(([, y]) => y)) + 6);
+      }
+    }
+    frames++;
+    drawMs += performance.now() - began;
   }
 
   const redraw = () => {
@@ -567,6 +726,15 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     }
   });
   canvas.addEventListener('pointercancel', () => (drag = undefined));
+  // The cursor's place is kept for the hover marker, which the next frame works out. Nothing else follows from it.
+  canvas.addEventListener('pointermove', (event) => {
+    cursor = { x: event.offsetX, y: event.offsetY };
+    lastTime = undefined;
+  });
+  canvas.addEventListener('pointerleave', () => {
+    cursor = undefined;
+    lastTime = undefined;
+  });
   canvas.addEventListener(
     'wheel',
     (event) => {
@@ -597,17 +765,22 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       showPathStatus('');
       districtNames = new Map(districts.map((district) => [district.id, district.name]));
       const colours = districtColours(districts.map((district) => district.id));
-      const byColour = new Map<string, Path2D>();
+      const byColour = new Map<string, { ground: Path2D; built: Path2D }>();
       lotCentres = new Map();
       for (const lot of next.lots) {
         const colour = colours.get(lot.districtId) ?? '#dddddd';
         let shape = byColour.get(colour);
-        if (!shape) byColour.set(colour, (shape = new Path2D()));
-        trace(shape, lot.polygon, true);
+        if (!shape) byColour.set(colour, (shape = { ground: new Path2D(), built: new Path2D() }));
+        trace(shape.ground, lot.polygon, true);
+        for (const footprint of lot.footprints) trace(shape.built, footprint, true);
         const sum = lot.polygon.reduce((total, point) => [total[0] + point[0], total[1] + point[1]] as Point, [0, 0] as Point);
         lotCentres.set(lot.buildingId, [sum[0] / lot.polygon.length, sum[1] / lot.polygon.length]);
       }
-      lotPaths = [...byColour].map(([colour, shape]) => ({ colour, path: shape }));
+      lotPaths = [...byColour].map(([colour, shape]) => ({ colour, ...shape }));
+      frames = 0;
+      drawMs = 0;
+      hover = undefined;
+      marked = undefined;
       // Segments are grouped by colour and width, the widest kinds drawn last so they lie on top.
       const byStyle = new Map<string, { colour: string; width: number; path: Path2D }>();
       for (const segment of next.segments) {
@@ -645,6 +818,22 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       // The map can keep to one thing at a time.
       if (person) followingAvatar = false;
       redraw();
+    },
+    mark(personId) {
+      marked = personId;
+      lastTime = undefined;
+    },
+    drawn() {
+      return {
+        people: dots.map(({ personId, x, y, point, colour, shape }) => ({ personId, x, y, point, colour, shape })),
+        hover,
+        avatar: drawnAvatar,
+        marked: marked !== undefined && dots.some((dot) => dot.personId === marked) ? marked : undefined,
+        frames,
+        drawMs,
+        size: { ...size },
+        view: { ...view },
+      };
     },
     setAvatar(next) {
       avatar = next;

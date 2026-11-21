@@ -112,7 +112,7 @@ export class CityView {
         name: `${person.givenName} ${person.familyName}`,
         role: roleOf(person, this.pack, this.occupations),
         ...(person.occupationId !== undefined && { occupationId: person.occupationId }),
-        ...(person.apprentice && { apprentice: true }),
+        ...(person.apprentice && { apprentice: true as const }),
       };
       this.seenAs.set(personId, seen);
     }

@@ -132,7 +132,7 @@ export interface Seen {
   /** The key of their colour in the pack's role colours. */
   role: string;
   occupationId?: string;
-  apprentice?: boolean;
+  apprentice?: true;
 }
 
 /** A person at a moment: who they are and where. */

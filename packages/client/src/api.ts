@@ -28,6 +28,8 @@ import { type HouseholdFilters, listQuery } from './city-format.ts';
  * expected on port 3001 of the machine this page was loaded from.
  */
 export const API_URL: string =
+  // An address given as ?api=... wins, so one viewer can be pointed at more than one server.
+  new URLSearchParams(location.search).get('api')?.replace(/\/+$/, '') ||
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ||
   `${location.protocol}//${location.hostname}:3001`;
 
@@ -64,6 +66,7 @@ export const fetchHouseholds = (id: string, filters: HouseholdFilters, offset: n
   get<Page<HouseholdListItem>>(`${settlement(id)}/city/households?${listQuery(filters, offset, limit)}`);
 export const fetchHousehold = (id: string, householdId: string) =>
   get<HouseholdDetail>(`${settlement(id)}/city/households/${encodeURIComponent(householdId)}`);
+export const fetchBuildingTypes = (id: string) => get<Record<string, string>>(`${settlement(id)}/city/building-types`);
 export const fetchLayout = (id: string) => get<Layout>(`${settlement(id)}/layout`);
 export const fetchPath = (id: string, fromLotId: string, toLotId: string) =>
   get<LayoutPath>(`${settlement(id)}/layout/path?from=${encodeURIComponent(fromLotId)}&to=${encodeURIComponent(toLotId)}`);

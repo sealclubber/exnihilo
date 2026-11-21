@@ -13,6 +13,7 @@ current phase before starting, and the README for how things run today.
 | Task | Command |
 | --- | --- |
 | Type-check and run every test | `npm run check` |
+| The viewer in a headless browser | `npm run test:viewer` |
 | Tests only | `npm test` |
 | Type-check only | `npm run typecheck` |
 | Import an AFMG export | `npm run import -- fixtures/afmg/lomia.json` |
@@ -110,6 +111,16 @@ enforce them. Do not weaken that test to make a change pass.
     depend on the avatar, stop and ask.
 22. **Inspecting is not moving.** In the viewer, clicking to look at
     something never moves the avatar; only a button that says so does.
+    Hovering changes nothing at all.
+23. **A wander is derived, not stepped.** Someone outside moves about the
+    lot's open ground along a wander drawn from the person, the building and
+    the stay. The server sends the wander; the client interpolates.
+24. **Footprints are format, not decoration.** They go through the layout
+    format and its invariants, so that a later generator can supply better
+    ones. Whatever reads them may not assume one rectangle per lot.
+25. **Colours live in the pack.** Code knows categories and workforce states,
+    not which one is red. Add nothing to the map that does not carry
+    information.
 
 ## The layout format
 
@@ -123,6 +134,8 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `BEARING_TOLERANCE` as seen from the centre.
 - **District areas** are one or more polygons that touch each other and enclose
   the district's lots.
+- **Footprints** are the outlines of a lot's buildings: they lie inside the
+  lot and do not overlap each other, and the rest of the lot is open ground.
 - **The summary names the generator** that made the layout, so generators can
   coexist.
 - Every length, width and density limit comes from `packs/medieval/layout.yaml`.
@@ -141,7 +154,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 2, 1 and 2.
+  inputs would change. Today they are 2, 2 and 3.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it.
