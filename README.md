@@ -28,8 +28,8 @@ households, working ages and workplaces hang together),
 
 | Path | Holds |
 | --- | --- |
-| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, the layout format, generator and path function, and daily life (calendar, day plans, whereabouts). Pure code: no disk, network, clock or unseeded randomness. |
-| `packages/server` | SQLite storage, the pack loader, the import, generate and day commands, the world clock, and the HTTP API. |
+| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, the layout format, generator and path function, daily life (calendar, day plans, whereabouts), and the avatar (its state and the pure functions on it). Pure code: no disk, network, clock or unseeded randomness. |
+| `packages/server` | SQLite storage, the pack loader, the import, generate and day commands, the world clock, the avatar's state, and the HTTP API. |
 | `packages/client` | The browser viewer, city inspector and living town map. Uses `core` for types only. |
 | `packs/medieval` | The first setting pack: every occupation, building and number the generator uses. |
 | `fixtures/afmg` | The Lomia export, used by the tests. |
@@ -102,6 +102,13 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET .../life/people/<id>/now` | Where a person is and what they are doing |
 | `GET .../life/buildings/<id>/occupants` | Who is at a building, inside or outside on its lot, whether it is open, and its hours that day |
 | `GET .../life/households/<id>/now` | What each member of a household is doing |
+| `GET /api/avatar` | The avatar's state: standing on a street, in a building, or walking (a path, a departure time, a speed and a destination). `null` until it is spawned |
+| `POST /api/avatar/spawn` with `{"settlementId": "settlement-641", "point": [0, 0]}` | Places the avatar on the nearest street to a point of that town's map |
+| `POST /api/avatar/walk-to-point` with `{"point": [120, -40]}` | Walks it to the nearest street point |
+| `POST /api/avatar/walk-to-building` with `{"buildingId": "building-641-000224"}` | Walks it to that building's entrance and in |
+| `POST /api/avatar/stop`, `/leave` | Stops a walk where it is; leaves a building for its entrance |
+| `GET /api/avatar/perception` | Who the avatar perceives now, with who they are |
+| WebSocket `/api/avatar/stream` | The avatar's state on connecting, then again after every change |
 | `GET .../life/summary?day=` | A day hour by hour: people asleep, at home, at work, visiting, travelling, and out of doors |
 
 "Now" is the clock's game time unless the request gives `time=`. The server
@@ -217,6 +224,7 @@ numbers.
 | `pack.yaml` | The pack's name and version, the status tiers, the apprentice age and label, and a few household settings |
 | `calendar.yaml` | The days of the week and which are rest days, the days in a year, sunrise and sunset |
 | `time.yaml` | The clock's rate presets and the default rate |
+| `avatar.yaml` | The avatar's walking speed and how far it perceives |
 | `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default. Shifts also decide when each building is open |
 | `visits.yaml` | Whether places keep opening hours (`openingHours`), and each kind of visit: who makes it, on which days and `weekdays`, how likely, when, for how long, to which building types or to `home`, and whether it is spent `outside` |
 | `categories.yaml` | The seven workforce categories and their base shares |
@@ -408,6 +416,16 @@ placeholder shifts and can be changed there.
 The module reads the layout format and uses the path function, and nothing
 from the layout generator.
 
+**Who is nearby.** `nearby(point, radius, time)` returns every resident who
+can be seen within a distance of a point at a moment, nearest first: those
+walking between two buildings and those outside at one, never anyone indoors.
+It keeps an index per day of who is walking or outside in each stretch of the
+day, so a question looks only at the people who are out around then and not
+at every resident. Once a day's index is built, a query takes about 0.05
+milliseconds in Badanos and 0.2 to 0.7 in Pombal, against a target of 10;
+building it means planning the day, about 0.2 seconds for Badanos and 2.5
+for Pombal.
+
 **The clock** lives in the server (`packages/server/src/clock.ts`). Its state
 is a game time, a rate and whether it is running; the current game time is
 computed from an anchor and the rate, and every change re-anchors, so game
@@ -416,6 +434,60 @@ is paused, re-anchored or set and on shutdown, and restored paused.
 
 To use another pack, copy the folder, edit it, and point `WORLDSIM_PACK` or
 `--pack` at the copy.
+
+## The avatar
+
+`packages/core/src/avatar` is the user's presence in a town. **The avatar is
+never stepped**, like everyone else: its state is a resting place or a trip,
+and its position at any game time is arithmetic on that state. So pausing,
+changing the rate and jumping the clock, forward or back, work for it as they
+do for residents.
+
+| Condition | What is recorded |
+| --- | --- |
+| Standing on a street | The segment and the point on it |
+| In a building | The building |
+| Walking | The path, the game time of departure, the speed, and what it is heading for: a street point, or a building |
+
+- **One avatar per world**, absent until first spawned, and in one settlement.
+  Moving to another town is a fresh spawn.
+- **It walks the graph.** It is always on a segment or in a building. The path
+  function joins any two positions on the street graph, a segment and a point
+  each, with a lot as the special case of its entrance; the two may be on the
+  same segment. Spawning and walking to a point take the nearest point of the
+  nearest segment.
+- **Actions** each take the game time and return a new state: spawn, walk to a
+  street point, walk to a building, stop, leave. A walk ordered during a walk,
+  or a stop, starts from the position at that moment. A walk from inside a
+  building begins at its door. An action that makes no sense, such as leaving
+  while on a street, is refused with the reason (HTTP 409).
+- **A walk that has reached its arrival time counts as arrived**: standing at
+  the street point, or in the building. Nothing rewrites the state when that
+  happens; the stored walk simply reads as arrived from then on.
+- **Perception.** On a street the avatar perceives the residents walking or
+  outside within the pack's radius, by the nearby query. In a building it
+  perceives everyone at that building, inside or outside on its lot. People
+  indoors are not perceived from the street, nor the street from indoors.
+- **Residents do not react.** Nothing in `life` reads the avatar, and a test
+  holds that plans are byte-identical with and without one.
+- **It is stored.** The avatar is the first thing in the world the user
+  decides, so it cannot be derived from a seed. With the clock it is the only
+  stored state that is not imported. It is written whenever it changes,
+  restored on start, and cleared when a world is imported again.
+
+**In the viewer.** **Spawn** in the map's tools, then a click, places the
+avatar on the nearest street; so does **Spawn here** after clicking open
+ground or a street. The avatar is a blue dot with a circle showing how far it
+perceives, or a white dot on a lot when it is indoors. Clicking a lot inspects
+it as before and, with the avatar in town, offers **Walk into this building**
+beside the click; clicking a street or open ground offers **Walk here**.
+Nothing but those buttons moves the avatar. The **Around you** panel says what
+the avatar is doing, offers **Stop** or **Leave**, and lists who it perceives,
+nearest first, with age, occupation and what they are doing; each name opens
+the person panel, and the people listed are ringed on the map. **Follow on the
+map** keeps the map centred on the avatar at a zoom where a street fills the
+view. A person's panel offers **Walk to them**, **Walk to their home** and
+**Walk to their workplace**, and a building's panel **Walk here**.
 
 ## Tests
 
@@ -439,7 +511,11 @@ are in `calendar.test.ts`, `life.test.ts` (plans, whereabouts, behaviour,
 determinism, pack edits and cost) and, in the server and client packages,
 `clock.test.ts` and `life-api.test.ts`; phase 4.5's are in
 `life-places.test.ts` (split shifts, opening hours, being outside, home
-visits, weekdays and pack behaviour) and `baselines/badanos-phase4-plans.json`.
+visits, weekdays and pack behaviour) and `baselines/badanos-phase4-plans.json`;
+phase 5's are in `avatar.test.ts` in each package (paths between street
+positions, the avatar's actions, perception and its cost; the client's
+arithmetic and wording), `avatar-api.test.ts` (storage, endpoints, notices) and
+`baselines/badanos-lot-paths.json`.
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
 and checks every invariant on each. With generator version 2 it takes about 9

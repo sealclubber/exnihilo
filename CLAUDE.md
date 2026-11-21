@@ -28,8 +28,8 @@ the server. Run `npm run check` before calling any task done.
 
 | Path | Holds | May depend on |
 | --- | --- | --- |
-| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator, daily life | Nothing in this repository |
-| `packages/server` | SQLite storage, pack loader, commands, world clock, HTTP API | `core` |
+| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator, daily life, the avatar | Nothing in this repository |
+| `packages/server` | SQLite storage, pack loader, commands, world clock, the avatar's state, HTTP API | `core` |
 | `packages/client` | Browser viewer, city inspector and living town map | `core`, for types only |
 | `packs/medieval` | The first setting pack, as YAML | n/a |
 | `fixtures/afmg/lomia.json` | The Lomia export used by every test | n/a |
@@ -84,11 +84,12 @@ enforce them. Do not weaken that test to make a change pass.
     random stream comes from the seed, the person's ID and the day number, so
     it never depends on which other plans were computed, or in what order.
 15. **`core` never reads a clock.** Game time is always an argument. The
-    world clock lives in `server`, and is the only state stored besides the
-    imported world.
+    world clock lives in `server`. The clock and the avatar are the only
+    state stored besides the imported world.
 16. **The client stays thin.** It moves dots along the trips it was sent,
-    shows the outside stays it was sent at their points, and shows a clock.
-    It does not plan, choose or decide.
+    shows the outside stays it was sent at their points, moves the avatar
+    along the path it was sent, and shows a clock. It does not plan, choose,
+    find paths or decide who is nearby.
 17. **`life` reads the layout format and the path function**, and nothing
     from the layout generator.
 18. **Openness comes from shifts, not plans.** A building is open when
@@ -99,6 +100,16 @@ enforce them. Do not weaken that test to make a change pass.
     types are open-air or always open, or which visits are spent outside. An
     outside stay's point is derived from the person, the building and the
     stay, never remembered.
+20. **The avatar is never stepped.** Its state is a resting place or a trip,
+    in `packages/core/src/avatar`, and its position comes from that state and
+    a game time. No timer moves it. It is always on a segment or in a
+    building, never at a free point.
+21. **Residents are untouched by the avatar.** Nothing in `life` or `layout`
+    may read it, and a resident's plan must never depend on it. The avatar
+    module reads `life`; never the other way. If a change would make a plan
+    depend on the avatar, stop and ask.
+22. **Inspecting is not moving.** In the viewer, clicking to look at
+    something never moves the avatar; only a button that says so does.
 
 ## The layout format
 
@@ -165,7 +176,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
 
 ## Later phases, for orientation
 
-An avatar in the town, encounters and conversation between residents, needs
+Residents reacting to the avatar, encounters and conversation between residents, needs
 and state that carry from day to day, a layout generator that makes
 natural-looking towns, building footprints, history generated backward from
 the present, persistence of changes, and LLM conversations. Do not build ahead for
