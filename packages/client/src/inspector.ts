@@ -2,7 +2,7 @@
  * The city inspector: a generated city's summary, its districts, a searchable
  * list of households, and views of one household or one building.
  */
-import type { AvatarPerception, AvatarState, BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
+import type { AvatarPerception, AvatarState, BuildingDetail, BuildingTypes, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
 import {
   fetchBuilding,
   fetchBuildingTypes,
@@ -31,7 +31,7 @@ import {
   type BarSection,
   type HouseholdFilters,
   buildingKindName,
-  buildingTypeName,
+  buildingName,
   describeKin,
   describeMember,
   describeRowMember,
@@ -118,7 +118,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   let settlementId = '';
   let labels: PackLabels;
   /** The type of each building of the town on show, for naming the lot under the cursor. */
-  let buildingTypes: Record<string, string> = {};
+  let buildingTypes: BuildingTypes = {};
   let districts: District[] = [];
   let filters: HouseholdFilters = {};
   let shown: HouseholdListItem[] = [];
@@ -147,8 +147,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     roleColour: (role) => labels?.roleColours[role],
     personLabel: (person) => (person.occupationId !== undefined && labels ? `${person.name} · ${workName(person, labels)}` : person.name),
     lotLabel: (lot) => {
-      const type = buildingTypes[lot.buildingId];
-      return type === undefined || !labels ? lot.buildingId : buildingTypeName(type, labels);
+      const building = buildingTypes[lot.buildingId];
+      return building === undefined || !labels ? lot.buildingId : buildingName(building, labels);
     },
     onHover: (personId) => showHovered(personId),
   });
@@ -383,7 +383,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       h('h2', {}, `${household.familyName} household`),
       h('p', { class: 'subtitle' }, `${tierName(household.statusTier)} · ${members.length} ${members.length === 1 ? 'member' : 'members'} · ${household.id}`),
       h('h3', {}, 'Home'),
-      h('p', {}, link(buildingTypeName(dwelling.type, labels), () => void showBuilding(dwelling.id), 'Show this building'), ` in ${districtLabel(district, labels)}`),
+      h('p', {}, link(buildingName(dwelling, labels), () => void showBuilding(dwelling.id), 'Show this building'), ` in ${districtLabel(district, labels)}`),
       h('h3', {}, 'Members'),
       h(
         'table',
@@ -398,7 +398,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
 
   function renderBuilding(detail: BuildingDetail, now?: OccupantsNow): void {
     const { building, district, workers, households } = detail;
-    detailShows('Building', buildingTypeName(building.type, labels));
+    detailShows('Building', buildingName(building, labels));
     const inside = now
       ? [
           // Hours are worth showing for a place someone works at or that never closes, not for a plain dwelling.
@@ -427,13 +427,11 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
               ),
         ]
       : [];
-    detailBox.replaceChildren(
-      h('h2', {}, buildingTypeName(building.type, labels)),
-      h('p', { class: 'subtitle' }, `${buildingKindName(building.kind)} · ${districtLabel(district, labels)} · ${building.id}`),
-      ...(avatarHere() ? [h('p', { class: 'avatar-actions' }, h('button', { attrs: { type: 'button' }, title: 'Walk your avatar into this building', onClick: () => act('walk-to-building', { buildingId: building.id }) }, 'Walk here'))] : []),
-      ...inside,
+    const workersSection = [
       h('h3', {}, `People working here (${workers.length})`),
       workers.length === 0 ? hint('Nobody works here.') : workersTable(workers),
+    ];
+    const householdsSection = [
       h('h3', {}, `Households living here (${households.length})`),
       households.length === 0
         ? hint('Nobody lives here.')
@@ -444,6 +442,14 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
               h('li', {}, link(`${household.familyName} household`, () => void showHousehold(household.id)), ` · ${household.size} ${household.size === 1 ? 'member' : 'members'} · ${tierName(household.statusTier)}`),
             ),
           ),
+    ];
+    detailBox.replaceChildren(
+      h('h2', {}, buildingName(building, labels)),
+      h('p', { class: 'subtitle' }, `${buildingKindName(building.kind)} · ${districtLabel(district, labels)} · ${building.id}`),
+      ...(avatarHere() ? [h('p', { class: 'avatar-actions' }, h('button', { attrs: { type: 'button' }, title: 'Walk your avatar into this building', onClick: () => act('walk-to-building', { buildingId: building.id }) }, 'Walk here'))] : []),
+      ...inside,
+      // A home that is also a workplace lists the household that lives there first, as plainly as those who work there.
+      ...(building.kind === 'both' ? [...householdsSection, ...workersSection] : [...workersSection, ...householdsSection]),
     );
     detailBox.scrollTop = 0;
   }
@@ -571,6 +577,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       detailBox.replaceChildren(hint('Choose a household, or click a lot on the map, to see who lives and works there.'));
       detailShows('Details', 'nothing chosen');
       buildingTypes = {};
+      townMap.markHomesWithWork(new Set());
       legendBody.replaceChildren();
       townMap.message('');
       try {
@@ -586,7 +593,15 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         const colours = legendEntries(summary, labels);
         renderLegend(legendBody, colours);
         legendPane.setSummary(`${colours.length} colours`);
-        void fetchBuildingTypes(id).then((types) => settlementId === id && (buildingTypes = types), () => undefined);
+        void fetchBuildingTypes(id).then(
+          (types) => {
+            if (settlementId !== id) return;
+            buildingTypes = types;
+            // Homes that are workshops are marked on the map.
+            townMap.markHomesWithWork(new Set(Object.entries(types).filter(([, building]) => building.kind === 'both').map(([buildingId]) => buildingId)));
+          },
+          () => undefined,
+        );
         // The map loads beside the lists, not before them.
         townMap.message('Laying out the town…');
         void fetchLayout(id).then(

@@ -45,6 +45,9 @@ const DOT_REACH = 8;
 const HOVER_REACH = 12;
 const HOVER_BOX = 7;
 const UNKNOWN_ROLE = '#555555';
+/** The inner outline of a home that is also a workplace is this share of its footprint's size, and is drawn once a metre is at least a third of a pixel. */
+const HOME_MARK = 0.55;
+const HOME_MARK_FROM = 3;
 /**
  * People keep much the same size on screen at every zoom, so they stay easy to click: zoomed in they grow a
  * little, up to this many times, and never shrink.
@@ -75,6 +78,8 @@ export interface TownMap {
   setPerceived(personIds: ReadonlySet<string>): void;
   /** Keeps the map centred on the avatar, at a zoom where a street fills the view. */
   followAvatar(on: boolean): void;
+  /** The buildings in which a household lives and people work, to be marked on the map so they can be told from a plain home or a plain workplace. */
+  markHomesWithWork(buildingIds: ReadonlySet<string>): void;
   /** Marks a person as the hover marker would, when they are hovered somewhere else on the page; nothing clears it. */
   mark(personId: string | undefined): void;
   /** What the last frame drew, for tests and for measuring: nothing here changes the map. */
@@ -100,6 +105,8 @@ export interface Drawn {
   avatar: { x: number; y: number } | undefined;
   /** The person marked from a list elsewhere on the page, if they can be seen. */
   marked: string | undefined;
+  /** How many buildings are marked as both a home and a workplace. */
+  homesWithWork: number;
   /** How many frames have been drawn since the map was shown, and the real milliseconds spent drawing them. */
   frames: number;
   drawMs: number;
@@ -158,6 +165,24 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   let districtNames = new Map<string, string>();
   /** Paths are built once per layout, in map coordinates, and redrawn under the view's transform. */
   let lotPaths: Array<{ colour: string; ground: Path2D; built: Path2D }> = [];
+  /** The mark of a home that is also a workplace: a second outline inside each of its footprints. */
+  let homesWithWork: ReadonlySet<string> = new Set();
+  let homeMarks = new Path2D();
+  let homeMarkCount = 0;
+  const markHomes = () => {
+    homeMarks = new Path2D();
+    homeMarkCount = 0;
+    for (const lot of layout?.lots ?? []) {
+      if (!homesWithWork.has(lot.buildingId) || lot.footprints.length === 0) continue;
+      homeMarkCount++;
+      for (const footprint of lot.footprints) {
+        // The footprint again at a smaller size about its own middle: a box within the box, whatever its shape.
+        const cx = footprint.reduce((sum, point) => sum + point[0], 0) / footprint.length;
+        const cy = footprint.reduce((sum, point) => sum + point[1], 0) / footprint.length;
+        trace(homeMarks, footprint.map(([x, y]): Point => [cx + (x - cx) * HOME_MARK, cy + (y - cy) * HOME_MARK]), true);
+      }
+    }
+  };
   let segmentPaths: Array<{ colour: string; width: number; path: Path2D }> = [];
   let lotCentres = new Map<string, Point>();
   let view: View = { scale: 1, x: 0, y: 0 };
@@ -243,6 +268,12 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       target.fillStyle = colour;
       target.fill(built);
       target.stroke(built);
+    }
+    // A home that is also a workplace has a second outline inside it. Not a colour: an outline, so it reads in any district.
+    if (homeMarkCount > 0 && view.scale * HOME_MARK_FROM >= 1) {
+      target.strokeStyle = 'rgba(35, 39, 46, 0.55)';
+      target.lineWidth = Math.min(0.5, 1.2 * px);
+      target.stroke(homeMarks);
     }
 
     const outline = (lot: Lot, colour: string) => {
@@ -777,6 +808,8 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
         lotCentres.set(lot.buildingId, [sum[0] / lot.polygon.length, sum[1] / lot.polygon.length]);
       }
       lotPaths = [...byColour].map(([colour, shape]) => ({ colour, ...shape }));
+      // Which buildings are homes and workplaces at once may have arrived before the layout did, or may come after.
+      markHomes();
       frames = 0;
       drawMs = 0;
       hover = undefined;
@@ -819,6 +852,11 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       if (person) followingAvatar = false;
       redraw();
     },
+    markHomesWithWork(buildingIds) {
+      homesWithWork = buildingIds;
+      markHomes();
+      redraw();
+    },
     mark(personId) {
       marked = personId;
       lastTime = undefined;
@@ -829,6 +867,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
         hover,
         avatar: drawnAvatar,
         marked: marked !== undefined && dots.some((dot) => dot.personId === marked) ? marked : undefined,
+        homesWithWork: homeMarkCount,
         frames,
         drawMs,
         size: { ...size },

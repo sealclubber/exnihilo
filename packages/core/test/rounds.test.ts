@@ -476,9 +476,9 @@ describe('the targets, in Badanos on a work day', () => {
   const baseline = { walkingAt1230: 31, walkingAt0750: 867, tripsPerResident: 1.21 };
 
   it('has at least 2% of residents walking at 12:30 on a work day, and no fewer than before at the morning peak', () => {
-    // The figure at one instant moves by a tenth from day to day, so it is taken as the mean of the week's six
-    // work days. On day 1 alone it was 203 before phase 6B.5 and is 184 since, which is 1.9%: with a baker and a
-    // tavern in every district, and more people living near their work, walks are shorter.
+    // The figure sits close to its line, and at one instant it moves by a tenth from day to day and with any
+    // change to where buildings stand, so it is taken as the mean of the week's six work days. With a baker and a
+    // tavern in every district, and more people living near their work, walks are a little shorter than they were.
     const middays = [1, 2, 3, 4, 5, 6].map((day) => walking(badanos, at(day, 12, 30)));
     const midday = middays.reduce((sum, count) => sum + count, 0) / middays.length;
     const morning = walking(badanos, at(WORK_DAY, 7, 50));

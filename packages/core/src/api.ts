@@ -48,6 +48,8 @@ export interface PackLabels {
   occupations: Record<string, { name: string; category: CategoryId }>;
   /** How an apprentice's occupation is shown; {occupation} stands for the occupation's name. */
   apprenticeLabel?: string;
+  /** How a building that is both a home and a workplace is named; {workplace} stands for the building type's name. */
+  homeAndWorkLabel?: string;
   /** The week, the year and the daylight, for showing game time. */
   calendar: Calendar;
   /** The avatar's walking speed and how far it perceives, for drawing it. */
@@ -95,6 +97,9 @@ export interface HouseholdDetail {
   /** People employed by this household, who work in its home. */
   staff: Person[];
 }
+
+/** What every building of a town is, by building ID: its type, and whether it is a dwelling, a workplace, both or a landmark. */
+export type BuildingTypes = Record<string, Pick<Building, 'type' | 'kind'>>;
 
 export interface BuildingDetail {
   building: Building;

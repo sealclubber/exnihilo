@@ -979,3 +979,8 @@ body > header .fold-all {
   background: #eef2fd;
   outline: 1px solid #1d4ed8;
 }
+
+/* A home that is also a workplace: a box within the box, as on the map. */
+#inspector .legend .swatch.both {
+  box-shadow: inset 0 0 0 2px #a8a8a0, inset 0 0 0 3px rgba(35, 39, 46, 0.6);
+}

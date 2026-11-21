@@ -49,6 +49,7 @@ export function renderLegend(body: HTMLElement, entries: LegendEntry[]): void {
       h('li', {}, h('span', { class: 'swatch avatar' }), 'You'),
       h('li', {}, h('span', { class: 'swatch ground' }), 'Open ground'),
       h('li', {}, h('span', { class: 'swatch built' }), 'Building'),
+      h('li', { attrs: { 'data-mark': 'home-and-work' } }, h('span', { class: 'swatch built both' }), 'Home and workplace'),
     ),
   );
 }

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type Building,
   type BuildingDetail,
+  type BuildingTypes,
   type CitySummary,
   type District,
   type HouseholdDetail,
@@ -75,11 +76,14 @@ describe('GET /api/settlements/:id/city', () => {
 
 describe('GET /api/settlements/:id/city/building-types', () => {
   it('serves the type of every building by ID, for naming lots on the map', async () => {
-    const { status, body } = await get<Record<string, string>>(`${CITY}/building-types`);
+    const { status, body } = await get<BuildingTypes>(`${CITY}/building-types`);
     expect(status).toBe(200);
     expect(Object.keys(body)).toHaveLength(1829);
-    expect(body['building-641-000001']).toMatch(/^[a-z-]+$/);
-    expect(new Set(Object.values(body)).has('tannery')).toBe(true);
+    expect(body['building-641-000001']!.type).toMatch(/^[a-z-]+$/);
+    expect(new Set(Object.values(body).map((building) => building.type)).has('tannery')).toBe(true);
+    // And what kind of building each is, so that a home that is also a workplace can be named and marked as both.
+    expect(new Set(Object.values(body).map((building) => building.kind))).toEqual(new Set(['dwelling', 'workplace', 'both', 'landmark']));
+    expect(Object.values(body).filter((building) => building.kind === 'both').length).toBeGreaterThan(500);
   });
 });
 

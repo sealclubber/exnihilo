@@ -18,6 +18,7 @@ import {
   type Page,
   type PathFinder,
   type AvatarTown,
+  type BuildingTypes,
   type Occupation,
   type Seen,
   type SettlementLife,
@@ -71,7 +72,7 @@ export class CityView {
   private pathFinder: PathFinder | undefined;
   private livedLife: SettlementLife | undefined;
   private townForAvatar: AvatarTown | undefined;
-  private typeOfBuilding: Record<string, string> | undefined;
+  private typeOfBuilding: BuildingTypes | undefined;
   private readonly seenAs = new Map<string, Seen>();
   private readonly occupations: Map<string, Occupation>;
 
@@ -119,9 +120,9 @@ export class CityView {
     return seen;
   }
 
-  /** The type of every building, by ID, for naming lots on the map. */
-  get allBuildingTypes(): Record<string, string> {
-    return (this.typeOfBuilding ??= Object.fromEntries(this.city.buildings.map((building) => [building.id, building.type])));
+  /** The type and kind of every building, by ID, for naming and marking lots on the map. */
+  get allBuildingTypes(): BuildingTypes {
+    return (this.typeOfBuilding ??= Object.fromEntries(this.city.buildings.map((building) => [building.id, { type: building.type, kind: building.kind }])));
   }
 
   /** A resident by ID. */

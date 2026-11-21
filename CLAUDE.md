@@ -133,6 +133,12 @@ enforce them. Do not weaken that test to make a change pass.
     knows that rounds exist. Which occupations patrol, and who fetches
     water, are pack entries. The watch leaves everyone alone.
 
+29. **Move, never make.** How a town is divided into districts, and which
+    building holds which lot, may be rearranged without adding, removing or
+    changing any person, household, job or building. Where a tier lives,
+    which types are everyday buildings and how much housing stands near work
+    are pack data: code must not know that the wealthy like the centre.
+
 ## The layout format
 
 A layout belongs to one settlement. Coordinates are metres, origin at the town
@@ -165,7 +171,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 3, 2 and 4.
+  inputs would change. Today they are 4, 3 and 4.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it.
@@ -178,7 +184,10 @@ centre, x east and y south; bearings are degrees clockwise from north.
   numbers count from 1. Times of day in pack files are written `"HH:MM"`.
 - **Errors name their subject.** A failure says which settlement, field or
   pack entry caused it and what to change.
-- **Tests come with the code**, in the same change.
+- **Tests come with the code**, in the same change. The default limit for a
+  test is generous and set once, in `vitest.config.ts`; a test that measures
+  cost compares against the yardstick in `packages/core/test/cost.ts`, not
+  against a number of seconds.
 - **Pack files are for people.** Keep the explanatory comments at the top of
   each YAML file accurate when the format changes.
 - **Imports** use explicit `.ts` extensions; the client imports types only

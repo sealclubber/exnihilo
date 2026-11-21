@@ -14,6 +14,7 @@ import {
   summaryBars,
   workName,
   workplaceText,
+  buildingName,
 } from '../src/city-format.ts';
 
 let city: City;
@@ -162,5 +163,24 @@ describe('list requests', () => {
       { key: 'occupation', text: 'Occupation: Tanner' },
       { key: 'status', text: 'Status: Poor' },
     ]);
+  });
+});
+
+describe('a building that is both a home and a workplace', () => {
+  const named = { buildingTypes: { forge: 'Forge', cottage: 'Cottage' }, homeAndWorkLabel: '{workplace} and home' } as unknown as PackLabels;
+
+  it('is named as both, by the pack\'s pattern', () => {
+    expect(buildingName({ type: 'forge', kind: 'both' }, named)).toBe('Forge and home');
+  });
+
+  it('is named plainly when it is only a home, only a workplace or a landmark', () => {
+    expect(buildingName({ type: 'forge', kind: 'workplace' }, named)).toBe('Forge');
+    expect(buildingName({ type: 'cottage', kind: 'dwelling' }, named)).toBe('Cottage');
+    expect(buildingName({ type: 'forge', kind: 'landmark' }, named)).toBe('Forge');
+  });
+
+  it('keeps the type\'s own name when the pack gives no pattern', () => {
+    expect(buildingName({ type: 'forge', kind: 'both' }, { buildingTypes: { forge: 'Forge' } } as unknown as PackLabels)).toBe('Forge');
+    expect(buildingName({ type: 'smithy', kind: 'both' }, named)).toBe('smithy and home');
   });
 });

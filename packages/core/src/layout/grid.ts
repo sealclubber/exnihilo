@@ -699,12 +699,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       const slots = [...lots].sort((a, b) => street(a) - street(b) || Number(a.north) - Number(b.north) || along(a) - along(b));
       const byId = (a: Building, b: Building) => (a.id < b.id ? -1 : 1);
       for (const list of types.values()) list.sort(byId);
-      // Spread types take turns, a tavern then a baker then a shop, at even steps through the lots: far from their own kind.
-      const spread = [...types].filter(([type]) => spreadTypes.has(type)).sort(([a], [b]) => (a < b ? -1 : 1));
-      const apart: Building[] = [];
-      for (let turn = 0; spread.some(([, list]) => turn < list.length); turn++) {
-        for (const [, list] of spread) if (turn < list.length) apart.push(list[turn] as Building);
-      }
+      // Spread types, the commonest first. They are to stand apart from their own kind.
+      const spread = [...types].filter(([type]) => spreadTypes.has(type)).sort(([a, one], [b, other]) => other.length - one.length || (a < b ? -1 : 1));
+      const apart = spread.flatMap(([, list]) => list);
       // The rest stand together by type, the commonest first.
       const together = [...types].filter(([type]) => !spreadTypes.has(type)).sort(([a, one], [b, other]) => other.length - one.length || (a < b ? -1 : 1)).flatMap(([, list]) => list);
       // Lots that stand side by side form a run; a lot with no like lot beside it stands alone, and whatever is put
@@ -716,8 +713,15 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       const runs = slots.filter((_, index) => inRun[index]);
       const given = new Map<Placed, Building>();
       const evenly = (buildings: Building[], among: Placed[]) => buildings.forEach((building, turn) => given.set(among[Math.floor(((turn + 0.5) * among.length) / buildings.length)] as Placed, building));
+      // A lone lot has no like lot beside it, so nothing put there is beside its own kind: the commonest spread
+      // types, which are the hardest to keep apart, go there first.
       evenly(apart.slice(0, alone.length), alone);
-      evenly(apart.slice(alone.length), runs);
+      // The rest go into the runs at even steps, in an order that never has two of a type in a row unless one type
+      // is more than half of them: every other place is filled first, commonest type first, then the places between.
+      const rest = apart.slice(alone.length);
+      const mixed = new Array<Building>(rest.length);
+      rest.forEach((building, turn) => (mixed[turn * 2 < rest.length ? turn * 2 : (turn - Math.ceil(rest.length / 2)) * 2 + 1] = building));
+      evenly(mixed, runs);
       let next = 0;
       for (const slot of [...runs, ...alone]) slot.building = given.get(slot) ?? (together[next++] as Building);
     }

@@ -227,7 +227,7 @@ numbers.
 
 | File | Holds |
 | --- | --- |
-| `pack.yaml` | The pack's name and version, the status tiers, the apprentice age and label, and a few household settings |
+| `pack.yaml` | The pack's name and version, the status tiers, the apprentice age and label, and a few household settings; and the name for a building that is both a home and a workplace (`homeAndWorkLabel`) |
 | `calendar.yaml` | The days of the week and which are rest days, the days in a year, sunrise and sunset |
 | `time.yaml` | The clock's rate presets and the default rate |
 | `avatar.yaml` | The avatar's walking speed and how far it perceives |
@@ -239,12 +239,12 @@ numbers.
 | `modifiers.yaml` | Multipliers on category shares by size group and condition |
 | `occupations.yaml` | Every job: category, workplace or employer, weight, status, specialty tags, minimum population, who may hold it (`minAge`, `maxAge`, `sexes`, `apprenticeUntil`), and its `shift`, which may be a list that splits the job across shifts by share |
 | `specialties.yaml` | How specialty tags fill the trade category, and which tags are ignored |
-| `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district, and whether it is `openAir` or `alwaysOpen` |
+| `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district, and whether it is `openAir` or `alwaysOpen`, and whether it is `spread` across the districts as an everyday building |
 | `dwellings.yaml` | Housing types by status tier |
 | `landmarks.yaml` | The buildings and fixed posts that flags and status add, and the civic buildings a settlement has by its size (`minPopulation`, a count per so many residents, `spread` across the districts, posts or none), with the same `openAir` and `alwaysOpen` flags |
 | `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations, and under `outside` the pace and pauses of someone moving about a lot) |
 | `cultures.yaml` | Which species each culture belongs to |
-| `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside |
+| `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside; where each status tier prefers to live (`tierDistricts`); and the share of housing that stands near work (`housingNearWork`) |
 | `layout.yaml` | Every length behind a town's layout: street widths, block dimensions, lot sizes by building type, how much of a lot its building covers (`footprints`), the river's width, density limits |
 
 Each file starts with a comment describing its fields. All the numbers are
@@ -277,6 +277,59 @@ in its home; `servant` is the one such occupation in the `medieval` pack.
 
 One tag is ignored by the `medieval` pack and listed for review at the top of
 `specialties.yaml`: `slaves`.
+
+**How a town is divided.** Since generator version 4 a town's districts are
+mixed. Nothing is created or removed by any of this: only the district a
+building stands in changes, and every household keeps its building.
+
+- **Everyday buildings in every district.** A workplace type marked `spread`
+  (tavern, bakery, butchery, shop, chapel, healer's house) is shared out
+  among the districts in proportion to their residents, as wells are. A
+  household that lives in one moves with it; within a type the better-off
+  households' buildings go to the better-off districts. A type that is not
+  spread keeps the kind of district it prefers: tanneries stay on the
+  outskirts, and the craft quarter is still the craft quarter.
+- **Where each tier lives.** `tierDistricts` gives each status tier the kinds
+  of district it prefers, in order; a dwelling goes to the first entry the
+  settlement has, and an entry may be several kinds ranked alike. The wealthy
+  and the noble prefer an upper quarter and then the centre, and are never
+  put in a lower quarter or the outskirts.
+- **Housing near work.** A share of dwellings (`housingNearWork`) stands in
+  the district where the head of the household works, instead of where the
+  tier prefers. A kind of district may have a share of its own, and 0 closes
+  it. A household is never moved to a kind its tier does not list.
+
+**Badanos, before and after** (default seed):
+
+| District | Residents | People working there | Taverns | Bakeries | Shops | Chapels | Mansions and noble houses |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Bank Market (centre) | 1,825 → 1,751 | 717 → 567 | 13 → 5 | 0 → 4 | 30 → 10 | 13 → 4 | 0 → 5 |
+| Old Market (centre) | 1,809 → 1,747 | 736 → 567 | 15 → 5 | 0 → 4 | 29 → 11 | 13 → 5 | 0 → 5 |
+| Mill Row (craft) | 1,245 → 1,621 | 1,160 → 1,178 | 0 → 5 | 24 → 4 | 0 → 10 | 0 → 4 | 0 |
+| Ford Street (common) | 2,164 → 1,863 | 58 → 188 | 0 → 5 | 0 → 5 | 0 → 11 | 0 → 5 | 0 |
+| Ford Bottoms (lower) | 1,941 → 1,732 | 151 → 250 | 0 → 5 | 0 → 4 | 0 → 11 | 0 → 5 | 10 → 0 |
+| Upper Fields (outskirts) | 623 → 893 | 1,597 → 1,669 | 0 → 3 | 0 → 3 | 0 → 6 | 0 → 3 | 0 |
+
+| Measure | Before | Required | Now |
+| --- | --- | --- | --- |
+| Districts lacking a tavern, bakery, shop or chapel | 6 of 6 lack at least one | 0 | 0 |
+| Mansions and noble houses in Ford Bottoms | 10 | 0 | 0 |
+| Jobs in Ford Street | 58 | Higher | 188 |
+| Workers living in the district they work in | 30.3% | Higher | 35.4% |
+| Average walk to work | 670 m | Report | 664 m |
+| Forges and leather shops in the craft quarter | 221 of 221 | The large majority | 221 of 221 |
+| Tanneries outside the outskirts | 0 | 0 | 0 |
+| Working buildings beside one of their own type | 28% | At least 70% (an estimate) | 65% |
+| Buildings that changed district | n/a | n/a | 909 of 1,829 |
+
+Two of phase 6B's five targets sit on their line after this change, as mixed
+districts make walks shorter and gathered trades put people closer together.
+Walking at 12:30 is 207 on day 1 and between 199 and 207 across the six work
+days (2.1%), where it was 203. From 100 seeded street points at 12:30, 46%
+perceive someone and the median is 0, where it was about half and a median of
+1; the mean is unchanged at 1.9. The morning peak (910 at 07:50), the watch
+(at least 11 on the streets at every hour) and trips per resident (3.65) are
+met as before.
 
 **Civic buildings.** Besides the landmarks its flags give it, a settlement
 has civic buildings by its size (generator version 3): wells, one for every
@@ -326,9 +379,35 @@ the viewer, the invariants and the path function to that.
 **Footprints.** The grid generator draws one rectangle across each lot's
 street frontage, as deep as the pack's `coverage` for the building type, and
 leaves the rest as a yard. An open-air type has no footprint unless the pack
-gives it one, such as a stable at the front of a stockyard. `LAYOUT_VERSION`
-is 2; junctions, segments, lots and entrances are those of version 1, which a
-fingerprint of all 682 settlements holds.
+gives it one, such as a stable at the front of a stockyard. Footprints came
+with `LAYOUT_VERSION` 2; junctions, segments, lots and entrances stayed those
+of version 1, which a fingerprint of all 682 settlements holds.
+
+**Streets of one trade.** `LAYOUT_VERSION` 3 settles last which building
+holds which lot, and changes no lot. Within a district, buildings whose lots
+are alike (the same size, covered by the same share of building) change
+places, so that buildings of one type stand on neighbouring lots along a
+street: a row of forges, then a row of leather shops. Types the pack spreads
+are the exception and stand apart from their own kind. The street graph, the
+lots and their footprints are exactly those of version 2, which a test holds
+for every settlement; `generateLayout(city, brief, pack, { arrange: false })`
+gives the version 2 arrangement, for comparing.
+
+Because lots are held as they were, a building can only change places with
+one whose lot is alike. That caps how far trades can gather: in Badanos 65%
+of working buildings now stand beside one of their own type, up from 28%,
+and 67.5% is the most this method can reach. Forges and leather shops, whose
+lots are the common size, are nearly all in rows; tanneries, yards and market
+stalls have lot sizes of their own and stay scattered among other lots.
+Reaching the 70% that was hoped for needs the generator to hand out lots type
+by type, which moves lots.
+
+The same limit leaves one thing wrong that this patch could not mend: **a
+district's wells stand in a row.** The generator gives landmarks their lots
+first, so the wells of a district are packed side by side, and only a well
+has a lot of a well's size. Across Lomia 11,308 of 11,740 wells have another
+well beside them. Of the 79,597 taverns, bakeries, butcheries, shops, chapels,
+healers' houses and public ovens, 459 do.
 
 **The generator** (`layout/grid.ts`, named `grid` in a layout's summary) is
 deliberately regular: a street grid around the centre, a river bending beside
@@ -565,6 +644,13 @@ do for residents.
   stored state that is not imported. It is written whenever it changes,
   restored on start, and cleared when a world is imported again.
 
+**Homes that are workshops.** A building in which a household lives and
+people work is named as both, by the pack's pattern: "Forge and home", on
+hover, in its panel and as a household's home. On the map it has a second
+outline inside its footprint, which the legend explains, so it can be told
+from a plain dwelling and a plain workplace without relying on colour. Its
+panel lists the household that lives there before the people who work there.
+
 **Reading the map.** Moving the cursor onto a person draws a box round them
 with their name and occupation; onto a lot, its outline and its building's
 name; onto the avatar, "You". The nearest person within a generous reach
@@ -625,7 +711,12 @@ visits, weekdays and pack behaviour) and `baselines/badanos-phase4-plans.json`;
 phase 5's are in `avatar.test.ts` in each package (paths between street
 positions, the avatar's actions, perception and its cost; the client's
 arithmetic and wording), `avatar-api.test.ts` (storage, endpoints, notices) and
-`baselines/badanos-lot-paths.json`; phase 6B's are in `civic.test.ts` (civic
+`baselines/badanos-lot-paths.json`; phase 6B.5's are in `districts.test.ts`
+(nothing created or destroyed, spread, tiers, housing near work, streets of
+one trade, in Badanos and in every settlement), with
+`baselines/city-v3.json` (every city as generator version 3 made it) and
+`baselines/badanos-districts-v4.json` (the new baseline and what moved);
+phase 6B's are in `civic.test.ts` (civic
 buildings in every settlement), `rounds.test.ts` (rounds, chains, repeats,
 strolls, the targets, emergence and pack behaviour), `baseline.test.ts` with
 `baselines/badanos-counts-v3.json` (the new baseline and what moved) and
@@ -655,6 +746,9 @@ Pombal's 47,603 residents take about 4 seconds for the first day (it was
 seconds for each day after (it was 0.9). Planning one day for every one of
 Lomia's 2,935,089 residents takes about 115 seconds (it was 69), and every
 plan in all 682 settlements passes every plan rule.
+
+The test runner's default limit for one test is two minutes, set once in
+`vitest.config.ts`, so that slow hardware cannot fail a correct build.
 
 Cost tests do not hold the planner to a number of seconds, which fails on a
 slow or busy machine: they time a fixed piece of arithmetic alongside the

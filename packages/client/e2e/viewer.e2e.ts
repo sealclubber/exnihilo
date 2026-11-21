@@ -15,6 +15,7 @@ import { type ViteDevServer, createServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type AvatarReport,
+  type BuildingTypes,
   type CitySummary,
   type Layout,
   type PackLabels,
@@ -346,21 +347,58 @@ describe('the hover marker', () => {
     expect((await drawn()).hover).toMatchObject({ kind: 'person', id: a.personId });
   });
 
-  it('outlines the lot under the cursor and names its building', async () => {
+  it('outlines the lot under the cursor and names its building, a home that is a workplace as both', async () => {
     const layout = await main.get<Layout>(`/api/settlements/${BADANOS}/layout`);
-    const types = await main.get<Record<string, string>>(`/api/settlements/${BADANOS}/city/building-types`);
+    const types = await main.get<BuildingTypes>(`/api/settlements/${BADANOS}/city/building-types`);
     const labels = await main.get<PackLabels>('/api/pack');
     const state = await drawn();
     const box = await canvasBox();
-    // A lot with nobody on it, away from the panes.
-    const lot = layout.lots.find((entry) => {
-      const [sx, sy] = toScreen(geometry.polygonCentroid(entry.polygon), state);
-      return inTheClear(sx, sy, state.size) && state.people.every((person) => Math.hypot(person.x - sx, person.y - sy) > 30);
-    })!;
-    const [sx, sy] = toScreen(geometry.polygonCentroid(lot.polygon), state);
-    await page.mouse.move(box.x + sx, box.y + sy);
-    await settled();
-    expect((await drawn()).hover).toEqual({ kind: 'lot', id: lot.id, label: labels.buildingTypes[types[lot.buildingId]!] });
+    expect(labels.homeAndWorkLabel).toBe('{workplace} and home');
+    /** A lot of a kind of building, with nobody on it, away from the panes. */
+    const lotOf = (kind: string) =>
+      layout.lots.find((entry) => {
+        const [sx, sy] = toScreen(geometry.polygonCentroid(entry.polygon), state);
+        return types[entry.buildingId]!.kind === kind && inTheClear(sx, sy, state.size) && state.people.every((person) => Math.hypot(person.x - sx, person.y - sy) > 30);
+      })!;
+    const hoverOn = async (lot: Layout['lots'][number]) => {
+      const [sx, sy] = toScreen(geometry.polygonCentroid(lot.polygon), state);
+      await page.mouse.move(box.x + sx, box.y + sy);
+      await settled();
+      return (await drawn()).hover;
+    };
+    // A plain dwelling and a plain workplace are named by their type alone.
+    for (const kind of ['dwelling', 'workplace']) {
+      const lot = lotOf(kind);
+      expect(await hoverOn(lot), kind).toEqual({ kind: 'lot', id: lot.id, label: labels.buildingTypes[types[lot.buildingId]!.type] });
+    }
+    // A building in which a household lives and people work is named as both, by the pack's pattern.
+    const both = lotOf('both');
+    const name = `${labels.buildingTypes[types[both.buildingId]!.type]} and home`;
+    expect(await hoverOn(both)).toEqual({ kind: 'lot', id: both.id, label: name });
+    // Its panel says the same, and lists the household that lives there before the people who work there.
+    const [sx, sy] = toScreen(geometry.polygonCentroid(both.polygon), state);
+    await page.mouse.click(box.x + sx, box.y + sy);
+    await page.waitForFunction((wanted) => document.querySelector('#inspector .detail h2')?.textContent === wanted, name, { timeout: 10_000 });
+    const headings = await page.locator('#inspector .detail h3').allInnerTexts();
+    const living = headings.findIndex((heading) => /households living here \(1\)/i.test(heading));
+    const working = headings.findIndex((heading) => /people working here/i.test(heading));
+    expect(living).toBeGreaterThanOrEqual(0);
+    expect(living).toBeLessThan(working);
+    expect((await pane('detail').locator('> .pane-head').innerText()).replace(/\s+/g, ' ')).toMatch(/building/i);
+    await page.keyboard.press('Escape');
+    // On the map it is marked, by a second outline and not by colour: every such building that has a footprint.
+    const expected = layout.lots.filter((lot) => types[lot.buildingId]!.kind === 'both' && lot.footprints.length > 0).length;
+    expect(expected).toBeGreaterThan(500);
+    expect((await drawn()).homesWithWork).toBe(expected);
+    expect(await pane('legend').locator('li[data-mark="home-and-work"]').innerText()).toMatch(/home and workplace/i);
+    // A plain workplace's panel lists its workers first.
+    const shop = lotOf('workplace');
+    const [wx, wy] = toScreen(geometry.polygonCentroid(shop.polygon), state);
+    await page.mouse.click(box.x + wx, box.y + wy);
+    await page.waitForFunction((wanted) => document.querySelector('#inspector .detail h2')?.textContent === wanted, labels.buildingTypes[types[shop.buildingId]!.type]!, { timeout: 10_000 });
+    const plain = await page.locator('#inspector .detail h3').allInnerTexts();
+    expect(plain.findIndex((heading) => /people working here/i.test(heading))).toBeLessThan(plain.findIndex((heading) => /households living here/i.test(heading)));
+    await page.keyboard.press('Escape');
   });
 
   it('marks on the map the person whose entry is hovered in the around-you panel, and the entry of the person hovered on the map', async () => {

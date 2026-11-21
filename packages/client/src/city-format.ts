@@ -73,6 +73,15 @@ export function buildingTypeName(type: string, labels: PackLabels): string {
   return labels.buildingTypes[type] ?? type;
 }
 
+/**
+ * The name of a building: its type's, or for one in which a household lives and people work, both, by the pack's
+ * pattern: "Forge and home".
+ */
+export function buildingName(building: Pick<Building, 'type' | 'kind'>, labels: PackLabels): string {
+  const name = buildingTypeName(building.type, labels);
+  return building.kind === 'both' && labels.homeAndWorkLabel !== undefined ? labels.homeAndWorkLabel.replace('{workplace}', name) : name;
+}
+
 export function districtLabel(district: Pick<District, 'name' | 'kind'>, labels: PackLabels): string {
   return `${district.name} (${labels.districtKinds[district.kind] ?? district.kind})`;
 }
