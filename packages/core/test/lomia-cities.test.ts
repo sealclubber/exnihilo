@@ -1,8 +1,6 @@
 /**
  * The whole-world run: every settlement of Lomia, generated and checked.
  */
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   WORKFORCE_SHARE_LIMITS,
@@ -58,8 +56,6 @@ describe('every settlement of Lomia', () => {
     let slowest = { seconds: 0, id: '' };
     let layoutSeconds = 0;
     const failures: string[] = [];
-    // Everything a layout held at version 1, to compare with a fingerprint taken then.
-    const versionOne = createHash('sha256');
     let footprints = 0;
     let openAirLots = 0;
     for (const brief of settlements) {
@@ -74,8 +70,6 @@ describe('every settlement of Lomia', () => {
         if (layout.lots.length !== city.buildings.length) failures.push(`${brief.id}: ${layout.lots.length} lots for ${city.buildings.length} buildings`);
         // The generator checks itself; the rules are run again here so the test does not rely on that.
         failures.push(...checkLayout(layout, city, brief, pack).map((problem) => `${brief.id}: ${problem}`));
-        const { summary: _summary, ...rest } = layout;
-        versionOne.update(JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) }));
         // Footprints lie inside their lots without overlapping (checked above, with the rest), and an open-air building has open ground.
         const types = new Map(city.buildings.map((building) => [building.id, building.type]));
         for (const lot of layout.lots) {
@@ -112,9 +106,6 @@ describe('every settlement of Lomia', () => {
     );
     expect(failures.slice(0, 10)).toEqual([]);
     expect(slowest.seconds).toBeLessThan(5);
-    // Junctions, segments, exits, water, lots, entrances and district areas are those of layout version 1.
-    const baseline = JSON.parse(readFileSync(new URL('./baselines/layout-v1.json', import.meta.url), 'utf8')) as { all: string };
-    expect(versionOne.digest('hex')).toBe(baseline.all);
     expect(footprints).toBeGreaterThan(400_000);
     expect(openAirLots).toBeGreaterThan(10_000);
   });

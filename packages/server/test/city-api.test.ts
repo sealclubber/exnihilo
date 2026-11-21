@@ -77,7 +77,7 @@ describe('GET /api/settlements/:id/city/building-types', () => {
   it('serves the type of every building by ID, for naming lots on the map', async () => {
     const { status, body } = await get<Record<string, string>>(`${CITY}/building-types`);
     expect(status).toBe(200);
-    expect(Object.keys(body)).toHaveLength(1772);
+    expect(Object.keys(body)).toHaveLength(1829);
     expect(body['building-641-000001']).toMatch(/^[a-z-]+$/);
     expect(new Set(Object.values(body)).has('tannery')).toBe(true);
   });
@@ -207,8 +207,10 @@ describe('filters', () => {
   it('filters buildings by district, kind, type, occupation and category', async () => {
     const local = (await get<Page<Building>>(`${CITY}/buildings?district=${district.id}&limit=1`)).body;
     expect(local.total).toBe(district.buildingIds.length);
-    const landmarks = (await get<Page<Building>>(`${CITY}/buildings?kind=landmark`)).body;
-    expect(landmarks.items.map((building) => building.type)).toEqual(['province-hall']);
+    const landmarks = (await get<Page<Building>>(`${CITY}/buildings?kind=landmark&limit=100`)).body;
+    // The one landmark a flag gives Badanos, and the civic buildings of a town its size.
+    expect(new Set(landmarks.items.map((building) => building.type))).toEqual(new Set(['province-hall', 'well', 'public-oven', 'bathhouse', 'granary', 'infirmary', 'town-hall', 'guild-hall', 'adventurers-guild']));
+    expect(landmarks.total).toBe(52);
     const tanneries = (await get<Page<Building>>(`${CITY}/buildings?type=tannery&limit=500`)).body;
     expect(tanneries.total).toBe(badanos.buildings.filter((building) => building.type === 'tannery').length);
     const withTanners = (await get<Page<Building>>(`${CITY}/buildings?occupation=tanner&limit=500`)).body;

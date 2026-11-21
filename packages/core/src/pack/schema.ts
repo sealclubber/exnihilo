@@ -38,6 +38,7 @@ export const PACK_FILES = [
   'visits',
   'avatar',
   'display',
+  'rounds',
 ] as const;
 export type PackFile = (typeof PACK_FILES)[number];
 
@@ -126,6 +127,8 @@ const OccupationSchema = z.strictObject({
    * The hours worked: one shift by name, or several with the share of the
    * occupation's workers on each. Left out means the default shift.
    */
+  /** A round this work is done on, by name: part of each shift is then spent on foot. */
+  round: id.optional(),
   shift: z.union([id, z.array(z.strictObject({ shift: id, share: probability })).min(1)]).optional(),
 });
 export type Occupation = z.infer<typeof OccupationSchema>;
@@ -174,14 +177,22 @@ export type DwellingType = z.infer<typeof DwellingSchema>;
 const CountSchema = z.union([
   z.strictObject({ fixed: wholeNumber }),
   z.strictObject({ perThousand: z.number().positive(), min: wholeNumber.optional(), max: wholeNumber.optional() }),
+  /** One for every so many residents. */
+  z.strictObject({ perResidents: z.number().positive(), min: wholeNumber.optional(), max: wholeNumber.optional() }),
 ]);
 export type CountSpec = z.infer<typeof CountSchema>;
 
 const LandmarkSchema = z.strictObject({
   id,
   name: text,
-  when: ConditionSchema,
-  district: id,
+  /** The flag or status that grants the building. Left out, every settlement of at least `minPopulation` has it. */
+  when: ConditionSchema.optional(),
+  /** The settlement has none of these below this many residents. */
+  minPopulation: z.int().positive().optional(),
+  /** The kind of district the building prefers. Not needed when the buildings are spread. */
+  district: id.optional(),
+  /** Spread the buildings across the districts in proportion to their residents, so that every part of town has one. */
+  spread: z.boolean().optional(),
   /** How many of these buildings the settlement gets. */
   count: CountSchema,
   /** Fixed posts, shared out among the buildings. */
@@ -368,6 +379,15 @@ const ShiftSchema = z.strictObject({
 });
 export type Shift = z.infer<typeof ShiftSchema>;
 
+/** One stop of an errand. */
+const VisitStopSchema = z.strictObject({
+  destinations: z.array(id).min(1),
+  durationMinutes: z.strictObject({ min: minutes, max: minutes }),
+  /** The chance that this stop is made at all. Left out means always. */
+  chance: probability.optional(),
+  nearest: z.boolean().optional(),
+});
+
 const VisitSchema = z.strictObject({
   id,
   name: text,
@@ -376,6 +396,8 @@ const VisitSchema = z.strictObject({
     minAge: wholeNumber.optional(),
     maxAge: wholeNumber.optional(),
   }),
+  /** How many times in a day, each at a time of its own within `when`. Left out means once. */
+  timesPerDay: z.strictObject({ min: z.int().positive(), max: z.int().positive() }).optional(),
   /** On which kind of day the visit can happen. */
   days: z.enum(['work', 'rest', 'any']),
   /** Days of the week, by the calendar's names, to which the visit is limited. Left out means any. */
@@ -383,19 +405,63 @@ const VisitSchema = z.strictObject({
   probability,
   /** After the day's work, on the way home; or starting at some time in a window of the day. */
   when: z.union([z.literal('after-work'), z.strictObject({ from: clockTime, to: clockTime })]),
-  durationMinutes: z.strictObject({ min: minutes, max: minutes }),
-  /** Building types the visit can go to. `home` is the person's own dwelling, which takes no walk to reach. */
-  destinations: z.array(id).min(1),
+  /** For a visit with one stop: how long it lasts. */
+  durationMinutes: z.strictObject({ min: minutes, max: minutes }).optional(),
+  /** For a visit with one stop: the building types it can go to. `home` is the person's own dwelling, which takes no walk to reach. */
+  destinations: z.array(id).min(1).optional(),
+  /** Always the nearest destination that will do, instead of favouring nearer ones by chance. */
+  nearest: z.boolean().optional(),
+  /** For an errand that chains: several stops in a row, each walked to from the last, before going home. */
+  stops: z.array(VisitStopSchema).optional(),
+  /** For a walk with no destination: out from home, by way of a street point or a public place, and back. */
+  stroll: z
+    .strictObject({
+      /** How long is spent walking. */
+      minutes: z.strictObject({ min: minutes, max: minutes }),
+      /** How long the walker pauses where they turn. */
+      pauseMinutes: z.strictObject({ min: minutes, max: minutes }),
+      /** Building types a stroll goes by way of where the town has them, such as a market square. */
+      favour: z.array(id).optional(),
+    })
+    .optional(),
   /** The visitor is outside, whatever the building type. */
   outside: z.boolean().optional(),
+  /** Where an outside visitor is: on the lot's open ground, or out on the street in front of the building. Left out means the ground. */
+  where: z.enum(['ground', 'street']).optional(),
 });
 export type Visit = z.infer<typeof VisitSchema>;
+export type VisitStop = z.infer<typeof VisitStopSchema>;
+
+/** The stops of a visit, in order: its own list, or the one stop a plain visit has. A stroll has none. */
+export function stopsOf(visit: Visit): VisitStop[] {
+  if (visit.stops) return visit.stops;
+  if (visit.destinations && visit.durationMinutes) return [{ destinations: visit.destinations, durationMinutes: visit.durationMinutes, ...(visit.nearest && { nearest: true }) }];
+  return [];
+}
+
+/** A round: work done on foot, on a circuit that starts and ends at the workplace. */
+const RoundSchema = z.strictObject({
+  name: text,
+  /** How much of each shift is spent on rounds. */
+  share: probability,
+  /** How many stops a circuit has. */
+  stops: z.strictObject({ min: z.int().positive(), max: z.int().positive() }),
+  /** How long each stop lasts. */
+  stopMinutes: z.strictObject({ min: minutes, max: minutes }),
+  /** How far a round ranges: the district of the workplace, or the whole town. */
+  range: z.enum(['district', 'town']),
+  /** What a stop is: a point on a street, or a building of one of the types listed. */
+  at: z.union([z.literal('street'), z.array(id).min(1)]),
+});
+export type Round = z.infer<typeof RoundSchema>;
 
 const VisitsSchema = z.strictObject({
   /** How strongly nearer destinations are favoured: 1 is not at all, higher is more. */
   nearness: z.number().min(1),
   /** Whether a visit goes only to a place that is open when the visitor arrives. Left out, places are never closed. */
   openingHours: z.boolean().optional(),
+  /** How far along the street, either way, someone out on the street in front of a building or at a stop on a round moves about. */
+  streetReach: metres.optional(),
   visits: z.array(VisitSchema),
 });
 
@@ -416,6 +482,7 @@ const RawPackSchema = z.strictObject({
   time: TimeSchema,
   avatar: AvatarSettingsSchema,
   display: DisplaySchema,
+  rounds: z.record(id, RoundSchema),
   shifts: z.strictObject({ default: id, shifts: z.record(id, ShiftSchema) }),
   visits: VisitsSchema,
 });
@@ -591,7 +658,11 @@ function crossCheck(pack: SettingPack): string[] {
   }
   const posts = new Map<string, string>();
   for (const landmark of pack.landmarks) {
-    needKind(landmark.district, `landmarks: "${landmark.id}"`);
+    if (landmark.district !== undefined) needKind(landmark.district, `landmarks: "${landmark.id}"`);
+    else if (!landmark.spread) problems.push(`landmarks: "${landmark.id}" needs a district to prefer, or spread: true`);
+    if (landmark.when === undefined && landmark.minPopulation === undefined && !landmark.spread) {
+      problems.push(`landmarks: "${landmark.id}" needs a "when", a minPopulation or spread: true, to say which settlements have it`);
+    }
     for (const post of landmark.posts) {
       const occupation = occupationById.get(post.occupation);
       if (!occupation) {
@@ -765,18 +836,51 @@ function crossCheck(pack: SettingPack): string[] {
   }
   for (const visit of pack.visits.visits) {
     const where = `visits: "${visit.id}"`;
-    for (const type of visit.destinations) {
-      if (type !== HOME && !buildingTypeIds.includes(type)) problems.push(`${where} names the building type "${type}", which does not exist`);
+    // A visit is one stop, or a chain of stops, or a stroll.
+    const forms = [visit.destinations !== undefined || visit.durationMinutes !== undefined, visit.stops !== undefined, visit.stroll !== undefined].filter(Boolean).length;
+    if (visit.stops !== undefined && visit.stops.length === 0) problems.push(`${where} is a chain with no stops`);
+    else if (forms !== 1) problems.push(`${where} must be exactly one of: a stop (destinations and durationMinutes), a chain (stops), or a stroll`);
+    else if ((visit.destinations === undefined) !== (visit.durationMinutes === undefined)) problems.push(`${where} needs both destinations and durationMinutes`);
+    if ((visit.stops !== undefined || visit.stroll !== undefined) && visit.when === 'after-work') {
+      problems.push(`${where} is a ${visit.stroll ? 'stroll' : 'chain'}, which starts from home at a time of day, so it cannot be after-work`);
     }
+    for (const stop of stopsOf(visit)) {
+      for (const type of stop.destinations) {
+        if (type !== HOME && !buildingTypeIds.includes(type)) problems.push(`${where} names the building type "${type}", which does not exist`);
+      }
+      if (stop.durationMinutes.min > stop.durationMinutes.max) problems.push(`${where} has a shortest duration above its longest`);
+    }
+    for (const type of visit.stroll?.favour ?? []) {
+      if (!buildingTypeIds.includes(type)) problems.push(`${where} favours the building type "${type}", which does not exist`);
+    }
+    if (visit.stroll && (visit.stroll.minutes.min > visit.stroll.minutes.max || visit.stroll.pauseMinutes.min > visit.stroll.pauseMinutes.max)) {
+      problems.push(`${where} has a shortest time above its longest`);
+    }
+    if (visit.timesPerDay && visit.timesPerDay.min > visit.timesPerDay.max) problems.push(`${where} has a least number of times a day above its most`);
+    if (visit.timesPerDay && visit.when === 'after-work') problems.push(`${where} happens several times a day, so it needs a window of the day, not after-work`);
+    if (visit.where === 'street' && !visit.outside) problems.push(`${where} is on the street, so it must be marked outside`);
+    if ((visit.where === 'street' || visit.stroll) && pack.visits.streetReach === undefined) problems.push(`${where} puts people on the street, so visits needs a streetReach`);
     for (const weekday of visit.weekdays ?? []) {
       if (!weekdayNames.includes(weekday)) {
         problems.push(`${where} names the weekday "${weekday}", which the calendar does not have (it has ${weekdayNames.join(', ')})`);
       }
     }
-    if (visit.durationMinutes.min > visit.durationMinutes.max) problems.push(`${where} has a shortest duration above its longest`);
     if (visit.when !== 'after-work' && visit.when.from > visit.when.to) problems.push(`${where} has a window that ends before it starts`);
     if (visit.who.minAge !== undefined && visit.who.maxAge !== undefined && visit.who.minAge > visit.who.maxAge) {
       problems.push(`${where} has a minAge above its maxAge`);
+    }
+  }
+  for (const [roundId, round] of Object.entries(pack.rounds)) {
+    const where = `rounds: "${roundId}"`;
+    if (round.at !== 'street') {
+      for (const type of round.at) if (!buildingTypeIds.includes(type)) problems.push(`${where} stops at the building type "${type}", which does not exist`);
+    } else if (pack.visits.streetReach === undefined) problems.push(`${where} stops on the street, so visits needs a streetReach`);
+    if (round.stops.min > round.stops.max) problems.push(`${where} has a least number of stops above its most`);
+    if (round.stopMinutes.min > round.stopMinutes.max) problems.push(`${where} has a shortest stop above its longest`);
+  }
+  for (const occupation of occupations) {
+    if (occupation.round !== undefined && !(occupation.round in pack.rounds)) {
+      problems.push(`occupations: "${occupation.id}" names the round "${occupation.round}", which rounds does not define`);
     }
   }
   for (const [speciesId, species] of Object.entries(pack.species)) {

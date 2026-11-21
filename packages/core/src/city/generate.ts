@@ -35,7 +35,7 @@ import { type Rng, apportion, shuffle, stepRng, weightedPicker } from './random.
 import type { Building, City, CitySummary, District, Household, HouseholdRole, Person } from './records.ts';
 
 /** Raised whenever the generator's output for the same inputs would change. */
-export const GENERATOR_VERSION = 2;
+export const GENERATOR_VERSION = 3;
 
 /** A person has at most this many parents; it bounds how many elders one adult can be the child of. */
 const PARENTS_PER_PERSON = 2;
@@ -67,7 +67,7 @@ export function speciesOf(brief: SettlementBrief, pack: SettingPack): string {
 /** Resolves a count that is either fixed or grows with the population. */
 export function resolveCount(spec: CountSpec, population: number): number {
   if ('fixed' in spec) return spec.fixed;
-  const scaled = Math.round((population / 1000) * spec.perThousand);
+  const scaled = Math.round('perResidents' in spec ? population / spec.perResidents : (population / 1000) * spec.perThousand);
   return Math.min(Math.max(scaled, spec.min ?? 0), spec.max ?? Infinity);
 }
 
@@ -371,7 +371,8 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   const ordinary = { ...categoryCounts };
   const landmarkPlan: Array<{ landmark: Landmark; buildings: number }> = [];
   for (const landmark of pack.landmarks) {
-    if (!conditions[landmark.when]) continue;
+    if (landmark.when !== undefined && !conditions[landmark.when]) continue;
+    if ((landmark.minPopulation ?? 0) > population) continue;
     landmarkPlan.push({ landmark, buildings: resolveCount(landmark.count, population) });
     for (const post of landmark.posts) {
       const index = occupationIndex.get(post.occupation) as number;
@@ -614,7 +615,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     building: Building;
     workers: number[];
     /** The kind of district the building asks for, or the status tier whose districts it belongs in. */
-    wants: { kind: string } | { tier: string };
+    wants: { kind: string } | { tier: string } | { spread: string };
     residents: number;
   }
   const drafts: BuildingDraft[] = [];
@@ -671,7 +672,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       const made: BuildingDraft[] = [];
       // A landmark that has staff exists even if its count came to zero.
       for (let n = 0; n < Math.max(buildings, staffList.length > 0 ? 1 : 0); n++) {
-        made.push(newBuilding(landmark.id, 'landmark', { kind: landmark.district }));
+        made.push(newBuilding(landmark.id, 'landmark', landmark.spread || landmark.district === undefined ? { spread: landmark.id } : { kind: landmark.district }));
       }
       staffList.forEach((index, turn) => (made[turn % made.length] as BuildingDraft).workers.push(index));
     }
@@ -867,6 +868,8 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       );
     }
     for (const draft of drafts) {
+      // Buildings that are spread by population wait until it is known where people live.
+      if ('spread' in draft.wants) continue;
       const asked = 'kind' in draft.wants ? ofKind.get(draft.wants.kind) : ofTier.get(draft.wants.tier);
       // A building whose preferred kind is absent goes to any district that every settlement can have.
       const candidates = asked && asked.length > 0 ? asked : open;
@@ -879,8 +882,39 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       draft.building.districtId = district.id;
       district.buildingIds.push(draft.building.id);
     }
+
+    // Buildings spread by population: each type is shared out among the districts in proportion to their
+    // residents. Where there are at least as many as districts with residents, each such district gets one first.
+    const spread = new Map<string, BuildingDraft[]>();
+    for (const draft of drafts) {
+      if (!('spread' in draft.wants)) continue;
+      spread.set(draft.wants.spread, [...(spread.get(draft.wants.spread) ?? []), draft]);
+    }
+    if (spread.size > 0) {
+      const residentsOf = districts.map(() => 0);
+      const indexOf = new Map(districts.map((district, index) => [district.id, index]));
+      for (const draft of drafts) if (draft.building.districtId !== '') residentsOf[indexOf.get(draft.building.districtId) as number]! += draft.residents;
+      const lived = residentsOf.filter((residents) => residents > 0).length;
+      for (const made of spread.values()) {
+        const everywhere = lived > 0 && made.length >= lived;
+        const share = everywhere ? residentsOf.map((residents) => (residents > 0 ? 1 : 0)) : residentsOf.map(() => 0);
+        const left = made.length - share.reduce((sum, count) => sum + count, 0);
+        // With nobody counted as living anywhere, the first district takes them.
+        const more = lived > 0 ? apportion(left, residentsOf) : residentsOf.map((_, index) => (index === 0 ? left : 0));
+        let next = 0;
+        districts.forEach((district, index) => {
+          for (let n = 0; n < (share[index] as number) + (more[index] as number); n++) {
+            const draft = made[next++] as BuildingDraft;
+            draft.building.districtId = district.id;
+            district.buildingIds.push(draft.building.id);
+          }
+        });
+      }
+      for (const district of districts) district.buildingIds.sort();
+    }
   }
   const buildings = drafts.map((draft) => draft.building);
+
 
   // ---- summary ---------------------------------------------------------------------------------
   const summary: CitySummary = {

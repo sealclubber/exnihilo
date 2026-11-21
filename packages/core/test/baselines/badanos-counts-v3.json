@@ -1,0 +1,247 @@
+{
+  "note": "Saved from generator version 3 (phase 6B), which gives a settlement civic buildings by its size: wells, public ovens, a bathhouse, a granary, an infirmary, a town hall, a guild hall and an adventurers' guild hall. Their staff are fixed posts, each taking a slot from its occupation's category, so population, workforce and the seven category counts are those of badanos-counts.json, while occupation counts inside the food, services and trade categories move: the new posts appear and other occupations of the same category give up the slots. \"moved\" lists every occupation whose count changed, as [before, after].",
+  "settlementId": "settlement-641",
+  "generatorVersion": 3,
+  "pack": {
+    "name": "medieval",
+    "version": "0.8.0"
+  },
+  "seed": 3824260698,
+  "population": 9607,
+  "workforce": 4419,
+  "categories": {
+    "food": 637,
+    "utilities": 425,
+    "services": 1020,
+    "construction": 425,
+    "military": 213,
+    "luxury": 212,
+    "trade": 1487
+  },
+  "buildings": 1829,
+  "moved": {
+    "baker": [
+      95,
+      94
+    ],
+    "butcher": [
+      54,
+      53
+    ],
+    "brewer": [
+      48,
+      47
+    ],
+    "tavern-keeper": [
+      34,
+      33
+    ],
+    "innkeeper": [
+      14,
+      13
+    ],
+    "grocer": [
+      41,
+      40
+    ],
+    "market-gardener": [
+      81,
+      80
+    ],
+    "farmhand": [
+      95,
+      94
+    ],
+    "servant": [
+      311,
+      305
+    ],
+    "launderer": [
+      124,
+      122
+    ],
+    "barber": [
+      62,
+      61
+    ],
+    "healer": [
+      47,
+      46
+    ],
+    "midwife": [
+      47,
+      46
+    ],
+    "apothecary": [
+      31,
+      30
+    ],
+    "tailor": [
+      93,
+      91
+    ],
+    "cobbler": [
+      78,
+      76
+    ],
+    "scribe": [
+      47,
+      46
+    ],
+    "clerk": [
+      62,
+      61
+    ],
+    "priest": [
+      47,
+      46
+    ],
+    "sexton": [
+      31,
+      30
+    ],
+    "tanner": [
+      418,
+      417
+    ],
+    "leatherworker": [
+      251,
+      250
+    ],
+    "weaponsmith": [
+      255,
+      254
+    ],
+    "oven-keeper": [
+      0,
+      6
+    ],
+    "granary-keeper": [
+      0,
+      2
+    ],
+    "bath-keeper": [
+      0,
+      2
+    ],
+    "bath-attendant": [
+      0,
+      6
+    ],
+    "infirmarer": [
+      0,
+      1
+    ],
+    "nurse": [
+      0,
+      4
+    ],
+    "town-clerk": [
+      0,
+      2
+    ],
+    "alderman": [
+      0,
+      2
+    ],
+    "guild-registrar": [
+      0,
+      1
+    ],
+    "guild-steward": [
+      0,
+      2
+    ],
+    "guild-master": [
+      0,
+      1
+    ],
+    "guild-clerk": [
+      0,
+      2
+    ]
+  },
+  "occupations": {
+    "baker": 94,
+    "miller": 27,
+    "butcher": 53,
+    "brewer": 47,
+    "tavern-keeper": 33,
+    "innkeeper": 13,
+    "tapster": 47,
+    "cook": 47,
+    "grocer": 40,
+    "fishmonger": 27,
+    "market-gardener": 80,
+    "farmhand": 94,
+    "dairy-worker": 27,
+    "oven-keeper": 6,
+    "granary-keeper": 2,
+    "water-carrier": 91,
+    "night-soil-collector": 46,
+    "street-sweeper": 38,
+    "lamplighter": 23,
+    "woodcutter": 68,
+    "fuel-seller": 38,
+    "ostler": 45,
+    "porter": 76,
+    "servant": 305,
+    "launderer": 122,
+    "barber": 61,
+    "healer": 46,
+    "midwife": 46,
+    "physician": 15,
+    "apothecary": 30,
+    "tailor": 91,
+    "cobbler": 76,
+    "scribe": 46,
+    "clerk": 61,
+    "priest": 46,
+    "sexton": 30,
+    "moneylender": 15,
+    "provincial-official": 5,
+    "provincial-clerk": 5,
+    "bath-keeper": 2,
+    "bath-attendant": 6,
+    "infirmarer": 1,
+    "nurse": 4,
+    "town-clerk": 2,
+    "alderman": 2,
+    "guild-registrar": 1,
+    "guild-steward": 2,
+    "mason": 67,
+    "carpenter": 81,
+    "joiner": 34,
+    "thatcher": 40,
+    "plasterer": 27,
+    "builders-labourer": 108,
+    "master-builder": 7,
+    "brickmaker": 34,
+    "sawyer": 27,
+    "watchman": 97,
+    "watch-sergeant": 19,
+    "gaoler": 10,
+    "soldier": 77,
+    "officer": 10,
+    "goldsmith": 28,
+    "mercer": 37,
+    "confectioner": 28,
+    "vintner": 28,
+    "musician": 46,
+    "player": 27,
+    "painter": 18,
+    "merchant": 59,
+    "broker": 10,
+    "shopkeeper": 78,
+    "pedlar": 49,
+    "carter": 98,
+    "drover": 29,
+    "warehouseman": 49,
+    "guild-master": 1,
+    "guild-clerk": 2,
+    "tanner": 417,
+    "leatherworker": 250,
+    "weaponsmith": 254,
+    "armourer": 191
+  }
+}

@@ -42,7 +42,7 @@ import {
   walkToBuilding,
   walkToPoint,
 } from '../src/index.ts';
-import { medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
@@ -94,8 +94,11 @@ const along = (layout: Layout, index: number, share: number): StreetPosition => 
 describe('paths between street positions', () => {
   it('leaves the lot-to-lot results exactly as they were', () => {
     const baseline = JSON.parse(readFileSync(new URL('./baselines/badanos-lot-paths.json', import.meta.url), 'utf8')) as { pathHash: string };
-    const { lots } = badanos.layout;
-    const finder = createPathFinder(badanos.layout);
+    // The fingerprint is of Badanos before it had civic buildings, so it is laid out without them here.
+    const brief = settlement('settlement-641');
+    const layout = generateLayout(generateCity(brief, medievalPackBefore6B()), brief, medievalPackBefore6B());
+    const { lots } = layout;
+    const finder = createPathFinder(layout);
     const hash = createHash('sha256');
     for (let i = 0; i < 4000; i++) hash.update(JSON.stringify(finder.path(lots[(i * 37) % lots.length]!.id, lots[(i * 101 + 13) % lots.length]!.id)));
     expect(hash.digest('hex')).toBe(baseline.pathHash);
@@ -522,6 +525,6 @@ describe('unchanged', () => {
   it('keeps every version where it was', () => {
     expect(LIFE_VERSION).toBe(3);
     expect(LAYOUT_VERSION).toBe(2);
-    expect(GENERATOR_VERSION).toBe(2);
+    expect(GENERATOR_VERSION).toBe(3);
   });
 });

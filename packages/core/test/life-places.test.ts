@@ -32,7 +32,7 @@ import {
   shiftLength,
   startOfDay,
 } from '../src/index.ts';
-import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { lomiaWorld, medievalPack, rawMedievalPack, settlement, stripPhase6B } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
@@ -84,7 +84,7 @@ const atWork = (life: SettlementLife, people: City['people'], time: number) => p
 describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
     expect(LIFE_VERSION).toBe(3);
-    expect(GENERATOR_VERSION).toBe(2);
+    expect(GENERATOR_VERSION).toBe(3);
     expect(LAYOUT_VERSION).toBe(2);
   });
 });
@@ -620,6 +620,8 @@ describe('pack behaviour', () => {
   /** The medieval pack with every phase 4.5 field taken out again: the pack as it was in phase 4. */
   const phase4 = () =>
     edited((raw) => {
+      // Phase 6B's civic buildings, rounds and errands go first: the fingerprint is of the town before them.
+      stripPhase6B(raw);
       for (const entry of [...raw.workplaces, ...raw.landmarks]) {
         delete entry.openAir;
         delete entry.alwaysOpen;

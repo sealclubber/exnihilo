@@ -37,10 +37,10 @@ const edited = (edit: (raw: any) => void): SettingPack => {
 const occupationIn = (raw: any, id: string) => raw.occupations.find((entry: any) => entry.id === id);
 
 describe('versions', () => {
-  it('is generator version 2 with pack 0.7.0', () => {
-    expect(GENERATOR_VERSION).toBe(2);
-    expect(badanos.summary.generatorVersion).toBe(2);
-    expect(badanos.summary.pack).toEqual({ name: 'medieval', version: '0.7.0' });
+  it('is generator version 3 with pack 0.8.0', () => {
+    expect(GENERATOR_VERSION).toBe(3);
+    expect(badanos.summary.generatorVersion).toBe(3);
+    expect(badanos.summary.pack).toEqual({ name: 'medieval', version: '0.8.0' });
   });
 });
 
@@ -271,7 +271,7 @@ describe('who may hold which job', () => {
     expect(badanos.people.some((person) => person.occupationId === 'tanner' && person.age < 30)).toBe(true);
     const city = generateCity(brief, edited((raw) => (occupationIn(raw, 'tanner').minAge = 30)));
     const tanners = city.people.filter((person) => person.occupationId === 'tanner');
-    expect(tanners).toHaveLength(418);
+    expect(tanners).toHaveLength(417);
     expect(Math.min(...tanners.map((person) => person.age))).toBeGreaterThanOrEqual(30);
     expect(city.summary.occupations).toEqual(badanos.summary.occupations);
   });
@@ -310,7 +310,7 @@ describe('who may hold which job', () => {
     const impossible = edited((raw) => (occupationIn(raw, 'servant').minAge = 200));
     expect(() => generateCity(brief, impossible)).toThrow(CityGenerationError);
     expect(() => generateCity(brief, impossible)).toThrow(
-      /settlement-641 \(Badanos\): cannot fill 311 of the 311 slots for "servant": 311 workers are left/,
+      /settlement-641 \(Badanos\): cannot fill 305 of the 305 slots for "servant": 305 workers are left/,
     );
     // Too few slots open to the young: the message names the jobs that could not be filled.
     const closed = edited((raw) => {
@@ -367,7 +367,7 @@ describe('work in an employer\'s home', () => {
     const households = new Map(badanos.households.map((household) => [household.id, household]));
     const buildings = new Map(badanos.buildings.map((building) => [building.id, building]));
     const servants = servantsOf(badanos);
-    expect(servants).toHaveLength(311);
+    expect(servants).toHaveLength(305);
     for (const servant of servants) {
       const employer = households.get(servant.employerHouseholdId!)!;
       expect(employer.id).not.toBe(servant.householdId);
@@ -425,7 +425,7 @@ describe('work in an employer\'s home', () => {
     const poorEmploy = edited((raw) => (occupationIn(raw, 'servant').employer = { tiers: { poor: 1 } }));
     const city = generateCity(brief, poorEmploy);
     const servants = servantsOf(city);
-    expect(servants).toHaveLength(311);
+    expect(servants).toHaveLength(305);
     expect(servants.filter((servant) => servant.employerHouseholdId === servant.householdId)).toEqual([]);
     expect(checkCity(city, brief, poorEmploy)).toEqual([]);
   });

@@ -60,6 +60,9 @@
 - {id: farmhand, name: Farmhand, category: food, workplace: farmstead, weight: 14, status: poor, apprenticeUntil: 0}
 - {id: dairy-worker, name: Dairy worker, category: food, workplace: dairy, weight: 4, status: poor, apprenticeUntil: 0}
 
+- {id: oven-keeper, name: Oven keeper, category: food, workplace: public-oven, weight: 0, status: modest, minAge: 21, shift: early}
+- {id: granary-keeper, name: Granary keeper, category: food, workplace: granary, weight: 0, status: modest, minAge: 25}
+
 # --- Utilities --------------------------------------------------------------
 - {id: water-carrier, name: Water carrier, category: utilities, workplace: town-yard, weight: 12, status: poor, apprenticeUntil: 0}
 - {id: night-soil-collector, name: Night-soil collector, category: utilities, workplace: town-yard, weight: 6, status: poor, apprenticeUntil: 0}
@@ -95,6 +98,15 @@
 - {id: courtier, name: Courtier, category: services, workplace: palace, weight: 0, status: noble, minAge: 21}
 - {id: palace-official, name: Palace official, category: services, workplace: palace, weight: 0, status: wealthy, minAge: 30}
 - {id: harbourmaster, name: Harbourmaster, category: services, workplace: docks, weight: 0, status: comfortable, minAge: 30}
+# Posts of the civic buildings a settlement has by its size (landmarks.yaml).
+- {id: bath-keeper, name: Bath keeper, category: services, workplace: bathhouse, weight: 0, status: modest, minAge: 25}
+- {id: bath-attendant, name: Bath attendant, category: services, workplace: bathhouse, weight: 0, status: poor, apprenticeUntil: 0}
+- {id: infirmarer, name: Infirmarer, category: services, workplace: infirmary, weight: 0, status: comfortable, minAge: 30}
+- {id: nurse, name: Nurse, category: services, workplace: infirmary, weight: 0, status: poor, minAge: 16, apprenticeUntil: 0}
+- {id: town-clerk, name: Town clerk, category: services, workplace: town-hall, weight: 0, status: comfortable, minAge: 25}
+- {id: alderman, name: Alderman, category: services, workplace: town-hall, weight: 0, status: wealthy, minAge: 40}
+- {id: guild-registrar, name: Guild registrar, category: services, workplace: adventurers-guild, weight: 0, status: modest, minAge: 25}
+- {id: guild-steward, name: Guild steward, category: services, workplace: adventurers-guild, weight: 0, status: poor, minAge: 16, apprenticeUntil: 0}
 
 # --- Construction -----------------------------------------------------------
 - {id: mason, name: Mason, category: construction, workplace: masons-yard, weight: 10, status: modest}
@@ -140,6 +152,9 @@
 - {id: warehouseman, name: Warehouseman, category: trade, workplace: warehouse, weight: 5, status: poor, apprenticeUntil: 0}
 # Fixed post
 - {id: dock-worker, name: Dock worker, category: trade, workplace: docks, weight: 0, status: poor, apprenticeUntil: 0}
+
+- {id: guild-master, name: Guild master, category: trade, workplace: guild-hall, weight: 0, status: wealthy, minAge: 40}
+- {id: guild-clerk, name: Guild clerk, category: trade, workplace: guild-hall, weight: 0, status: modest, minAge: 21}
 
 # --- Trade: specialties -----------------------------------------------------
 # These exist only in settlements whose brief carries one of their tags.

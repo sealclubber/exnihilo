@@ -30,7 +30,7 @@ describe('GET /api/settlements/:id/layout', () => {
     const { status, body } = await get<Layout>(LAYOUT);
     expect(status).toBe(200);
     expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(expected)));
-    expect(body.lots).toHaveLength(1772);
+    expect(body.lots).toHaveLength(1829);
     expect(body.summary.generator).toBe('grid');
   });
 

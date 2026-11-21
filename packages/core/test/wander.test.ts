@@ -31,7 +31,7 @@ import {
   positionOnWander,
   startOfDay,
 } from '../src/index.ts';
-import { medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
@@ -352,12 +352,14 @@ describe('unchanged behaviour', () => {
   it('keeps every activity, building, time and trip of Badanos over eight days as they were at life version 2', { timeout: SLOW }, () => {
     const baseline = JSON.parse(readFileSync(new URL('./baselines/badanos-life-v2.json', import.meta.url), 'utf8')) as { planHash: Record<string, string> };
     expect(Object.keys(baseline.planHash)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
+    // The fingerprint is of the town before phase 6B gave it civic buildings, rounds and errands.
+    const before = town('settlement-641', medievalPackBefore6B());
     for (const [day, hash] of Object.entries(baseline.planHash)) {
       // Everything but where on the lot an outside stay is spent.
-      const plans = badanos.life.plansForDay(Number(day)).map((plan) => ({ ...plan, activities: plan.activities.map(({ wander: _wander, ...rest }: any) => rest) }));
+      const plans = before.life.plansForDay(Number(day)).map((plan) => ({ ...plan, activities: plan.activities.map(({ wander: _wander, ...rest }: any) => rest) }));
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);
     }
     expect(LIFE_VERSION).toBe(3);
-    expect(GENERATOR_VERSION).toBe(2);
+    expect(GENERATOR_VERSION).toBe(3);
   });
 });

@@ -77,6 +77,15 @@ lots:
   docks: {frontage: 40, depth: 44}
   province-hall: {frontage: 24, depth: 44}
   gatehouse: {frontage: 12, depth: 12}
+  # Civic buildings
+  well: {frontage: 6, depth: 6}
+  public-oven: {frontage: 10, depth: 16}
+  bathhouse: {frontage: 16, depth: 22}
+  granary: {frontage: 16, depth: 22}
+  infirmary: {frontage: 18, depth: 22}
+  town-hall: {frontage: 24, depth: 22}
+  guild-hall: {frontage: 16, depth: 22}
+  adventurers-guild: {frontage: 14, depth: 22}
 
 # Footprints: the outline of the building on each lot. The generator draws one
 # rectangle across the lot's street frontage; `coverage` is how far back it
@@ -111,6 +120,9 @@ footprints:
     palace: 0.5
     temple: 0.7
     gatehouse: 1
+    granary: 0.8
+    town-hall: 0.8
+    guild-hall: 0.8
 
 # The brief says where a river arrives and leaves but not how wide it is.
 riverWidth: 14

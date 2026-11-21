@@ -384,8 +384,8 @@ describe('visits', () => {
           expect(walk.fromBuildingId).not.toBe(activity.buildingId);
           const length = activity.end - activity.start;
           // Closing time may cut a visit short, but never below its shortest duration.
-          expect(length).toBeGreaterThanOrEqual(visit.durationMinutes.min * 60);
-          expect(length).toBeLessThanOrEqual(visit.durationMinutes.max * 60);
+          expect(length).toBeGreaterThanOrEqual(visit.durationMinutes!.min * 60);
+          expect(length).toBeLessThanOrEqual(visit.durationMinutes!.max * 60);
         });
       }
     }

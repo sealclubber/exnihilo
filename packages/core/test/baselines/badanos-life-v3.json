@@ -1,0 +1,8 @@
+{
+  "note": "Fingerprints of every Badanos resident's whole plan under LIFE_VERSION 3, GENERATOR_VERSION 2 and pack 0.7.0, default seed. A pack with none of the phase 6B fields must still give exactly these.",
+  "settlement": "settlement-641",
+  "planHash": {
+    "1": "af1820dcce1e4920703bd1e1385c5facbb387ce433d6af55052aab28bc87a903",
+    "7": "1d52668083d215b6cf2cef403b4de90b8b44e6dc52680cacacc03093a4f2cebd"
+  }
+}

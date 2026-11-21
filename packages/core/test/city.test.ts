@@ -18,13 +18,14 @@ import {
   conditionsOf,
   generateCity,
   parsePack,
+  resolveCount,
 } from '../src/index.ts';
 import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
 
 const pack = medievalPack();
 const occupation = (id: string) => allOccupations(pack).find((entry) => entry.id === id)!;
 const landmarksFor = (...conditions: string[]) =>
-  pack.landmarks.filter((landmark) => conditions.includes(landmark.when)).map((landmark) => landmark.id);
+  pack.landmarks.filter((landmark) => landmark.when !== undefined && conditions.includes(landmark.when)).map((landmark) => landmark.id);
 const buildingsOfType = (city: City, types: string[]) => city.buildings.filter((building) => types.includes(building.type));
 const largestCategory = (city: City) =>
   CATEGORY_IDS.reduce((best, category) => (city.summary.categories[category] > city.summary.categories[best] ? category : best));
@@ -211,11 +212,12 @@ describe('steps 4 to 8: shares, posts, occupations, assignment and status', () =
   it('creates the fixed posts a landmark requires, taken from their own category', () => {
     const hall = pack.landmarks.find((landmark) => landmark.when === 'provinceSeat')!;
     for (const post of hall.posts) {
-      const count = 'fixed' in post.count ? post.count.fixed : Math.max(Math.round(9.607 * post.count.perThousand), post.count.min ?? 0);
+      const count = resolveCount(post.count, 9607);
       expect(badanos.summary.occupations[post.occupation], post.occupation).toBe(count);
     }
-    // No other landmark applies, so no other post exists.
-    const posts = new Set(pack.landmarks.flatMap((landmark) => landmark.posts.map((post) => post.occupation)));
+    // No other flag's landmark applies, so no other such post exists. (Civic buildings, which a settlement
+    // has by its size since generator version 3, have posts of their own: see civic.test.ts.)
+    const posts = new Set(pack.landmarks.filter((landmark) => landmark.when !== undefined).flatMap((landmark) => landmark.posts.map((post) => post.occupation)));
     const present = Object.keys(badanos.summary.occupations).filter((id) => posts.has(id));
     expect(present.sort()).toEqual(hall.posts.map((post) => post.occupation).sort());
   });
@@ -410,7 +412,7 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
       buildings: badanos.buildings.length,
       districts: badanos.districts.length,
       generatorVersion: GENERATOR_VERSION,
-      pack: { name: 'medieval', version: '0.7.0' },
+      pack: { name: 'medieval', version: '0.8.0' },
       seed: badanosBrief.seed,
     });
     const tiers = Object.values(summary.statusTiers);
@@ -541,7 +543,9 @@ describe('named settlements', () => {
     const staff = badanos.people.filter((person) => person.workplaceId === halls[0]!.id);
     expect(staff.length).toBeGreaterThanOrEqual(4);
     expect(staff.some((person) => person.occupationId === 'provincial-official')).toBe(true);
-    expect(badanos.buildings.filter((building) => building.kind === 'landmark')).toEqual(halls);
+    // The only landmark a flag gives it; the rest are the civic buildings of a town its size.
+    const civic = new Set(pack.landmarks.filter((landmark) => landmark.when === undefined).map((landmark) => landmark.id));
+    expect(badanos.buildings.filter((building) => building.kind === 'landmark' && !civic.has(building.type))).toEqual(halls);
   });
 
   it('Pombal: citadel with garrison, temple with clergy, docks with dock workers, gatehouses and a market square', () => {

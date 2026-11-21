@@ -117,12 +117,12 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
           if (!visit) problem(`activity ${at + 1} is a visit of the kind "${activity.visitId}", which the pack does not define`);
           else {
             const atHome = activity.buildingId === home;
-            if (atHome ? !visit.destinations.includes(HOME) : !visit.destinations.includes(building.type)) {
+            if (atHome ? !(visit.destinations ?? []).includes(HOME) : !(visit.destinations ?? []).includes(building.type)) {
               problem(`activity ${at + 1} is a "${visit.id}" visit to ${atHome ? "the person's own home" : `a ${building.type}`}, which that visit does not allow`);
             }
             // A visit to the person's own home involves no travel: it is neither walked to nor walked away from.
             const next = activities[at + 1];
-            if (atHome && (previous?.kind === 'travel' || next?.kind === 'travel') && visit.destinations.every((type) => type === HOME)) {
+            if (atHome && (previous?.kind === 'travel' || next?.kind === 'travel') && (visit.destinations ?? []).every((type) => type === HOME)) {
               problem(`activity ${at + 1} is a "${visit.id}" visit at home with a walk beside it`);
             }
             // The place is open when the visitor arrives, and the visit ends by closing time.

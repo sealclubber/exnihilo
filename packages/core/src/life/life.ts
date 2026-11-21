@@ -215,7 +215,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     let list = reachable.get(key);
     if (!list) {
       const origin = entranceOf(from);
-      list = visit.destinations
+      list = (visit.destinations ?? [])
         .flatMap((type) => buildingsOfType.get(type) ?? [])
         .filter((id) => id !== from && lotOf.has(id))
         .map((id) => ({ id, away: distance(origin, entranceOf(id)) }))
@@ -303,8 +303,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     const choose = (visit: Visit, from: string, arrival: (to: string, exact: boolean, away: number) => number): { to: string; arriveAt: number; closes: number } | undefined => {
       let list = destinations(visit, from).filter((entry) => entry.id !== home);
       // The person's own dwelling, where the visit allows it, is reached without a walk.
-      if (from === home && visit.destinations.includes(HOME)) list = [{ id: home, away: 0 }, ...list];
-      const shortest = visit.durationMinutes.min * 60;
+      if (from === home && (visit.destinations ?? []).includes(HOME)) list = [{ id: home, away: 0 }, ...list];
+      const shortest = (visit.durationMinutes?.min ?? 0) * 60;
       const closing = (to: string, at: number) => (to === home || !checksHours ? Infinity : hours.openUntil(to, at));
       // A first sieve by the time a straight walk would take, so that paths are found only for places worth trying.
       if (checksHours) list = list.filter((entry) => closing(entry.id, arrival(entry.id, false, entry.away)) !== undefined);
@@ -320,7 +320,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       return undefined;
     };
     const stayLength = (visit: Visit) => {
-      const { min, max } = visit.durationMinutes;
+      const { min, max } = visit.durationMinutes ?? { min: 0, max: 0 };
       return Math.round((min + rng.next() * (max - min)) * 60);
     };
     /** The stops after work, each walked to from the last, starting where and when work ends. */

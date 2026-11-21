@@ -1,9 +1,17 @@
-# Buildings that a flag or status adds, and the fixed posts they create.
+# Buildings that a flag or status adds, civic buildings that a settlement has
+# by its size, and the fixed posts they create.
 #
-#   when      capital, port, citadel, walls, plaza, temple, shantyTown or provinceSeat
+#   when      optional: capital, port, citadel, walls, plaza, temple, shantyTown
+#             or provinceSeat. Left out, the building depends only on size.
+#   minPopulation  optional: a settlement with fewer residents has none
 #   district  the kind of district the building prefers
-#   count     how many buildings: {fixed: n}, or {perThousand: x, min: a, max: b}
-#             which grows with the settlement's population
+#   spread    optional. true: instead of preferring a district, the buildings
+#             are shared out among the districts in proportion to their
+#             residents, so every part of town has one and no district has all
+#   count     how many buildings: {fixed: n}, {perThousand: x, min: a, max: b}
+#             or {perResidents: n, min: a, max: b}: one for every n residents.
+#             Both grow with the settlement's population.
+#   posts     may be empty, for a building nobody staffs
 #   posts     jobs that exist because the landmark does. Each takes a slot from
 #             its occupation's category, and is shared out among the buildings.
 #             The occupation must name this landmark as its workplace.
@@ -76,3 +84,83 @@
   posts:
     - {occupation: provincial-official, count: {perThousand: 0.5, min: 2}}
     - {occupation: provincial-clerk, count: {perThousand: 0.5, min: 2}}
+
+# --- Civic buildings, by size ---------------------------------------------
+# What a settlement has because of how many people live in it. Every number
+# here is a placeholder: how many residents share a well, and how big a town
+# must be before it has a bathhouse, are first guesses for review.
+
+# Where the water comes from. Nobody staffs a well and it is never shut.
+- id: well
+  name: Well
+  spread: true
+  openAir: true
+  alwaysOpen: true
+  count: {perResidents: 250, min: 1}
+  posts: []
+
+# Households without an oven of their own bake here.
+- id: public-oven
+  name: Public oven
+  minPopulation: 300
+  spread: true
+  count: {perResidents: 1500, min: 1}
+  posts:
+    - {occupation: oven-keeper, count: {perResidents: 1500, min: 1}}
+
+- id: bathhouse
+  name: Bathhouse
+  minPopulation: 1500
+  district: common
+  count: {perResidents: 4000, min: 1}
+  posts:
+    - {occupation: bath-keeper, count: {perResidents: 4000, min: 1}}
+    - {occupation: bath-attendant, count: {perResidents: 1500, min: 2}}
+
+- id: granary
+  name: Granary
+  minPopulation: 1000
+  district: outskirts
+  count: {fixed: 1}
+  posts:
+    - {occupation: granary-keeper, count: {perResidents: 5000, min: 1}}
+
+- id: infirmary
+  name: Infirmary
+  minPopulation: 2500
+  district: lower
+  count: {fixed: 1}
+  posts:
+    - {occupation: infirmarer, count: {perResidents: 8000, min: 1}}
+    - {occupation: nurse, count: {perResidents: 2500, min: 2}}
+
+- id: town-hall
+  name: Town hall
+  minPopulation: 5000
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: town-clerk, count: {perResidents: 4000, min: 2}}
+    - {occupation: alderman, count: {perResidents: 5000, min: 2, max: 12}}
+
+# The hall of the town's trades. Which trade leads is not modelled yet: this
+# is one hall for them all.
+- id: guild-hall
+  name: Guild hall
+  minPopulation: 3000
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: guild-master, count: {fixed: 1}}
+    - {occupation: guild-clerk, count: {perResidents: 5000, min: 1}}
+
+# The adventurers themselves arrive in a later phase. For now the hall has its
+# staff.
+- id: adventurers-guild
+  name: Adventurers' guild hall
+  minPopulation: 2000
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: guild-registrar, count: {fixed: 1}}
+    - {occupation: guild-steward, count: {perResidents: 6000, min: 1}}

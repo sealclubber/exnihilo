@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.7.0');
+    expect(pack.pack.version).toBe('0.8.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -42,7 +42,7 @@ describe('the medieval pack', () => {
 
   it('is roughly the intended size', () => {
     expect(allOccupations(pack).length).toBeGreaterThanOrEqual(80);
-    expect(allOccupations(pack).length).toBeLessThanOrEqual(125);
+    expect(allOccupations(pack).length).toBeLessThanOrEqual(140);
     expect(pack.workplaces.length).toBeGreaterThanOrEqual(30);
     expect(pack.workplaces.length).toBeLessThanOrEqual(55);
   });
