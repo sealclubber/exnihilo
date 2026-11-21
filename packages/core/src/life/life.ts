@@ -905,12 +905,6 @@ export function createLife(inputs: LifeInputs): SettlementLife {
             if (activity.kind !== 'street' && !activity.outside) continue;
             const wander = activity.wander as Wander;
             const where = activity.kind === 'street' ? { segmentId: activity.segmentId } : { buildingId: activity.buildingId };
-            if (region) {
-              // A stay on a lot is in a region when the lot is; one on a street, when the person is.
-              const [px, py] = wander.points[0] as Point;
-              const box = activity.kind === 'street' || activity.onStreet ? { minX: px, maxX: px, minY: py, maxY: py } : lotBox(activity.buildingId);
-              if (box.maxX < region.minX || box.minX > region.maxX || box.maxY < region.minY || box.minY > region.maxY) continue;
-            }
             const before = latest.get(personId);
             if (before && before.to === activity.start && before.buildingId === where.buildingId && before.segmentId === where.segmentId) {
               // The other half of a stay already found: the wander goes on from where it stopped.
@@ -936,7 +930,13 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       }
       // Only the part of each wander that falls in the window is given.
       for (const stay of found) stay.wander = clipWander(stay.wander, from, to);
-      return found;
+      if (!region) return found;
+      // A stay on a lot is in a region when the lot is; one on a street, when the person is as the window opens.
+      return found.filter((stay) => {
+        const [x, y] = stay.wander.points[0] as Point;
+        const box = stay.buildingId === undefined || stay.onStreet ? { minX: x, maxX: x, minY: y, maxY: y } : lotBox(stay.buildingId);
+        return box.maxX >= region.minX && box.minX <= region.maxX && box.maxY >= region.minY && box.minY <= region.maxY;
+      });
     },
 
     trips(from, to, region) {

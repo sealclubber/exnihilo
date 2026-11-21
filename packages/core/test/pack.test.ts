@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.8.0');
+    expect(pack.pack.version).toBe('0.9.0');
   });
 
   it('has the seven categories with the base shares', () => {

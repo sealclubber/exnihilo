@@ -58,6 +58,34 @@ export function stripPhase6B(raw: any): void {
     delete visit.nearest;
   }
   delete raw.visits.streetReach;
+  stripPhase6B5(raw);
+}
+
+/**
+ * Takes out of a raw pack what phase 6B.5 added: everyday buildings spread across districts, housing near work,
+ * the lists of where each tier lives, and the name for a home that is a workshop. A city made from the result
+ * is the one generator version 3 made. To lay it out as layout version 2 did, pass `BEFORE_6B5` to the layout
+ * generator as well: which building holds which lot is the one thing the pack does not decide.
+ */
+export function stripPhase6B5(raw: any): void {
+  for (const type of raw.workplaces) delete type.spread;
+  delete raw.districts.tierDistricts;
+  delete raw.districts.housingNearWork;
+  delete raw.pack.homeAndWorkLabel;
+}
+
+/** Layout options that leave every building on the lot it was first given, as layout version 2 did. */
+export const BEFORE_6B5 = { arrange: false } as const;
+
+let before6B5: SettingPack | undefined;
+/** The medieval pack with what phase 6B.5 added taken out. Shared, so do not change it. */
+export function medievalPackBefore6B5(): SettingPack {
+  if (!before6B5) {
+    const raw = rawMedievalPack();
+    stripPhase6B5(raw);
+    before6B5 = parsePack(raw);
+  }
+  return before6B5;
 }
 
 let before6B: SettingPack | undefined;

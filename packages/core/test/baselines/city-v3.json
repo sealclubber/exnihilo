@@ -1,0 +1,5 @@
+{
+  "note": "Fingerprints of whole cities from GENERATOR_VERSION 3 and pack 0.8.0, default seeds: every person, household, building and district and the summary, leaving out only the generator and pack versions the summary records. \"all\" is every one of the 682 settlements of Lomia in order. A pack with no workplace type spread, no housing near work and no tier lists must still give exactly these.",
+  "badanos": "229b589cb2c9db606111139c2388587207f55e0bbe445b7f3f4a334e7f48db0e",
+  "all": "de20663e914205c3c5879db2ba95ece284a00abc4314662b8165abf503fb169b"
+}

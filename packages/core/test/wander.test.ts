@@ -31,7 +31,7 @@ import {
   positionOnWander,
   startOfDay,
 } from '../src/index.ts';
-import { medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
@@ -49,10 +49,10 @@ interface Town {
   layout: Layout;
   life: SettlementLife;
 }
-const town = (id: string, packUsed: SettingPack = pack): Town => {
+const town = (id: string, packUsed: SettingPack = pack, layoutOptions: { arrange?: boolean } = {}): Town => {
   const brief = settlement(id);
   const city = generateCity(brief, packUsed);
-  const layout = generateLayout(city, brief, packUsed);
+  const layout = generateLayout(city, brief, packUsed, layoutOptions);
   return { city, layout, life: createLife({ city, layout, pack: packUsed }) };
 };
 let badanos: Town;
@@ -358,13 +358,13 @@ describe('unchanged behaviour', () => {
     const baseline = JSON.parse(readFileSync(new URL('./baselines/badanos-life-v2.json', import.meta.url), 'utf8')) as { planHash: Record<string, string> };
     expect(Object.keys(baseline.planHash)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8']);
     // The fingerprint is of the town before phase 6B gave it civic buildings, rounds and errands.
-    const before = town('settlement-641', medievalPackBefore6B());
+    const before = town('settlement-641', medievalPackBefore6B(), BEFORE_6B5);
     for (const [day, hash] of Object.entries(baseline.planHash)) {
       // Everything but where on the lot an outside stay is spent.
       const plans = before.life.plansForDay(Number(day)).map((plan) => ({ ...plan, activities: plan.activities.map(({ wander: _wander, ...rest }: any) => rest) }));
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);
     }
     expect(LIFE_VERSION).toBe(4);
-    expect(GENERATOR_VERSION).toBe(3);
+    expect(GENERATOR_VERSION).toBe(4);
   });
 });

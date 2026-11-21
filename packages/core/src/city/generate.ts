@@ -35,7 +35,7 @@ import { type Rng, apportion, shuffle, stepRng, weightedPicker } from './random.
 import type { Building, City, CitySummary, District, Household, HouseholdRole, Person } from './records.ts';
 
 /** Raised whenever the generator's output for the same inputs would change. */
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 
 /** A person has at most this many parents; it bounds how many elders one adult can be the child of. */
 const PARENTS_PER_PERSON = 2;
@@ -682,7 +682,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       if (!staffList) continue;
       const made: BuildingDraft[] = [];
       for (let n = 0; n < Math.ceil(staffList.length / type.capacity); n++) {
-        made.push(newBuilding(type.id, 'workplace', { kind: type.district }));
+        made.push(newBuilding(type.id, 'workplace', type.spread ? { spread: type.id } : { kind: type.district }));
       }
       const emptiest = (): BuildingDraft => {
         let best = made[0] as BuildingDraft;
@@ -867,21 +867,91 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
         kinds.filter((kind) => kind.statuses.includes(tier)).flatMap((kind) => ofKind.get(kind.id) ?? []),
       );
     }
-    for (const draft of drafts) {
-      // Buildings that are spread by population wait until it is known where people live.
-      if ('spread' in draft.wants) continue;
-      const asked = 'kind' in draft.wants ? ofKind.get(draft.wants.kind) : ofTier.get(draft.wants.tier);
+    /**
+     * The districts a dwelling of a tier may go to. Where the pack lists the kinds a tier prefers, they are those
+     * of the first entry on the list that the settlement has; an entry may be several kinds ranked alike.
+     * Without a list, they are the districts of every kind that takes the tier.
+     */
+    const tierLists = pack.districts.tierDistricts ?? {};
+    const forTier = (tier: string): number[] => {
+      const list = tierLists[tier];
+      if (!list) return ofTier.get(tier) ?? [];
+      for (const entry of list) {
+        const found = (typeof entry === 'string' ? [entry] : entry).flatMap((kind) => ofKind.get(kind) ?? []);
+        if (found.length > 0) return found;
+      }
+      return [];
+    };
+    const indexOf = new Map(districts.map((district, index) => [district.id, index]));
+    const put = (draft: BuildingDraft, index: number) => {
+      load[index]! += draft.residents + draft.workers.length;
+      const district = districts[index] as District;
+      draft.building.districtId = district.id;
+      district.buildingIds.push(draft.building.id);
+    };
+    /** By what the building asks for: the least loaded district of its kind, or of the kinds its tier prefers. */
+    const settle = (draft: BuildingDraft) => {
+      const asked = 'kind' in draft.wants ? ofKind.get(draft.wants.kind) : 'tier' in draft.wants ? forTier(draft.wants.tier) : undefined;
       // A building whose preferred kind is absent goes to any district that every settlement can have.
       const candidates = asked && asked.length > 0 ? asked : open;
       let best = candidates[0] as number;
       for (const index of candidates) {
         if ((load[index] as number) < (load[best] as number)) best = index;
       }
-      load[best]! += draft.residents + draft.workers.length;
-      const district = districts[best] as District;
-      draft.building.districtId = district.id;
-      district.buildingIds.push(draft.building.id);
+      put(draft, best);
+    };
+
+    // Housing near work: a share of dwellings goes to the district where the head of the household works,
+    // instead of where the dwelling's tier prefers. Which dwellings are drawn from a stream of their own. Each
+    // waits until its head's workplace has a district.
+    const near = pack.districts.housingNearWork;
+    const shareFor = (kind: string) => (near ? (near.kinds?.[kind] ?? near.share) : 0);
+    const mostShare = near ? Math.max(near.share, ...Object.values(near.kinds ?? {})) : 0;
+    const waiting = new Map<BuildingDraft, { draw: number; workplace: BuildingDraft; tier: string }>();
+    if (near && mostShare > 0) {
+      const nearRng = stepRng(seed, 'housing-near-work');
+      const worksIn = new Map<number, BuildingDraft>();
+      for (const draft of drafts) for (const worker of draft.workers) worksIn.set(worker, draft);
+      const seen = new Set<BuildingDraft>();
+      households.forEach((_, index) => {
+        // A dwelling with several households follows the head of the first.
+        const draft = homeOf[index] as BuildingDraft;
+        if (seen.has(draft)) return;
+        seen.add(draft);
+        if (!('tier' in draft.wants)) return;
+        const workplace = worksIn.get((members[index] as number[])[0] as number);
+        if (!workplace || workplace === draft) return;
+        const draw = nearRng.next();
+        if (draw < mostShare) waiting.set(draft, { draw, workplace, tier: draft.wants.tier });
+      });
     }
+    /** Whether a tier may live in a kind of district at all: any kind on its list, or any kind that takes it. */
+    const mayLiveIn = (tier: string, kind: string) => {
+      const list = tierLists[tier];
+      return list ? list.some((entry) => (typeof entry === 'string' ? entry === kind : entry.includes(kind))) : (kinds.find((entry) => entry.id === kind)?.statuses.includes(tier) ?? false);
+    };
+    /** Puts the dwellings whose head's workplace now has a district; says whether any was put. */
+    const followWork = (): boolean => {
+      let moved = false;
+      for (const [draft, { draw, workplace, tier }] of waiting) {
+        const index = indexOf.get(workplace.building.districtId);
+        if (index === undefined) continue;
+        waiting.delete(draft);
+        moved = true;
+        const kind = (districts[index] as District).kind;
+        // The share is the kind's own; a kind with none, or one the tier never lives in, sends the dwelling where its tier prefers.
+        if (draw < shareFor(kind) && mayLiveIn(tier, kind)) put(draft, index);
+        else settle(draft);
+      }
+      return moved;
+    };
+
+    for (const draft of drafts) {
+      // Buildings that are spread by population, and dwellings that may follow work, wait until more is known.
+      if ('spread' in draft.wants || waiting.has(draft)) continue;
+      settle(draft);
+    }
+    followWork();
 
     // Buildings spread by population: each type is shared out among the districts in proportion to their
     // residents. Where there are at least as many as districts with residents, each such district gets one first.
@@ -892,26 +962,43 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     }
     if (spread.size > 0) {
       const residentsOf = districts.map(() => 0);
-      const indexOf = new Map(districts.map((district, index) => [district.id, index]));
       for (const draft of drafts) if (draft.building.districtId !== '') residentsOf[indexOf.get(draft.building.districtId) as number]! += draft.residents;
       const lived = residentsOf.filter((residents) => residents > 0).length;
-      for (const made of spread.values()) {
+      // How well off each district is: the mean status tier of the residents it has so far. A spread building with a
+      // household living in it brings that household along, so within a type the better-off households' buildings
+      // go to the better-off districts: how many each district gets is not changed by this.
+      const standing = districts.map(() => 0);
+      const tierOfHome = new Map<BuildingDraft, number>();
+      households.forEach((household, index) => {
+        const draft = homeOf[index] as BuildingDraft;
+        const tier = tierIds.indexOf(household.statusTier);
+        if (!tierOfHome.has(draft)) tierOfHome.set(draft, tier);
+        const district = indexOf.get(draft.building.districtId);
+        if (district !== undefined) standing[district]! += tier * (members[index] as number[]).length;
+      });
+      const wealth = standing.map((sum, index) => ((residentsOf[index] as number) > 0 ? sum / (residentsOf[index] as number) : 0));
+      const richestFirst = districts.map((_, index) => index).sort((a, b) => (wealth[b] as number) - (wealth[a] as number) || a - b);
+      for (const group of spread.values()) {
+        // Buildings with the best-off households first; those nobody lives in last. The order is otherwise the buildings' own.
+        const made = group.map((draft, index) => ({ draft, index, tier: tierOfHome.get(draft) ?? -1 })).sort((a, b) => b.tier - a.tier || a.index - b.index).map((entry) => entry.draft);
         const everywhere = lived > 0 && made.length >= lived;
         const share = everywhere ? residentsOf.map((residents) => (residents > 0 ? 1 : 0)) : residentsOf.map(() => 0);
         const left = made.length - share.reduce((sum, count) => sum + count, 0);
         // With nobody counted as living anywhere, the first district takes them.
         const more = lived > 0 ? apportion(left, residentsOf) : residentsOf.map((_, index) => (index === 0 ? left : 0));
         let next = 0;
-        districts.forEach((district, index) => {
-          for (let n = 0; n < (share[index] as number) + (more[index] as number); n++) {
-            const draft = made[next++] as BuildingDraft;
-            draft.building.districtId = district.id;
-            district.buildingIds.push(draft.building.id);
-          }
-        });
+        // Buildings nobody lives in, such as wells, are handed out district by district in the districts' own order.
+        const livedIn = group.some((draft) => tierOfHome.has(draft));
+        for (const index of livedIn ? richestFirst : districts.map((_, at) => at)) {
+          for (let n = 0; n < (share[index] as number) + (more[index] as number); n++) put(made[next++] as BuildingDraft, index);
+        }
       }
-      for (const district of districts) district.buildingIds.sort();
     }
+    // Dwellings whose head works in a building that was spread, or in a home that was itself waiting, follow now;
+    // any left over, whose chain of workplaces never settles, go where their tier prefers.
+    while (waiting.size > 0 && followWork());
+    for (const draft of waiting.keys()) settle(draft);
+    for (const district of districts) district.buildingIds.sort();
   }
   const buildings = drafts.map((draft) => draft.building);
 

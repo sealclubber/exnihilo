@@ -30,7 +30,7 @@ import {
   parsePack,
   shortestPath,
 } from '../src/index.ts';
-import { lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 const pack = medievalPack();
 const { bearingDifference, exactBearing, distanceBetweenPolylines, crossingsOfPolyline, polylineLength, projectOnPolyline, distance } = geometry;
@@ -352,9 +352,9 @@ describe('determinism and isolation', () => {
   });
 
   it('leaves the city generator at version 2', () => {
-    expect(GENERATOR_VERSION).toBe(3);
-    expect(badanos.city.summary.generatorVersion).toBe(3);
-    expect(LAYOUT_VERSION).toBe(2);
+    expect(GENERATOR_VERSION).toBe(4);
+    expect(badanos.city.summary.generatorVersion).toBe(4);
+    expect(LAYOUT_VERSION).toBe(3);
   });
 
   it('gives a different layout for a different seed, which still passes every invariant', () => {
@@ -417,12 +417,14 @@ describe('footprints', () => {
   it('leave junctions, segments, lots and entrances as they were at layout version 1', () => {
     // The fingerprint is of Badanos as the city generator made it at version 2, before civic buildings:
     // a pack without them gives that city again, and so the same streets, lots and entrances.
-    const without = town('settlement-641', medievalPackBefore6B());
+    const before = settlement('settlement-641');
+    const was = generateCity(before, medievalPackBefore6B());
+    const without = { layout: generateLayout(was, before, medievalPackBefore6B(), BEFORE_6B5) };
     const baseline = JSON.parse(readFileSync(new URL('./baselines/layout-v1.json', import.meta.url), 'utf8')) as { badanos: string };
     const { summary, ...rest } = without.layout;
     const text = JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) });
     expect(createHash('sha256').update(text).digest('hex')).toBe(baseline.badanos);
-    expect(summary.layoutVersion).toBe(2);
+    expect(summary.layoutVersion).toBe(3);
     expect(without.layout.lots).toHaveLength(1772);
   });
 

@@ -22,7 +22,7 @@ import { BuildingIdSchema, DistrictIdSchema } from '../city/records.ts';
 import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementIdSchema } from '../schema.ts';
 
 /** Raised whenever a layout for the same inputs would change. */
-export const LAYOUT_VERSION = 2;
+export const LAYOUT_VERSION = 3;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);

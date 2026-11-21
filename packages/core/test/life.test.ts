@@ -546,7 +546,10 @@ describe('trips and whereabouts', () => {
     const tannery = city.buildings.find((building) => building.type === 'tannery')!;
     const staff = life.occupants(tannery.id, at(WORK_DAY, 12));
     expect(staff.length).toBeGreaterThan(0);
-    expect(staff.every((occupant) => occupant.kind === 'work' && tannery.workerIds.includes(occupant.personId))).toBe(true);
+    // Everyone there at midday is at work: the tannery's own people, and perhaps a carter stopped there on a round.
+    expect(staff.every((occupant) => occupant.kind === 'work')).toBe(true);
+    expect(staff.filter((occupant) => tannery.workerIds.includes(occupant.personId)).length).toBeGreaterThan(0);
+    for (const caller of staff.filter((occupant) => !tannery.workerIds.includes(occupant.personId))) expect(life.whereabouts(caller.personId, at(WORK_DAY, 12))).toMatchObject({ round: true });
     expect(life.occupants(tannery.id, at(WORK_DAY, 3))).toEqual([]);
     expect(() => life.occupants('building-641-999999', 0)).toThrow(/there is no building/);
   });

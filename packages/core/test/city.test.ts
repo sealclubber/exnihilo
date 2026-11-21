@@ -394,9 +394,11 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
       const kind = kindOf.get(building.districtId)!;
       const workplace = pack.workplaces.find((type) => type.id === building.type);
       const dwelling = pack.dwellings.find((type) => type.id === building.type);
-      if (workplace && present.has(workplace.district)) expect(kind, building.id).toBe(workplace.district);
+      // A type the pack spreads is in every district; any other keeps to the kind it prefers.
+      if (workplace && !workplace.spread && present.has(workplace.district)) expect(kind, building.id).toBe(workplace.district);
       if (dwelling) {
-        const accepting = pack.districts.kinds.filter((entry) => entry.statuses.includes(dwelling.status)).map((entry) => entry.id);
+        // A dwelling stands in a kind of district its tier lives in: see districts.test.ts for the order of preference.
+        const accepting = pack.districts.tierDistricts![dwelling.status]!.flat();
         if (accepting.some((entry) => present.has(entry))) expect(accepting, building.id).toContain(kind);
       }
     }
@@ -412,7 +414,7 @@ describe('steps 9 to 12: workplaces, dwellings, districts and summary', () => {
       buildings: badanos.buildings.length,
       districts: badanos.districts.length,
       generatorVersion: GENERATOR_VERSION,
-      pack: { name: 'medieval', version: '0.8.0' },
+      pack: { name: 'medieval', version: '0.9.0' },
       seed: badanosBrief.seed,
     });
     const tiers = Object.values(summary.statusTiers);
@@ -588,7 +590,15 @@ describe('named settlements', () => {
     const buildingIds = new Set(shanty[0]!.buildingIds);
     const households = city.households.filter((household) => buildingIds.has(household.dwellingId));
     expect(households.length).toBeGreaterThan(50);
-    expect(new Set(households.map((household) => household.statusTier))).toEqual(new Set([pack.pack.statusTiers[0]!.id]));
+    // Every household in a plain dwelling there is of the lowest tier. The shanty town has its own taverns and
+    // shops too, since generator version 4 spreads those, and the households that keep them live in them: of the
+    // lower tiers, and none wealthy or noble.
+    const kindOf = new Map(city.buildings.map((building) => [building.id, building.kind]));
+    const lowest = pack.pack.statusTiers[0]!.id;
+    expect(new Set(households.filter((household) => kindOf.get(household.dwellingId) === 'dwelling').map((household) => household.statusTier))).toEqual(new Set([lowest]));
+    const tiers = pack.pack.statusTiers.map((tier) => tier.id);
+    for (const household of households) expect(tiers.indexOf(household.statusTier), household.id).toBeLessThanOrEqual(2);
+    expect(households.filter((household) => household.statusTier === lowest).length / households.length).toBeGreaterThan(0.8);
     expect(badanos.districts.some((district) => district.kind === 'shanty')).toBe(false);
   });
 

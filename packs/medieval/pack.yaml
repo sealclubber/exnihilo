@@ -5,7 +5,7 @@
 # The server reads the pack when it starts, so restart it after an edit.
 
 name: medieval
-version: "0.8.0"
+version: "0.9.0"
 
 # Status tiers, lowest first. Occupations, dwellings and districts refer to these IDs.
 statusTiers:
@@ -22,6 +22,10 @@ statusTiers:
 # 0 there means the job has no apprenticeship. This is a placeholder.
 apprenticeUntil: 16
 apprenticeLabel: "Apprentice {occupation}"
+
+# A building in which a household lives and people work is named as both.
+# {workplace} stands for the building type's name: "Forge and home".
+homeAndWorkLabel: "{workplace} and home"
 
 households:
   # Chance that a working member other than the head takes a free slot in the head's occupation.

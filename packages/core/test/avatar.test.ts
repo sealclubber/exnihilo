@@ -42,7 +42,7 @@ import {
   walkToBuilding,
   walkToPoint,
 } from '../src/index.ts';
-import { medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
@@ -96,7 +96,7 @@ describe('paths between street positions', () => {
     const baseline = JSON.parse(readFileSync(new URL('./baselines/badanos-lot-paths.json', import.meta.url), 'utf8')) as { pathHash: string };
     // The fingerprint is of Badanos before it had civic buildings, so it is laid out without them here.
     const brief = settlement('settlement-641');
-    const layout = generateLayout(generateCity(brief, medievalPackBefore6B()), brief, medievalPackBefore6B());
+    const layout = generateLayout(generateCity(brief, medievalPackBefore6B()), brief, medievalPackBefore6B(), BEFORE_6B5);
     const { lots } = layout;
     const finder = createPathFinder(layout);
     const hash = createHash('sha256');
@@ -530,7 +530,7 @@ describe('unchanged', () => {
 
   it('keeps every version where it was', () => {
     expect(LIFE_VERSION).toBe(4);
-    expect(LAYOUT_VERSION).toBe(2);
-    expect(GENERATOR_VERSION).toBe(3);
+    expect(LAYOUT_VERSION).toBe(3);
+    expect(GENERATOR_VERSION).toBe(4);
   });
 });

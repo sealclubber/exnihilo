@@ -8,11 +8,42 @@
 #
 #   placement where the town's layout puts the kind: centre, middle, edge, or
 #             waterside (by the sea or the river, where the town has either)
-#   statuses  the status tiers whose dwellings the kind takes
+#   statuses  the status tiers whose dwellings the kind takes, for a tier
+#             that has no list of its own under `tierDistricts`
 #   names     patterns; {settlement} is the settlement's name and any other
 #             {key} is filled from `words`
 
 residentsPerDistrict: 1500
+
+# Where each status tier prefers to live: kinds of district in order. A
+# dwelling goes to the first entry that the settlement has, and among the
+# districts of that entry to the least full. An entry in [brackets] is several
+# kinds ranked alike. A tier never lives in a kind that is not on its list,
+# unless the settlement has none that is.
+#
+# The wealthy and the noble prefer an upper quarter, then the centre, and are
+# never put in a lower quarter or the outskirts. The poor prefer the lower and
+# common quarters, ranked alike so that half the town is not crowded into one
+# lower quarter, with the harbour and the shanty town where there is one, then
+# the outskirts. All of it is a placeholder.
+tierDistricts:
+  noble: [upper, centre]
+  wealthy: [upper, centre]
+  comfortable: [[centre, upper], [craft, common], harbour]
+  modest: [[common, craft, centre, harbour], outskirts, [lower, upper]]
+  poor: [[lower, common, shanty, harbour], outskirts, [craft, centre]]
+
+# Housing near work: the share of dwellings that stand in the district where
+# the head of the household works, instead of where the tier prefers. `kinds`
+# gives a kind of district a share of its own; 0 closes it, so that nobody is
+# moved there for this reason. A household is never moved to a kind its tier
+# does not list above. Which dwellings are chosen is drawn from the seed. A
+# dwelling with several households follows the head of the first. Placeholders.
+housingNearWork:
+  share: 0.35
+  kinds:
+    outskirts: 0.2
+    upper: 0
 
 words:
   direction: [North, South, East, West, Upper, Lower]

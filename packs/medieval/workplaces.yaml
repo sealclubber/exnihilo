@@ -11,6 +11,14 @@
 # A head and the members of their household who share the head's occupation
 # work in the same building, as far as its capacity allows.
 #   district           the kind of district (districts.yaml) the building prefers
+#   spread             optional. true: what people use every day. Instead of all
+#                      standing in the kind of district the type prefers, the
+#                      buildings are shared out among the districts in
+#                      proportion to their residents, as wells are, so every
+#                      part of town has its own; within a district they are
+#                      placed apart from each other. A household that lives in
+#                      one moves with it. Which types are spread is a first
+#                      guess: tavern, bakery, butchery, shop, chapel, healer.
 #   openAir            optional. true: the work is done out of doors, so everyone
 #                      staying here, worker or visitor, is outside on the lot and
 #                      can be seen on the town map. Which types are open-air is a
@@ -20,15 +28,15 @@
 #                      open only while someone who works there is on shift.
 
 # --- Food
-- {id: bakery, name: Bakery, capacity: 4, proprietorLivesIn: true, district: craft}
-- {id: butchery, name: Butcher's shop, capacity: 3, proprietorLivesIn: true, district: craft}
+- {id: bakery, name: Bakery, capacity: 4, proprietorLivesIn: true, district: craft, spread: true}
+- {id: butchery, name: Butcher's shop, capacity: 3, proprietorLivesIn: true, district: craft, spread: true}
 - {id: brewery, name: Brewery, capacity: 6, proprietorLivesIn: false, district: craft}
-- {id: tavern, name: Tavern, capacity: 5, proprietorLivesIn: true, district: centre}
+- {id: tavern, name: Tavern, capacity: 5, proprietorLivesIn: true, district: centre, spread: true}
 - {id: mill, name: Mill, capacity: 4, proprietorLivesIn: true, district: outskirts}
 - {id: market-stall, name: Market stall, capacity: 2, proprietorLivesIn: false, district: centre, openAir: true}
 - {id: farmstead, name: Farmstead, capacity: 6, proprietorLivesIn: true, district: outskirts}
 - {id: dairy, name: Dairy, capacity: 4, proprietorLivesIn: true, district: outskirts}
-- {id: general-shop, name: Shop, capacity: 2, proprietorLivesIn: true, district: centre}
+- {id: general-shop, name: Shop, capacity: 2, proprietorLivesIn: true, district: centre, spread: true}
 
 # --- Utilities
 - {id: town-yard, name: Town yard, capacity: 10, proprietorLivesIn: false, district: outskirts, openAir: true}
@@ -38,10 +46,10 @@
 
 # --- Services
 - {id: laundry, name: Laundry, capacity: 6, proprietorLivesIn: false, district: lower}
-- {id: healers-house, name: Healer's house, capacity: 2, proprietorLivesIn: true, district: centre}
+- {id: healers-house, name: Healer's house, capacity: 2, proprietorLivesIn: true, district: centre, spread: true}
 - {id: tailors-shop, name: Tailor's shop, capacity: 3, proprietorLivesIn: true, district: centre}
 - {id: scribes-office, name: Scribes' office, capacity: 4, proprietorLivesIn: false, district: centre}
-- {id: chapel, name: Chapel, capacity: 3, proprietorLivesIn: false, district: centre}
+- {id: chapel, name: Chapel, capacity: 3, proprietorLivesIn: false, district: centre, spread: true}
 - {id: counting-house, name: Counting house, capacity: 3, proprietorLivesIn: true, district: centre}
 
 # --- Construction

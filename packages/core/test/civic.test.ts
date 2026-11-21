@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { type City, type Landmark, type SettingPack, GENERATOR_VERSION, allOccupations, checkCity, generateCity, generateLayout, parsePack, placeFlagsOf, resolveCount } from '../src/index.ts';
-import { lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 const SLOW = 180_000;
 const pack = medievalPack();
@@ -37,7 +37,7 @@ describe('the medieval pack\'s civic buildings', () => {
       expect(pack.layout.lots[landmark.id], landmark.id).toBeDefined();
       for (const post of landmark.posts) expect(allOccupations(pack).find((occupation) => occupation.id === post.occupation)!.workplace).toBe(landmark.id);
     }
-    expect(GENERATOR_VERSION).toBe(3);
+    expect(GENERATOR_VERSION).toBe(4);
   });
 });
 
@@ -110,7 +110,7 @@ describe('civic buildings in every settlement of Lomia', () => {
     for (const brief of lomiaWorld().settlements) {
       const city = generateCity(brief, pack);
       const was = generateCity(brief, before);
-      const { summary: _summary, ...rest } = generateLayout(was, brief, before);
+      const { summary: _summary, ...rest } = generateLayout(was, brief, before, BEFORE_6B5);
       versionOne.update(JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) }));
       const fail = (text: string) => failures.push(`${brief.id} (${brief.population}): ${text}`);
       // Unchanged by the civic buildings: who lives here, how many work, and in which categories.

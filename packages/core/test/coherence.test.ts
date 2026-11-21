@@ -37,10 +37,10 @@ const edited = (edit: (raw: any) => void): SettingPack => {
 const occupationIn = (raw: any, id: string) => raw.occupations.find((entry: any) => entry.id === id);
 
 describe('versions', () => {
-  it('is generator version 3 with pack 0.8.0', () => {
-    expect(GENERATOR_VERSION).toBe(3);
-    expect(badanos.summary.generatorVersion).toBe(3);
-    expect(badanos.summary.pack).toEqual({ name: 'medieval', version: '0.8.0' });
+  it('is generator version 4 with pack 0.9.0', () => {
+    expect(GENERATOR_VERSION).toBe(4);
+    expect(badanos.summary.generatorVersion).toBe(4);
+    expect(badanos.summary.pack).toEqual({ name: 'medieval', version: '0.9.0' });
   });
 });
 

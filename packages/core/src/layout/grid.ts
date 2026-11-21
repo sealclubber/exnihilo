@@ -53,6 +53,11 @@ export class LayoutGenerationError extends Error {
 export interface LayoutOptions {
   /** Replaces the brief's own seed. */
   seed?: number;
+  /**
+   * false leaves each building on the lot it was first given, as layout version 2 did, instead of gathering
+   * trades along streets. The lots themselves are the same either way; this is for comparing the two.
+   */
+  arrange?: boolean;
 }
 
 /** Thrown inside an attempt when the grid of candidate blocks proved too small; the attempt is repeated on a larger one. */
@@ -73,7 +78,7 @@ export function generateLayout(city: City, brief: SettlementBrief, pack: Setting
   let half = Math.max(4, Math.ceil(Math.sqrt(needed)) + 2);
   for (let attempt = 0; ; attempt++, half *= 2) {
     try {
-      return attemptLayout(city, brief, pack, seed, half);
+      return attemptLayout(city, brief, pack, seed, half, options.arrange !== false);
     } catch (error) {
       if (!(error instanceof GridTooSmall) || attempt >= 6) {
         if (error instanceof GridTooSmall) {
@@ -85,7 +90,7 @@ export function generateLayout(city: City, brief: SettlementBrief, pack: Setting
   }
 }
 
-function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, seed: number, half: number): Layout {
+function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, seed: number, half: number, arrange: boolean): Layout {
   const settings = pack.layout;
   const number = idNumber(brief.id);
   const fail = (message: string): never => {
@@ -667,6 +672,55 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
     const corner = (out: number, sideways: number): Point => [seaward[0] * out + along[0] * sideways, seaward[1] * out + along[1] * sideways];
     const span = 2 * far;
     waters.push({ id: waterId(), kind: 'sea', polygon: [corner(shore, -span), corner(shore, span), corner(shore + span, span), corner(shore + span, -span)] });
+  }
+
+  // ---- Streets of one trade ---------------------------------------------------------------
+  // Which building holds which lot is settled last, and changes no lot. Within a district, buildings whose lots
+  // are alike (the same size, covered by the same share of building) change places, so that buildings of one type
+  // stand on neighbouring lots along a street, while types the pack spreads stand apart from each other.
+  if (arrange) {
+    const spreadTypes = new Set([...pack.workplaces, ...pack.landmarks].filter((type) => type.spread).map((type) => type.id));
+    const alike = new Map<string, Placed[]>();
+    for (const lot of placed) {
+      // Buildings that belong toward an exit keep their place.
+      if (exitOf.has(lot.building.id)) continue;
+      const key = `${lot.building.districtId}|${lot.frontage}|${lot.depth}|${footprintCoverageOf(lot.building.type, pack)}`;
+      const list = alike.get(key);
+      if (list) list.push(lot);
+      else alike.set(key, [lot]);
+    }
+    for (const lots of alike.values()) {
+      const types = new Map<string, Building[]>();
+      for (const { building } of lots) types.set(building.type, [...(types.get(building.type) ?? []), building]);
+      if (types.size < 2) continue;
+      // The lots in the order they stand: street by street, one side at a time, along the street.
+      const street = (lot: Placed) => cellJ(lot.cell) + (lot.north ? 0 : 1);
+      const along = (lot: Placed) => cellI(lot.cell) * pitchX + lot.start;
+      const slots = [...lots].sort((a, b) => street(a) - street(b) || Number(a.north) - Number(b.north) || along(a) - along(b));
+      const byId = (a: Building, b: Building) => (a.id < b.id ? -1 : 1);
+      for (const list of types.values()) list.sort(byId);
+      // Spread types take turns, a tavern then a baker then a shop, at even steps through the lots: far from their own kind.
+      const spread = [...types].filter(([type]) => spreadTypes.has(type)).sort(([a], [b]) => (a < b ? -1 : 1));
+      const apart: Building[] = [];
+      for (let turn = 0; spread.some(([, list]) => turn < list.length); turn++) {
+        for (const [, list] of spread) if (turn < list.length) apart.push(list[turn] as Building);
+      }
+      // The rest stand together by type, the commonest first.
+      const together = [...types].filter(([type]) => !spreadTypes.has(type)).sort(([a, one], [b, other]) => other.length - one.length || (a < b ? -1 : 1)).flatMap(([, list]) => list);
+      // Lots that stand side by side form a run; a lot with no like lot beside it stands alone, and whatever is put
+      // there has no neighbour of its own type. So the spread types, which are meant to stand apart, take the lone
+      // lots first, and the trades that gather take the runs.
+      const beside = (a: Placed, b: Placed) => a.cell === b.cell && a.north === b.north && Math.abs(a.start + a.frontage - b.start) < EPSILON;
+      const inRun = slots.map((slot, index) => (index > 0 && beside(slots[index - 1] as Placed, slot)) || (index + 1 < slots.length && beside(slot, slots[index + 1] as Placed)));
+      const alone = slots.filter((_, index) => !inRun[index]);
+      const runs = slots.filter((_, index) => inRun[index]);
+      const given = new Map<Placed, Building>();
+      const evenly = (buildings: Building[], among: Placed[]) => buildings.forEach((building, turn) => given.set(among[Math.floor(((turn + 0.5) * among.length) / buildings.length)] as Placed, building));
+      evenly(apart.slice(0, alone.length), alone);
+      evenly(apart.slice(alone.length), runs);
+      let next = 0;
+      for (const slot of [...runs, ...alone]) slot.building = given.get(slot) ?? (together[next++] as Building);
+    }
   }
 
   // Lots are numbered as their buildings are.

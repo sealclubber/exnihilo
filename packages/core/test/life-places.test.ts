@@ -32,7 +32,7 @@ import {
   shiftLength,
   startOfDay,
 } from '../src/index.ts';
-import { lomiaWorld, medievalPack, rawMedievalPack, settlement, stripPhase6B } from './pack.ts';
+import { BEFORE_6B5, lomiaWorld, medievalPack, rawMedievalPack, settlement, stripPhase6B } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
@@ -50,10 +50,10 @@ interface Town {
   layout: Layout;
   life: SettlementLife;
 }
-const town = (id: string, packUsed: SettingPack = pack, seed?: number): Town => {
+const town = (id: string, packUsed: SettingPack = pack, seed?: number, layoutOptions: { arrange?: boolean } = {}): Town => {
   const brief = settlement(id);
   const city = generateCity(brief, packUsed);
-  const layout = generateLayout(city, brief, packUsed);
+  const layout = generateLayout(city, brief, packUsed, layoutOptions);
   return { city, layout, life: createLife({ city, layout, pack: packUsed, ...(seed !== undefined && { seed }) }) };
 };
 
@@ -90,8 +90,8 @@ const atWork = (life: SettlementLife, people: City['people'], time: number) => p
 describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
     expect(LIFE_VERSION).toBe(4);
-    expect(GENERATOR_VERSION).toBe(3);
-    expect(LAYOUT_VERSION).toBe(2);
+    expect(GENERATOR_VERSION).toBe(4);
+    expect(LAYOUT_VERSION).toBe(3);
   });
 });
 
@@ -674,7 +674,8 @@ describe('pack behaviour', () => {
 
   it('gives the same plans as phase 4 from a pack with none of the new fields', { timeout: SLOW }, () => {
     const baseline = JSON.parse(readFileSync(new URL('./baselines/badanos-phase4-plans.json', import.meta.url), 'utf8')) as { planHash: Record<string, string> };
-    const { life } = town('settlement-641', phase4());
+    // Laid out as it was then too: each building on the lot it was first given.
+    const { life } = town('settlement-641', phase4(), undefined, BEFORE_6B5);
     for (const [day, hash] of Object.entries(baseline.planHash)) {
       const plans = life.plansForDay(Number(day));
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);

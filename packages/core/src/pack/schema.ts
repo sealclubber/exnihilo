@@ -76,6 +76,8 @@ const ManifestSchema = z.strictObject({
   apprenticeUntil: wholeNumber.optional(),
   /** How an apprentice's job is shown, such as "Apprentice {occupation}". Needed when anyone can be an apprentice. */
   apprenticeLabel: text.optional(),
+  /** How a building is named that is both a home and a workplace, such as "{workplace} and home". Left out, it has its type's name alone. */
+  homeAndWorkLabel: text.optional(),
   /** Lowest tier first. */
   statusTiers: z.array(z.strictObject({ id, name: text })).min(1),
   households: z.strictObject({
@@ -158,6 +160,11 @@ const WorkplaceSchema = z.strictObject({
   capacity: z.int().positive(),
   proprietorLivesIn: z.boolean(),
   district: id,
+  /**
+   * Share the buildings out among the districts in proportion to their residents, as for a civic building,
+   * instead of putting them all in the kind of district the type prefers. For what people use every day.
+   */
+  spread: z.boolean().optional(),
   ...placeFlags,
 });
 export type WorkplaceType = z.infer<typeof WorkplaceSchema>;
@@ -298,6 +305,18 @@ const DistrictsSchema = z.strictObject({
   words: z.record(id, z.array(text).min(1)),
   /** The first kind listed is the one a single-district settlement gets. */
   kinds: z.array(DistrictKindSchema).min(1),
+  /**
+   * Where each status tier prefers to live: district kinds in order of preference. A dwelling goes to the first
+   * entry that the settlement has; an entry may be a list of kinds ranked alike. A tier left out goes to any kind
+   * whose `statuses` include it.
+   */
+  tierDistricts: z.record(id, z.array(z.union([id, z.array(id).min(1)])).min(1)).optional(),
+  /**
+   * Housing near work: the share of dwellings placed in the district where the head of the household works,
+   * instead of where the tier prefers, with values of its own for some kinds of district. A kind given 0 is
+   * closed: nobody is moved there for this reason.
+   */
+  housingNearWork: z.strictObject({ share: probability, kinds: z.record(id, probability).optional() }).optional(),
 });
 
 const metres = z.number().positive();
@@ -921,6 +940,20 @@ function crossCheck(pack: SettingPack): string[] {
   const first = pack.districts.kinds[0];
   if (first && (first.when !== undefined || !first.weight)) {
     problems.push('districts: the first kind must have a weight and no condition, because every settlement gets one');
+  }
+  const kindIds = new Set(pack.districts.kinds.map((kind) => kind.id));
+  for (const [tier, list] of Object.entries(pack.districts.tierDistricts ?? {})) {
+    needTier(tier, 'districts: tierDistricts');
+    for (const kind of list.flat()) {
+      if (!kindIds.has(kind)) problems.push(`districts: tierDistricts lists the district kind "${kind}" for "${tier}", which does not exist`);
+    }
+    for (const repeated of duplicates(list.flat())) problems.push(`districts: tierDistricts lists "${repeated}" more than once for "${tier}"`);
+  }
+  for (const kind of Object.keys(pack.districts.housingNearWork?.kinds ?? {})) {
+    if (!kindIds.has(kind)) problems.push(`districts: housingNearWork has a share for the district kind "${kind}", which does not exist`);
+  }
+  if (pack.pack.homeAndWorkLabel !== undefined && !pack.pack.homeAndWorkLabel.includes('{workplace}')) {
+    problems.push(`pack: homeAndWorkLabel "${pack.pack.homeAndWorkLabel}" must contain {workplace}`);
   }
   for (const kind of pack.districts.kinds) {
     const where = `districts: "${kind.id}"`;
