@@ -10,6 +10,10 @@
 #                    turns, so the same people are not always on. On work days
 #                    everyone works.
 #
+# An occupation can also be split across several shifts (see occupations.yaml).
+# A building is open while at least one person who works there is on shift, by
+# the hours written here; on a rest day that means someone on duty.
+#
 # All hours are placeholders. Which trades keep which hours is a setting
 # decision: these are first guesses for review.
 
@@ -36,6 +40,15 @@ shifts:
     end: "23:00"
     restDays: true
     dutyShare: 0.6
+
+  # The day watch. With the night watch below it leaves the evening, from 18:00
+  # to 22:00, to the sergeants: a placeholder, to be settled with the setting.
+  watch-day:
+    name: Day watch
+    start: "06:00"
+    end: "18:00"
+    restDays: true
+    dutyShare: 0.5
 
   # The night watch.
   night:

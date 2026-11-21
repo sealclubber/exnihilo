@@ -20,14 +20,17 @@
  */
 import type { City, Person } from '../city/records.ts';
 import { createRng } from '../city/random.ts';
-import { distance, pointAlongPolyline } from '../layout/geometry.ts';
+import { distance, pointAlongPolyline, pointWithinPolygon } from '../layout/geometry.ts';
 import { createPathFinder } from '../layout/path.ts';
 import type { Layout } from '../layout/records.ts';
-import { type Calendar, type Occupation, type SettingPack, type Shift, type Species, type Visit, allOccupations, shiftLength, shiftOf, sleepLength } from '../pack/schema.ts';
+import { type NamedShift, type SettingPack, type Species, type Visit, HOME, placeFlagsOf, shiftLength, sleepLength } from '../pack/schema.ts';
 import type { Point } from '../schema.ts';
 import { deriveSeed } from '../seed.ts';
-import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay } from './calendar.ts';
-import type { Activity, DayPlan, DaySummary, Occupant, Region, Stay, Travel, Trip, TripPath, Whereabouts } from './records.ts';
+import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay, weekdayOf } from './calendar.ts';
+import { createWorkingHours } from './hours.ts';
+import type { Activity, DayPlan, DaySummary, Occupant, OpenSpan, OutsideStay, Region, Stay, Travel, Trip, TripPath, Whereabouts } from './records.ts';
+
+export { dutyCount, restDaysUpTo } from './hours.ts';
 
 export class LifeError extends Error {
   constructor(message: string) {
@@ -51,8 +54,16 @@ export interface SettlementLife {
   plansForDay(day: number): DayPlan[];
   /** Where a person is at a game time. */
   whereabouts(personId: string, time: number): Whereabouts;
-  /** Who is in a building at a game time. */
+  /** Who is at a building at a game time, inside it or outside on its lot. */
   occupants(buildingId: string, time: number): Occupant[];
+  /** Whether a building is open at a game time: whether someone who works there is on shift, or it never closes. */
+  isOpen(buildingId: string, time: number): boolean;
+  /** The stretches of a day during which a building is open. */
+  openingHours(buildingId: string, day: number): OpenSpan[];
+  /** The shift a person works, the same every day; nothing for someone with no job. */
+  shiftOf(personId: string): NamedShift | undefined;
+  /** The stays out of doors that overlap a window of game time, optionally only those in a region. */
+  outsideStays(from: number, to: number, region?: Region): OutsideStay[];
   /** The trips under way at any point in a window of game time, optionally only those that pass through a region. */
   trips(from: number, to: number, region?: Region): Trip[];
   /** A day, hour by hour. */
@@ -73,21 +84,9 @@ export function tripDuration(length: number, speed: number): number {
   return Math.ceil(length / speed);
 }
 
-/** How many of an occupation's workers are on duty on a rest day, given the shift's share. */
-export function dutyCount(workers: number, share: number): number {
-  return Math.round(workers * share);
-}
-
 const DAYS_KEPT = 4;
-
-/** How many rest days there have been from day 1 up to and including a day. */
-export function restDaysUpTo(day: number, calendar: Calendar): number {
-  const perWeek = calendar.week.filter((entry) => entry.rest).length;
-  const weeks = Math.floor(day / calendar.week.length);
-  let count = weeks * perWeek;
-  for (let extra = weeks * calendar.week.length + 1; extra <= day; extra++) if (isRestDay(extra, calendar)) count++;
-  return count;
-}
+/** How many points are tried at random in a lot before one is worked out. */
+const POINT_TRIES = 8;
 
 export function createLife(inputs: LifeInputs): SettlementLife {
   const { city, layout, pack } = inputs;
@@ -99,7 +98,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
   const personIndex = new Map(city.people.map((person, index) => [person.id, index]));
   const homeOf = new Map(city.households.map((household) => [household.id, household.dwellingId]));
   const lotOf = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
-  const occupations = new Map(allOccupations(pack).map((occupation) => [occupation.id, occupation]));
+  const hours = createWorkingHours({ city, pack, seed });
+  const checksHours = pack.visits.openingHours === true;
   const buildingType = new Map(city.buildings.map((building) => [building.id, building.type]));
   const buildingsOfType = new Map<string, string[]>();
   for (const building of city.buildings) {
@@ -107,15 +107,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     if (list) list.push(building.id);
     else buildingsOfType.set(building.type, [building.id]);
   }
-  /** Each worker's place among the holders of their occupation, for taking turns at rest-day duty. */
-  const rank = new Int32Array(city.people.length);
-  const holders = new Map<string, number>();
-  city.people.forEach((person, index) => {
-    if (person.occupationId === undefined) return;
-    const count = holders.get(person.occupationId) ?? 0;
-    rank[index] = count;
-    holders.set(person.occupationId, count + 1);
-  });
+  const openAir = new Set(city.buildings.filter((building) => placeFlagsOf(building.type, pack).openAir).map((building) => building.id));
   const entranceOf = (buildingId: string): Point => {
     const lot = lotOf.get(buildingId);
     if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
@@ -135,7 +127,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     sleepLength: number;
     /** Where the personal day starts, in seconds from the start of the calendar day of the same number. */
     anchor: number;
-    work?: { building: string; occupation: Occupation; shift: Shift; start: number; end: number };
+    work?: { building: string; start: number; end: number };
   }
   const profiles = new Array<Profile | undefined>(city.people.length);
   const profileOf = (index: number): Profile => {
@@ -149,12 +141,11 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     const habit = Math.round((createRng(deriveSeed(String(seed), 'life-habit', person.id)).next() * 2 - 1) * personalMinutes * 60);
     let wake = species.life.sleep.to;
     let work: Profile['work'];
-    const occupation = person.occupationId === undefined ? undefined : occupations.get(person.occupationId);
-    if (occupation && person.workplaceId !== undefined) {
-      const shift = shiftOf(occupation, pack);
+    const shift = hours.shiftOf(index);
+    if (shift && person.workplaceId !== undefined) {
       const start = shift.start;
       const end = shift.start + shiftLength(shift);
-      work = { building: person.workplaceId, occupation, shift, start, end };
+      work = { building: person.workplaceId, start, end };
       // Sleep is moved, not shortened, as far as the shift requires: up in time to get ready, and not to bed before winding down.
       const earliest = end + species.life.minutesBeforeBed * 60 - (SECONDS_PER_DAY - asleep);
       const latest = start - species.life.minutesBeforeLeaving * 60;
@@ -196,8 +187,13 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     return { kind: 'travel', start: departAt, end: arriveAt, fromBuildingId: from, toBuildingId: to, departAt, arriveAt, path };
   };
   /** The buildings a visit can go to from a starting point, nearest first. Kept, since homes are asked about daily. */
-  const reachable = new Map<string, string[]>();
-  const destinations = (visit: Visit, from: string): string[] => {
+  interface Reachable {
+    id: string;
+    /** Straight-line distance, which no walk can beat. */
+    away: number;
+  }
+  const reachable = new Map<string, Reachable[]>();
+  const destinations = (visit: Visit, from: string): Reachable[] => {
     const key = `${visit.id}|${from}`;
     let list = reachable.get(key);
     if (!list) {
@@ -206,8 +202,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         .flatMap((type) => buildingsOfType.get(type) ?? [])
         .filter((id) => id !== from && lotOf.has(id))
         .map((id) => ({ id, away: distance(origin, entranceOf(id)) }))
-        .sort((a, b) => a.away - b.away || (a.id < b.id ? -1 : 1))
-        .map((entry) => entry.id);
+        .sort((a, b) => a.away - b.away || (a.id < b.id ? -1 : 1));
       reachable.set(key, list);
     }
     return list;
@@ -215,7 +210,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
 
   // ---- A personal day ---------------------------------------------------------------------
   const visits = pack.visits.visits;
-  const applies = (visit: Visit, person: Person, workedToday: boolean, restDay: boolean): boolean => {
+  const applies = (visit: Visit, person: Person, workedToday: boolean, restDay: boolean, day: number): boolean => {
+    if (visit.weekdays && !visit.weekdays.includes(calendar.week[weekdayOf(day, calendar)]!.name)) return false;
     if (!visit.who.states.includes(person.workforceState)) return false;
     if (visit.who.minAge !== undefined && person.age < visit.who.minAge) return false;
     if (visit.who.maxAge !== undefined && person.age > visit.who.maxAge) return false;
@@ -232,6 +228,14 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     activities: Activity[];
   }
 
+  /** A point inside a building's lot for one stay: drawn from the person, the building and when the stay begins. */
+  const pointFor = (personId: string, buildingId: string, start: number): Point => {
+    const lot = lotOf.get(buildingId);
+    if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
+    const rng = createRng(deriveSeed(String(seed), 'life-outside', `${personId}:${buildingId}:${start}`));
+    return pointWithinPolygon(lot.polygon, () => rng.next(), POINT_TRIES);
+  };
+
   const personalDay = (index: number, day: number): Activity[] => {
     const profile = profileOf(index);
     const { person, home, speed, species, work } = profile;
@@ -246,25 +250,42 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     let bed = base + profile.wake + profile.habit + (SECONDS_PER_DAY - profile.sleepLength) + vary();
 
     const restDay = isRestDay(day, calendar);
-    let onDuty = false;
-    if (work) {
-      if (!restDay) onDuty = true;
-      else if (work.shift.restDays) {
-        // Workers take turns: each rest day the duty moves on to the next stretch of the occupation's holders.
-        const workers = holders.get(work.occupation.id) as number;
-        const count = dutyCount(workers, work.shift.dutyShare ?? 0);
-        const turn = ((((rank[index] as number) - restDaysUpTo(day, calendar) * count) % workers) + workers) % workers;
-        onDuty = turn < count;
-      }
-    }
+    const onDuty = work !== undefined && hours.onDuty(index, day);
+
+    /** Time spent at a building, at work or on a visit: outside if the building is open-air or the visit says so. */
+    const spend = (kind: 'work' | 'visit', start: number, end: number, buildingId: string, visit?: Visit): Stay => ({
+      kind,
+      start,
+      end,
+      buildingId,
+      ...(visit && { visitId: visit.id }),
+      ...((openAir.has(buildingId) || visit?.outside === true) && { outside: true as const, point: pointFor(person.id, buildingId, start) }),
+    });
 
     const blocks: Block[] = [];
-    /** Chooses where a visit goes from a starting point, or nothing if there is nowhere. */
-    const choose = (visit: Visit, from: string): string | undefined => {
-      const list = destinations(visit, from).filter((id) => id !== home);
-      if (list.length === 0) return undefined;
-      // Raising an even draw to the pack's power leans the choice toward the near end of the list.
-      return list[Math.min(list.length - 1, Math.floor(list.length * rng.next() ** pack.visits.nearness))];
+    /**
+     * Chooses where a visit goes from a starting point, or nothing if there is nowhere. `arrival` says when the
+     * visitor would get to a place, given the length of the walk. Where the pack keeps opening hours, the place
+     * must be open then, and stay open for at least the visit's shortest duration.
+     */
+    const choose = (visit: Visit, from: string, arrival: (to: string, exact: boolean, away: number) => number): { to: string; arriveAt: number; closes: number } | undefined => {
+      let list = destinations(visit, from).filter((entry) => entry.id !== home);
+      // The person's own dwelling, where the visit allows it, is reached without a walk.
+      if (from === home && visit.destinations.includes(HOME)) list = [{ id: home, away: 0 }, ...list];
+      const shortest = visit.durationMinutes.min * 60;
+      const closing = (to: string, at: number) => (to === home || !checksHours ? Infinity : hours.openUntil(to, at));
+      // A first sieve by the time a straight walk would take, so that paths are found only for places worth trying.
+      if (checksHours) list = list.filter((entry) => closing(entry.id, arrival(entry.id, false, entry.away)) !== undefined);
+      while (list.length > 0) {
+        // Raising an even draw to the pack's power leans the choice toward the near end of the list.
+        const picked = Math.min(list.length - 1, Math.floor(list.length * rng.next() ** pack.visits.nearness));
+        const { id: to, away } = list[picked] as Reachable;
+        const arriveAt = arrival(to, true, away);
+        const closes = closing(to, arriveAt);
+        if (closes !== undefined && closes - arriveAt >= shortest) return { to, arriveAt, closes };
+        list = list.filter((_, at) => at !== picked);
+      }
+      return undefined;
     };
     const stayLength = (visit: Visit) => {
       const { min, max } = visit.durationMinutes;
@@ -276,12 +297,17 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       let where = from;
       let now = at;
       for (const visit of visits) {
-        if (visit.when !== 'after-work' || !applies(visit, person, true, restDay) || !rng.chance(visit.probability)) continue;
-        const to = choose(visit, where);
-        if (to === undefined) continue;
-        const walk = travel(where, to, now, speed);
-        const until = walk.arriveAt + stayLength(visit);
-        activities.push(walk, { kind: 'visit', start: walk.arriveAt, end: until, buildingId: to, visitId: visit.id });
+        if (visit.when !== 'after-work' || !applies(visit, person, true, restDay, day) || !rng.chance(visit.probability)) continue;
+        const origin = where;
+        const leaving = now;
+        const chosen = choose(visit, origin, (to, exact, away) =>
+          to === origin ? leaving : leaving + tripDuration(exact ? pathBetween(origin, to).length : away, speed),
+        );
+        if (!chosen) continue;
+        const { to, arriveAt, closes } = chosen;
+        if (to !== where) activities.push(travel(where, to, now, speed));
+        const until = Math.min(arriveAt + stayLength(visit), closes);
+        activities.push(spend('visit', arriveAt, until, to, visit));
         where = to;
         now = until;
       }
@@ -294,10 +320,15 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       if (work.building === home) {
         // Working at home: no commute. Any stop after work is an outing of its own.
         const stops = afterWork(home, leave);
-        blocks.push({ start: arrive, end: leave, activities: [{ kind: 'work', start: arrive, end: leave, buildingId: home }] });
+        blocks.push({ start: arrive, end: leave, activities: [spend('work', arrive, leave, home)] });
         if (stops.activities.length > 0) {
-          const back = travel(stops.where, home, stops.at, speed);
-          if (back.arriveAt <= dayEnd) blocks.push({ start: leave, end: back.arriveAt, activities: [...stops.activities, back] });
+          if (stops.where === home) {
+            // Every stop was at home itself, so there is no walk back.
+            if (stops.at <= dayEnd) blocks.push({ start: leave, end: stops.at, activities: stops.activities });
+          } else {
+            const back = travel(stops.where, home, stops.at, speed);
+            if (back.arriveAt <= dayEnd) blocks.push({ start: leave, end: back.arriveAt, activities: [...stops.activities, back] });
+          }
         }
       } else {
         const out = pathBetween(home, work.building);
@@ -321,7 +352,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         blocks.push({
           start: there.departAt,
           end: back.arriveAt,
-          activities: [there, { kind: 'work', start: arrive, end: leave, buildingId: work.building }, ...stops.activities, back],
+          activities: [there, spend('work', arrive, leave, work.building), ...stops.activities, back],
         });
         wake = Math.min(wake, there.departAt - leadTime);
       }
@@ -335,20 +366,25 @@ export function createLife(inputs: LifeInputs): SettlementLife {
 
     // Visits at a time of day: from home and back, if they fit around everything else.
     for (const visit of visits) {
-      if (visit.when === 'after-work' || !applies(visit, person, onDuty, restDay) || !rng.chance(visit.probability)) continue;
+      if (visit.when === 'after-work' || !applies(visit, person, onDuty, restDay, day) || !rng.chance(visit.probability)) continue;
       const begin = base + visit.when.from + Math.floor(rng.next() * (visit.when.to - visit.when.from));
-      const length = stayLength(visit);
-      const to = choose(visit, home);
-      if (to === undefined) continue;
-      const out = travel(home, to, begin - tripDuration(pathBetween(home, to).length, speed), speed);
-      const back = travel(to, home, begin + length, speed);
-      if (out.departAt < wake || back.arriveAt > bed) continue;
-      if (blocks.some((block) => out.departAt < block.end && back.arriveAt > block.start)) continue;
-      blocks.push({
-        start: out.departAt,
-        end: back.arriveAt,
-        activities: [out, { kind: 'visit', start: begin, end: begin + length, buildingId: to, visitId: visit.id }, back],
-      });
+      const wanted = stayLength(visit);
+      const chosen = choose(visit, home, () => begin);
+      if (chosen === undefined) continue;
+      const { to } = chosen;
+      const until = Math.min(begin + wanted, chosen.closes);
+      const block: Block =
+        to === home
+          ? { start: begin, end: until, activities: [spend('visit', begin, until, home, visit)] }
+          : (() => {
+              const out = travel(home, to, begin - tripDuration(pathBetween(home, to).length, speed), speed);
+              const back = travel(to, home, until, speed);
+              return { start: out.departAt, end: back.arriveAt, activities: [out, spend('visit', begin, until, to, visit), back] };
+            })();
+      if (block.start < wake || block.end > bed) continue;
+      // Outings may not touch, either: someone home from one walk does not set out on the next in the same second.
+      if (blocks.some((other) => block.start <= other.end && block.end >= other.start)) continue;
+      blocks.push(block);
     }
     blocks.sort((a, b) => a.start - b.start);
 
@@ -481,6 +517,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         kind: activity.kind,
         buildingId: activity.buildingId,
         ...(activity.visitId !== undefined && { visitId: activity.visitId }),
+        ...(activity.outside && { outside: true as const, point: activity.point as Point }),
         since: activity.start,
         until: activity.end,
       };
@@ -492,10 +529,59 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       for (const { personId, activities } of plansForDay(dayOf(time))) {
         const activity = activityAt(activities, time);
         if (activity.kind !== 'travel' && activity.buildingId === buildingId) {
-          inside.push({ personId, kind: activity.kind, ...(activity.visitId !== undefined && { visitId: activity.visitId }) });
+          inside.push({
+            personId,
+            kind: activity.kind,
+            ...(activity.visitId !== undefined && { visitId: activity.visitId }),
+            ...(activity.outside && { outside: true as const }),
+          });
         }
       }
       return inside;
+    },
+
+    isOpen(buildingId, time) {
+      if (!buildingType.has(buildingId)) throw new LifeError(`there is no building with the ID "${buildingId}"`);
+      return hours.openUntil(buildingId, time) !== undefined;
+    },
+
+    openingHours(buildingId, day) {
+      if (!buildingType.has(buildingId)) throw new LifeError(`there is no building with the ID "${buildingId}"`);
+      return hours.hoursOn(buildingId, day);
+    },
+
+    shiftOf: (personId) => hours.shiftOf(indexOfPerson(personId)),
+
+    outsideStays(from, to, region) {
+      const found: OutsideStay[] = [];
+      /** The last stay found for each person, for joining one that crosses midnight to its other half. */
+      const latest = new Map<string, OutsideStay>();
+      for (const day of daysIn(from, to)) {
+        for (const { personId, activities } of plansForDay(day)) {
+          for (const activity of activities) {
+            if (activity.kind === 'travel' || !activity.outside || activity.end <= from || activity.start >= to) continue;
+            const point = activity.point as Point;
+            if (region && (point[0] < region.minX || point[0] > region.maxX || point[1] < region.minY || point[1] > region.maxY)) continue;
+            const before = latest.get(personId);
+            if (before && before.to === activity.start && before.buildingId === activity.buildingId && before.point[0] === point[0] && before.point[1] === point[1]) {
+              before.to = activity.end;
+              continue;
+            }
+            const stay: OutsideStay = {
+              personId,
+              buildingId: activity.buildingId,
+              kind: activity.kind as 'work' | 'visit',
+              ...(activity.visitId !== undefined && { visitId: activity.visitId }),
+              point,
+              from: activity.start,
+              to: activity.end,
+            };
+            latest.set(personId, stay);
+            found.push(stay);
+          }
+        }
+      }
+      return found;
     },
 
     trips(from, to, region) {
@@ -542,6 +628,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     daySummary(day) {
       const start = startOfDay(day);
       const seconds = { sleep: new Float64Array(24), home: new Float64Array(24), work: new Float64Array(24), visit: new Float64Array(24), travel: new Float64Array(24) };
+      const outside = new Float64Array(24);
       const started = new Int32Array(24);
       let trips = 0;
       for (const { activities } of plansForDay(day)) {
@@ -553,7 +640,9 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           for (let hour = Math.floor((activity.start - start) / 3600); hour < 24 && start + hour * 3600 < activity.end; hour++) {
             const from = Math.max(activity.start, start + hour * 3600);
             const to = Math.min(activity.end, start + (hour + 1) * 3600);
-            if (to > from) seconds[activity.kind][hour]! += to - from;
+            if (to <= from) continue;
+            seconds[activity.kind][hour]! += to - from;
+            if (activity.kind !== 'travel' && activity.outside) outside[hour]! += to - from;
           }
         }
       }
@@ -566,6 +655,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           atWork: (seconds.work[hour] as number) / 3600,
           visiting: (seconds.visit[hour] as number) / 3600,
           travelling: (seconds.travel[hour] as number) / 3600,
+          outside: (outside[hour] as number) / 3600,
           tripsStarted: started[hour] as number,
         })),
         trips,

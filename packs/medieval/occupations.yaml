@@ -21,7 +21,10 @@
 #   sexes           optional: only the listed sexes can hold the job
 #   shift           optional: the hours worked, naming a shift from shifts.yaml.
 #                   Left out, the default shift applies. Apprentices keep the
-#                   same hours.
+#                   same hours. Or a list that splits the occupation across
+#                   shifts: [{shift: a, share: 0.5}, {shift: b, share: 0.5}].
+#                   The shares must add up to 1. In each settlement they are
+#                   met exactly, and a worker keeps the same shift every day.
 #   apprenticeUntil optional: a worker younger than this holds the job as an
 #                   apprentice. 0 means the job has no apprenticeship. Left out, the
 #                   pack-wide age in pack.yaml applies.
@@ -36,7 +39,8 @@
 #   - apprenticeUntil is 0 on unskilled jobs; every other job uses the
 #     pack-wide age.
 #   - Shifts: bakers and millers work early; tavern staff, musicians and
-#     players work evenings; watchmen work nights; clergy keep their own hours.
+#     players work evenings; watchmen are split evenly between the day
+#     watch and the night watch; clergy keep their own hours.
 #     The watch, the taverns and the clergy also work on rest days.
 #   - No occupation sets `sexes`. The syntax, on an example that is not in use:
 #       - {id: midwife, name: Midwife, category: services, workplace: healers-house, weight: 3, status: modest, sexes: [female]}
@@ -104,7 +108,7 @@
 - {id: sawyer, name: Sawyer, category: construction, workplace: woodyard, weight: 4, status: poor, apprenticeUntil: 0}
 
 # --- Military ---------------------------------------------------------------
-- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor, minAge: 16, apprenticeUntil: 0, shift: night}
+- {id: watchman, name: Watchman, category: military, workplace: watch-house, weight: 10, status: poor, minAge: 16, apprenticeUntil: 0, shift: [{shift: watch-day, share: 0.5}, {shift: night, share: 0.5}]}
 - {id: watch-sergeant, name: Watch sergeant, category: military, workplace: watch-house, weight: 2, status: modest, minAge: 25}
 - {id: gaoler, name: Gaoler, category: military, workplace: watch-house, weight: 1, status: poor, minPopulation: 2000, minAge: 21, apprenticeUntil: 0}
 - {id: soldier, name: Soldier, category: military, workplace: barracks, weight: 8, status: poor, minAge: 16, apprenticeUntil: 0}

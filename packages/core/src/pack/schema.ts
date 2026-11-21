@@ -120,8 +120,11 @@ const OccupationSchema = z.strictObject({
   sexes: z.array(SexSchema).min(1).optional(),
   /** A worker younger than this is an apprentice; 0 means the job has no apprenticeship. Left out means the pack-wide age. */
   apprenticeUntil: wholeNumber.optional(),
-  /** The hours worked, naming a shift. Left out means the default shift. */
-  shift: id.optional(),
+  /**
+   * The hours worked: one shift by name, or several with the share of the
+   * occupation's workers on each. Left out means the default shift.
+   */
+  shift: z.union([id, z.array(z.strictObject({ shift: id, share: probability })).min(1)]).optional(),
 });
 export type Occupation = z.infer<typeof OccupationSchema>;
 
@@ -135,6 +138,14 @@ const SpecialtiesSchema = z.strictObject({
   tags: z.record(text, z.strictObject({ ignore: z.boolean().optional(), note: text.optional() })),
 });
 
+/** What a building type can say about being visited and being out of doors. */
+const placeFlags = {
+  /** Everyone staying here, worker or visitor, is outside. */
+  openAir: z.boolean().optional(),
+  /** Open at every hour, with nobody needed in attendance. */
+  alwaysOpen: z.boolean().optional(),
+};
+
 const WorkplaceSchema = z.strictObject({
   id,
   name: text,
@@ -142,6 +153,7 @@ const WorkplaceSchema = z.strictObject({
   capacity: z.int().positive(),
   proprietorLivesIn: z.boolean(),
   district: id,
+  ...placeFlags,
 });
 export type WorkplaceType = z.infer<typeof WorkplaceSchema>;
 
@@ -172,6 +184,7 @@ const LandmarkSchema = z.strictObject({
   count: CountSchema,
   /** Fixed posts, shared out among the buildings. */
   posts: z.array(z.strictObject({ occupation: id, count: CountSchema })),
+  ...placeFlags,
 });
 export type Landmark = z.infer<typeof LandmarkSchema>;
 
@@ -334,18 +347,24 @@ const VisitSchema = z.strictObject({
   }),
   /** On which kind of day the visit can happen. */
   days: z.enum(['work', 'rest', 'any']),
+  /** Days of the week, by the calendar's names, to which the visit is limited. Left out means any. */
+  weekdays: z.array(text).min(1).optional(),
   probability,
   /** After the day's work, on the way home; or starting at some time in a window of the day. */
   when: z.union([z.literal('after-work'), z.strictObject({ from: clockTime, to: clockTime })]),
   durationMinutes: z.strictObject({ min: minutes, max: minutes }),
-  /** Building types the visit can go to. */
+  /** Building types the visit can go to. `home` is the person's own dwelling, which takes no walk to reach. */
   destinations: z.array(id).min(1),
+  /** The visitor is outside, whatever the building type. */
+  outside: z.boolean().optional(),
 });
 export type Visit = z.infer<typeof VisitSchema>;
 
 const VisitsSchema = z.strictObject({
   /** How strongly nearer destinations are favoured: 1 is not at all, higher is more. */
   nearness: z.number().min(1),
+  /** Whether a visit goes only to a place that is open when the visitor arrives. Left out, places are never closed. */
+  openingHours: z.boolean().optional(),
   visits: z.array(VisitSchema),
 });
 
@@ -406,10 +425,28 @@ export function allOccupations(pack: SettingPack): Occupation[] {
   return [...pack.occupations, ...Object.values(pack.species).flatMap((species) => species.occupations ?? [])];
 }
 
-/** The shift an occupation works: its own, or the pack's default. */
-export function shiftOf(occupation: Occupation, pack: SettingPack): Shift & { id: string } {
-  const shiftId = occupation.shift ?? pack.shifts.default;
-  return { id: shiftId, ...(pack.shifts.shifts[shiftId] as Shift) };
+/** The destination that means a person's own dwelling, whatever its type. */
+export const HOME = 'home';
+
+export type NamedShift = Shift & { id: string };
+
+/** The shifts an occupation is worked in, each with the share of its workers on it: its own, or the pack's default. */
+export function shiftsOf(occupation: Occupation, pack: SettingPack): Array<NamedShift & { share: number }> {
+  const named = occupation.shift ?? pack.shifts.default;
+  const entries = typeof named === 'string' ? [{ shift: named, share: 1 }] : named;
+  return entries.map(({ shift, share }) => ({ id: shift, share, ...(pack.shifts.shifts[shift] as Shift) }));
+}
+
+/** The shift an occupation works. For an occupation split across shifts, this is the first listed. */
+export function shiftOf(occupation: Occupation, pack: SettingPack): NamedShift {
+  const { share: _share, ...shift } = shiftsOf(occupation, pack)[0] as NamedShift & { share: number };
+  return shift;
+}
+
+/** What the pack says about a building type as a place to be: out of doors, and open at all hours. */
+export function placeFlagsOf(type: string, pack: SettingPack): { openAir: boolean; alwaysOpen: boolean } {
+  const entry = pack.workplaces.find((workplace) => workplace.id === type) ?? pack.landmarks.find((landmark) => landmark.id === type);
+  return { openAir: entry?.openAir === true, alwaysOpen: entry?.alwaysOpen === true };
 }
 
 /** How long a shift lasts, in seconds, allowing for one that crosses midnight. */
@@ -432,6 +469,9 @@ export function lotSizeOf(type: string, pack: SettingPack): LotSize {
 export function apprenticeUntil(occupation: Occupation, pack: SettingPack): number {
   return occupation.apprenticeUntil ?? pack.pack.apprenticeUntil ?? 0;
 }
+
+/** How far a list of shares written as decimals may be from adding up to 1. */
+const SHARE_TOLERANCE = 1e-9;
 
 function duplicates(ids: string[]): string[] {
   const seen = new Set<string>();
@@ -638,17 +678,37 @@ function crossCheck(pack: SettingPack): string[] {
     }
   }
   for (const occupation of occupations) {
-    if (occupation.shift !== undefined && !(occupation.shift in pack.shifts.shifts)) {
-      problems.push(`occupations: "${occupation.id}" names the shift "${occupation.shift}", which shifts does not define`);
+    if (occupation.shift === undefined) continue;
+    const named = typeof occupation.shift === 'string' ? [occupation.shift] : occupation.shift.map((entry) => entry.shift);
+    for (const shiftId of named) {
+      if (!(shiftId in pack.shifts.shifts)) {
+        problems.push(`occupations: "${occupation.id}" names the shift "${shiftId}", which shifts does not define`);
+      }
+    }
+    for (const repeated of duplicates(named)) problems.push(`occupations: "${occupation.id}" lists the shift "${repeated}" more than once`);
+    if (typeof occupation.shift !== 'string') {
+      const total = occupation.shift.reduce((sum, entry) => sum + entry.share, 0);
+      if (Math.abs(total - 1) > SHARE_TOLERANCE) {
+        problems.push(`occupations: "${occupation.id}" has shift shares that add up to ${Number(total.toFixed(6))}, not 1`);
+      }
     }
   }
+  if (buildingTypeIds.includes(HOME)) {
+    problems.push(`a building type is called "${HOME}", which visits use to mean a person's own dwelling: give it another ID`);
+  }
+  const weekdayNames = pack.calendar.week.map((entry) => entry.name);
   for (const repeated of duplicates(pack.visits.visits.map((visit) => visit.id))) {
     problems.push(`visits: "${repeated}" is defined more than once`);
   }
   for (const visit of pack.visits.visits) {
     const where = `visits: "${visit.id}"`;
     for (const type of visit.destinations) {
-      if (!buildingTypeIds.includes(type)) problems.push(`${where} names the building type "${type}", which does not exist`);
+      if (type !== HOME && !buildingTypeIds.includes(type)) problems.push(`${where} names the building type "${type}", which does not exist`);
+    }
+    for (const weekday of visit.weekdays ?? []) {
+      if (!weekdayNames.includes(weekday)) {
+        problems.push(`${where} names the weekday "${weekday}", which the calendar does not have (it has ${weekdayNames.join(', ')})`);
+      }
     }
     if (visit.durationMinutes.min > visit.durationMinutes.max) problems.push(`${where} has a shortest duration above its longest`);
     if (visit.when !== 'after-work' && visit.when.from > visit.when.to) problems.push(`${where} has a window that ends before it starts`);

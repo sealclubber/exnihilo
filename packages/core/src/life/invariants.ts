@@ -3,10 +3,11 @@
  * empty list means the plan is sound.
  */
 import type { City } from '../city/records.ts';
-import { distance } from '../layout/geometry.ts';
+import { distance, pointInPolygon } from '../layout/geometry.ts';
 import type { Layout } from '../layout/records.ts';
-import type { SettingPack } from '../pack/schema.ts';
+import { type SettingPack, type Species, HOME, placeFlagsOf, shiftLength } from '../pack/schema.ts';
 import { SECONDS_PER_DAY, startOfDay } from './calendar.ts';
+import { createWorkingHours } from './hours.ts';
 import { tripDuration, walkingSpeed } from './life.ts';
 import type { Activity, DayPlan } from './records.ts';
 
@@ -23,8 +24,11 @@ export interface PlanChecker {
 
 const describe = (activity: Activity) => (activity.kind === 'travel' ? `walking to ${activity.toBuildingId}` : `${activity.kind} in ${activity.buildingId}`);
 
-export function createPlanChecker(inputs: { city: City; layout: Layout; pack: SettingPack }): PlanChecker {
+export function createPlanChecker(inputs: { city: City; layout: Layout; pack: SettingPack; seed?: number }): PlanChecker {
   const { city, layout, pack } = inputs;
+  const hours = createWorkingHours(inputs);
+  const personIndex = new Map(city.people.map((person, index) => [person.id, index]));
+  const openAir = new Set(city.buildings.filter((building) => placeFlagsOf(building.type, pack).openAir).map((building) => building.id));
   const people = new Map(city.people.map((person) => [person.id, person]));
   const buildings = new Map(city.buildings.map((building) => [building.id, building]));
   const homes = new Map(city.households.map((household) => [household.id, household.dwellingId]));
@@ -45,6 +49,10 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
       const dayStart = startOfDay(plan.day);
       const dayEnd = dayStart + SECONDS_PER_DAY;
       const { activities } = plan;
+      const shift = hours.shiftOf(personIndex.get(plan.personId) as number);
+      const { personalMinutes, dailyMinutes } = (pack.species[person.species] as Species).life.variation;
+      /** How far from the shift's own hours a worker's habit and the day's variation can take them. */
+      const slack = (personalMinutes + dailyMinutes) * 60;
 
       // The plan covers the whole day with no gaps and no overlaps.
       if (activities.length === 0) return [`${plan.personId}, day ${plan.day}: the plan is empty`];
@@ -97,14 +105,48 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
         if (activity.kind === 'work') {
           if (person.workforceState !== 'working') problem(`activity ${at + 1} is work, but the person is not in the workforce`);
           else if (activity.buildingId !== person.workplaceId) problem(`activity ${at + 1} is work in ${activity.buildingId}, not the person's workplace ${person.workplaceId}`);
+          // Work is done in the hours of the person's own shift, the same shift every day, and not before it starts.
+          if (!shift) problem(`activity ${at + 1} is work, but the person has no shift`);
+          else if (![plan.day - 1, plan.day].some((day) => activity.start >= startOfDay(day) + shift.start - slack && activity.end <= startOfDay(day) + shift.start + shiftLength(shift) + slack)) {
+            problem(`activity ${at + 1} is work outside the hours of the person's shift, "${shift.id}"`);
+          }
         }
         // Every visit goes to a building type that visit allows.
         if (activity.kind === 'visit') {
           const visit = activity.visitId === undefined ? undefined : visits.get(activity.visitId);
           if (!visit) problem(`activity ${at + 1} is a visit of the kind "${activity.visitId}", which the pack does not define`);
-          else if (!visit.destinations.includes(building.type)) problem(`activity ${at + 1} is a "${visit.id}" visit to a ${building.type}, which that visit does not allow`);
+          else {
+            const atHome = activity.buildingId === home;
+            if (atHome ? !visit.destinations.includes(HOME) : !visit.destinations.includes(building.type)) {
+              problem(`activity ${at + 1} is a "${visit.id}" visit to ${atHome ? "the person's own home" : `a ${building.type}`}, which that visit does not allow`);
+            }
+            // A visit to the person's own home involves no travel: it is neither walked to nor walked away from.
+            const next = activities[at + 1];
+            if (atHome && (previous?.kind === 'travel' || next?.kind === 'travel') && visit.destinations.every((type) => type === HOME)) {
+              problem(`activity ${at + 1} is a "${visit.id}" visit at home with a walk beside it`);
+            }
+            // The place is open when the visitor arrives, and the visit ends by closing time.
+            if (pack.visits.openingHours && !atHome) {
+              // A visit that began before midnight arrived when it began, which the earlier day's plan checks.
+              const closes = hours.openUntil(activity.buildingId, activity.start);
+              if (closes === undefined) problem(`activity ${at + 1} is a "${visit.id}" visit to ${activity.buildingId}, which is closed at ${activity.start}`);
+              else if (activity.end > closes) problem(`activity ${at + 1} is a "${visit.id}" visit to ${activity.buildingId} that runs past its closing at ${closes}`);
+            }
+          }
         } else if (activity.visitId !== undefined) {
           problem(`activity ${at + 1} is ${activity.kind} but names a visit`);
+        }
+        // A stay is outside exactly when its building type is open-air or its visit is marked outside; sleep and time at home are indoors.
+        const visitOutside = activity.kind === 'visit' && activity.visitId !== undefined && visits.get(activity.visitId)?.outside === true;
+        const shouldBeOutside = (activity.kind === 'work' || activity.kind === 'visit') && (openAir.has(activity.buildingId) || visitOutside);
+        if ((activity.outside === true) !== shouldBeOutside) {
+          problem(`activity ${at + 1} is ${activity.outside ? 'outside' : 'inside'} at ${activity.buildingId}, but should be ${shouldBeOutside ? 'outside' : 'inside'}`);
+        }
+        // An outside stay has a point inside its building's lot.
+        if ((activity.point !== undefined) !== (activity.outside === true)) problem(`activity ${at + 1} must have a point exactly when it is outside`);
+        const lot = lots.get(activity.buildingId);
+        if (activity.point && lot && !pointInPolygon(activity.point, lot.polygon)) {
+          problem(`activity ${at + 1} is outside at a point that is not on the lot of ${activity.buildingId}`);
         }
         if (activity.end === activity.start) problem(`activity ${at + 1} is a stay of no length`);
       });
@@ -122,7 +164,8 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
       if (last.kind === 'travel' && first.kind === 'travel') same = last.departAt === first.departAt && last.toBuildingId === first.toBuildingId;
       else if (last.kind === 'travel') same = first.kind !== 'travel' && last.arriveAt === boundary && last.toBuildingId === first.buildingId;
       else if (first.kind === 'travel') same = first.departAt === boundary && first.fromBuildingId === last.buildingId;
-      else same = last.buildingId === first.buildingId;
+      // Someone outside either side of midnight is at the same point.
+      else same = last.buildingId === first.buildingId && last.point?.[0] === first.point?.[0] && last.point?.[1] === first.point?.[1];
       return same ? [] : [`${earlier.personId}: day ${earlier.day} ends ${describe(last)} but day ${later.day} starts ${describe(first)}`];
     },
   };

@@ -342,3 +342,40 @@ export class SpatialIndex<T> {
     return found;
   }
 }
+
+/**
+ * A point strictly inside a polygon, chosen by the draws given. A few points
+ * of the bounding box are tried; if none lands inside, as can happen with a
+ * thin or bent shape, the point is worked out on a line across the polygon
+ * instead. `draw` returns numbers from 0 up to 1.
+ */
+export function pointWithinPolygon(polygon: readonly Point[], draw: () => number, tries: number): Point {
+  const box = boxOf(polygon);
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const point: Point = [box.minX + draw() * (box.maxX - box.minX), box.minY + draw() * (box.maxY - box.minY)];
+    if (strictlyInside(point, polygon)) return point;
+  }
+  // Cross the polygon at a height between two of its corners' heights; the line enters and leaves it in pairs.
+  const heights = [...new Set(polygon.map((point) => point[1]))].sort((a, b) => a - b);
+  let best: Point | undefined;
+  let widest = 0;
+  for (let at = 0; at + 1 < heights.length; at++) {
+    const y = ((heights[at] as number) + (heights[at + 1] as number)) / 2;
+    const crossings: number[] = [];
+    for (let i = 0; i < polygon.length; i++) {
+      const a = polygon[i] as Point;
+      const b = polygon[(i + 1) % polygon.length] as Point;
+      if (a[1] > y !== b[1] > y) crossings.push(a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]));
+    }
+    crossings.sort((a, b) => a - b);
+    for (let pair = 0; pair + 1 < crossings.length; pair += 2) {
+      const width = (crossings[pair + 1] as number) - (crossings[pair] as number);
+      if (width > widest) {
+        widest = width;
+        best = [(crossings[pair] as number) + width * (draw() * 0.5 + 0.25), y];
+      }
+    }
+  }
+  if (!best) throw new RangeError('a polygon with no area has no point inside it');
+  return best;
+}

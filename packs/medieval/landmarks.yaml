@@ -7,6 +7,8 @@
 #   posts     jobs that exist because the landmark does. Each takes a slot from
 #             its occupation's category, and is shared out among the buildings.
 #             The occupation must name this landmark as its workplace.
+#   openAir, alwaysOpen  optional, as in workplaces.yaml. The market square is
+#             both: a public place out of doors. The docks are open-air.
 
 - id: citadel
   name: Citadel
@@ -40,6 +42,7 @@
   name: Docks
   when: port
   district: harbour
+  openAir: true
   count: {perThousand: 0.3, min: 1, max: 6}
   posts:
     - {occupation: harbourmaster, count: {fixed: 1}}
@@ -49,6 +52,8 @@
   name: Market square
   when: plaza
   district: centre
+  openAir: true
+  alwaysOpen: true
   count: {fixed: 1}
   posts:
     - {occupation: market-warden, count: {perThousand: 0.3, min: 1}}

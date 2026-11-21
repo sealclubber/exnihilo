@@ -13,10 +13,29 @@ import { PointSchema } from '../schema.ts';
 const text = z.string().min(1);
 const gameTime = z.number();
 
+/**
+ * Raised whenever the plans for the same inputs would change. Version 1 was
+ * the first daily life; version 2 added opening hours, occupations split
+ * across shifts, and stays out of doors.
+ */
+export const LIFE_VERSION = 2;
+
+/** Where a stay out of doors is spent: present, with a point, exactly when the stay is outside. */
+const outdoors = {
+  outside: z.literal(true).optional(),
+  /** A point inside the building's lot, the same for the whole stay. */
+  point: PointSchema.optional(),
+};
+const outdoorsTogether = (value: { outside?: true | undefined; point?: unknown }) => (value.outside === true) === (value.point !== undefined);
+
 export const ActivityKindSchema = z.enum(['sleep', 'home', 'work', 'visit', 'travel']);
 export type ActivityKind = z.infer<typeof ActivityKindSchema>;
 
-/** Being in a building: asleep or awake at home, at work, or on a visit. */
+/**
+ * Being at a building: asleep or awake at home, at work, or on a visit. A
+ * stay is inside the building unless it is marked outside, in which case the
+ * person is at a point on its lot and can be seen.
+ */
 export const StaySchema = z.strictObject({
   kind: z.enum(['sleep', 'home', 'work', 'visit']),
   start: gameTime,
@@ -24,6 +43,7 @@ export const StaySchema = z.strictObject({
   buildingId: BuildingIdSchema,
   /** For a visit: which of the pack's visits it is. */
   visitId: text.optional(),
+  ...outdoors,
 });
 export type Stay = z.infer<typeof StaySchema>;
 
@@ -53,7 +73,10 @@ export const TravelSchema = z.strictObject({
 });
 export type Travel = z.infer<typeof TravelSchema>;
 
-export const ActivitySchema = z.discriminatedUnion('kind', [StaySchema, TravelSchema]);
+export const ActivitySchema = z.discriminatedUnion('kind', [StaySchema, TravelSchema]).refine(
+  (activity) => activity.kind === 'travel' || outdoorsTogether(activity),
+  'a stay has a point exactly when it is outside',
+);
 export type Activity = z.infer<typeof ActivitySchema>;
 
 /** One person's day, from midnight to midnight, with no gaps and no overlaps. */
@@ -64,7 +87,7 @@ export const DayPlanSchema = z.strictObject({
 });
 export type DayPlan = z.infer<typeof DayPlanSchema>;
 
-/** Where a person is at a moment: in a building, or at a point on the street. */
+/** Where a person is at a moment: in a building, outside at one, or at a point on the street. */
 export const WhereaboutsSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     personId: PersonIdSchema,
@@ -72,6 +95,7 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
     kind: z.enum(['sleep', 'home', 'work', 'visit']),
     buildingId: BuildingIdSchema,
     visitId: text.optional(),
+    ...outdoors,
     /** When the current activity began and when it ends. */
     since: gameTime,
     until: gameTime,
@@ -90,11 +114,12 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
 ]);
 export type Whereabouts = z.infer<typeof WhereaboutsSchema>;
 
-/** Someone inside a building at a moment. */
+/** Someone at a building at a moment, inside it or outside on its lot. */
 export const OccupantSchema = z.strictObject({
   personId: PersonIdSchema,
   kind: z.enum(['sleep', 'home', 'work', 'visit']),
   visitId: text.optional(),
+  outside: z.literal(true).optional(),
 });
 export type Occupant = z.infer<typeof OccupantSchema>;
 
@@ -110,6 +135,22 @@ export const TripSchema = z.strictObject({
 });
 export type Trip = z.infer<typeof TripSchema>;
 
+/** One stay out of doors, whole: who, at which building, at what point, and from when until when. */
+export const OutsideStaySchema = z.strictObject({
+  personId: PersonIdSchema,
+  buildingId: BuildingIdSchema,
+  kind: z.enum(['work', 'visit']),
+  visitId: text.optional(),
+  point: PointSchema,
+  from: gameTime,
+  to: gameTime,
+});
+export type OutsideStay = z.infer<typeof OutsideStaySchema>;
+
+/** A stretch of game time during which a building is open. */
+export const OpenSpanSchema = z.strictObject({ from: gameTime, to: gameTime });
+export type OpenSpan = z.infer<typeof OpenSpanSchema>;
+
 /** A settlement's day, hour by hour. */
 export const DaySummarySchema = z.strictObject({
   day: z.int(),
@@ -123,6 +164,8 @@ export const DaySummarySchema = z.strictObject({
         atWork: z.number().nonnegative(),
         visiting: z.number().nonnegative(),
         travelling: z.number().nonnegative(),
+        /** Of those at work or visiting, how many were out of doors. */
+        outside: z.number().nonnegative(),
         tripsStarted: z.int().nonnegative(),
       }),
     )

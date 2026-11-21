@@ -5,6 +5,8 @@
 #                    minAge here stay at home.
 #   days             work, rest or any: on which kind of day the visit can happen.
 #                    For someone in the workforce a "work" day is one they work.
+#   weekdays         optional: days of the week, by their names in calendar.yaml,
+#                    to which the visit is limited
 #   probability      the chance, each day, that the person makes the visit
 #   when             after-work: on the way home from the day's work; or
 #                    {from, to}: starting at some time in that window of the day,
@@ -12,9 +14,24 @@
 #                    work, another visit or sleep does not happen.
 #   durationMinutes  how long the stop lasts, between min and max
 #   destinations     building types the visit can go to. If the settlement has
-#                    none of them, the visit does not happen.
+#                    none of them, the visit does not happen. `home` means the
+#                    person's own dwelling, which takes no walk to reach.
+#   outside          optional. true: the visitor is out of doors, at a point on
+#                    the building's lot, and can be seen on the town map. With
+#                    `home` this is the doorstep or the yard. A visit to an
+#                    open-air building type (workplaces.yaml) is outside anyway.
 #
-# All values are placeholders.
+# All values are placeholders: the ages for play and for sitting out, every
+# probability, every window and every duration are first guesses for review.
+# Ages are the same for every species, which will not suit the long-lived.
+
+# true: a visit goes only to a place that is open when the visitor arrives, and
+# ends by closing time. A place is open while someone who works there is on
+# shift (shifts.yaml), or always if its type is marked alwaysOpen. If closing
+# would cut a visit below its shortest duration the visitor tries elsewhere,
+# and if nowhere is open the visit does not happen. Left out or false, nothing
+# is ever closed.
+openingHours: true
 
 # How strongly nearer destinations are favoured: 1 is no preference, 2 means
 # the nearest quarter is chosen half the time, and so on.
@@ -56,3 +73,68 @@ visits:
     when: {from: "10:00", to: "15:00"}
     durationMinutes: {min: 20, max: 60}
     destinations: [market-stall, market-square, general-shop, chapel, healers-house]
+
+  # --- Evenings and rest days
+
+  - id: tavern-evening
+    name: An evening at the tavern
+    who: {states: [working, keeping-house, not-working], minAge: 16}
+    days: any
+    probability: 0.15
+    when: {from: "19:00", to: "21:00"}
+    durationMinutes: {min: 30, max: 120}
+    destinations: [tavern]
+
+  - id: square
+    name: An afternoon at the square
+    who: {states: [working, keeping-house, not-working], minAge: 13}
+    days: rest
+    probability: 0.3
+    when: {from: "13:00", to: "16:00"}
+    durationMinutes: {min: 30, max: 90}
+    destinations: [market-square]
+
+  # The week's big market: more people at the stalls and the square.
+  - id: marketday
+    name: Marketday
+    who: {states: [keeping-house, not-working], minAge: 13}
+    days: any
+    weekdays: [Marketday]
+    probability: 0.5
+    when: {from: "13:00", to: "16:00"}
+    durationMinutes: {min: 30, max: 90}
+    destinations: [market-stall, market-square]
+
+  # --- Outside one's own home
+
+  # Children of playing age. Younger children stay indoors.
+  - id: play-morning
+    name: Playing outside
+    who: {states: [not-working], minAge: 5, maxAge: 12}
+    days: any
+    probability: 0.7
+    when: {from: "09:00", to: "11:00"}
+    durationMinutes: {min: 45, max: 120}
+    destinations: [home]
+    outside: true
+
+  - id: play-afternoon
+    name: Playing outside
+    who: {states: [not-working], minAge: 5, maxAge: 12}
+    days: any
+    probability: 0.7
+    when: {from: "14:00", to: "16:00"}
+    durationMinutes: {min: 60, max: 150}
+    destinations: [home]
+    outside: true
+
+  # Elders on the doorstep in the early evening.
+  - id: doorstep
+    name: Sitting outside
+    who: {states: [not-working], minAge: 60}
+    days: any
+    probability: 0.5
+    when: {from: "17:30", to: "19:00"}
+    durationMinutes: {min: 30, max: 90}
+    destinations: [home]
+    outside: true

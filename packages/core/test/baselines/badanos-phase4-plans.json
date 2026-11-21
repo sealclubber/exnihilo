@@ -1,0 +1,8 @@
+{
+  "note": "Fingerprints of every Badanos resident's plan under the phase 4 pack (0.4.0), default seed. A pack with none of the phase 4.5 fields must still give exactly these.",
+  "settlement": "settlement-641",
+  "planHash": {
+    "1": "cd1ec0eaf882358602dfca3a3281064abde4304e34e723bcb5ea6a783a66055d",
+    "7": "6ae54879ca229f7d63916508dd1faffd10c534668efb4d9b531522e7186bd7c9"
+  }
+}

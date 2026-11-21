@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.4.0');
+    expect(pack.pack.version).toBe('0.5.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -157,10 +157,11 @@ describe('the medieval pack', () => {
     const shiftFor = (id: string) => allOccupations(pack).find((occupation) => occupation.id === id)!.shift;
     expect(shiftFor('baker')).toBe('early');
     expect(shiftFor('tavern-keeper')).toBe('evening');
-    expect(shiftFor('watchman')).toBe('night');
+    expect(shiftFor('watchman')).toEqual([{ shift: 'watch-day', share: 0.5 }, { shift: 'night', share: 0.5 }]);
     expect(shiftFor('tanner')).toBeUndefined();
     // Rest-day duty for the watch, the taverns and the clergy.
-    for (const id of ['watchman', 'tavern-keeper', 'tapster', 'priest']) expect(shifts[shiftFor(id)!]!.restDays, id).toBe(true);
+    for (const id of ['tavern-keeper', 'tapster', 'priest']) expect(shifts[shiftFor(id) as string]!.restDays, id).toBe(true);
+    for (const id of ['watch-day', 'night']) expect(shifts[id]!.restDays, id).toBe(true);
 
     const visits = Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit]));
     expect(visits.market).toMatchObject({ who: { states: ['keeping-house'] }, when: { from: 8 * 3600, to: 12 * 3600 } });
@@ -262,6 +263,11 @@ describe('pack validation', () => {
     ['a shift too long to sleep around', (raw) => Object.assign(raw.shifts.shifts.day, { start: '04:00', end: '23:00' }), /shifts: "day" is too long for the species "human"/],
     ['a default shift that is not defined', (raw) => (raw.shifts.default = 'dawn'), /shifts: the default shift "dawn" is not defined/],
     ['an occupation on a shift that is not defined', (raw) => (raw.occupations[0].shift = 'dawn'), /occupations: "baker" names the shift "dawn", which shifts does not define/],
+    ['shift shares that do not add up to 1', (raw) => (raw.occupations.find((entry: any) => entry.id === 'watchman').shift = [{ shift: 'watch-day', share: 0.5 }, { shift: 'night', share: 0.4 }]), /occupations: "watchman" has shift shares that add up to 0\.9, not 1/],
+    ['a split that lists a shift twice', (raw) => (raw.occupations[0].shift = [{ shift: 'day', share: 0.5 }, { shift: 'day', share: 0.5 }]), /occupations: "baker" lists the shift "day" more than once/],
+    ['a split naming a shift that is not defined', (raw) => (raw.occupations[0].shift = [{ shift: 'day', share: 0.5 }, { shift: 'dusk', share: 0.5 }]), /occupations: "baker" names the shift "dusk", which shifts does not define/],
+    ['a visit naming a weekday the calendar lacks', (raw) => (raw.visits.visits[0].weekdays = ['Marketday', 'Caturday']), /visits: "market" names the weekday "Caturday", which the calendar does not have/],
+    ['a building type called home', (raw) => (raw.workplaces[0].id = 'home'), /a building type is called "home"/],
     ['a time of day that is not one', (raw) => (raw.shifts.shifts.day.start = '8am'), /^shifts at shifts\.day\.start: must be a time of day/],
     ['a visit naming a missing building type', (raw) => raw.visits.visits[0].destinations.push('bazaar'), /visits: "market" names the building type "bazaar", which does not exist/],
     ['a visit with its durations the wrong way round', (raw) => (raw.visits.visits[0].durationMinutes = { min: 60, max: 20 }), /visits: "market" has a shortest duration above its longest/],

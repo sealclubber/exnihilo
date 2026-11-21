@@ -15,6 +15,7 @@ const {
   exactBearing,
   piecesCross,
   pointAlongPolyline,
+  pointWithinPolygon,
   pointInPolygon,
   polygonArea,
   polygonCentroid,
@@ -150,6 +151,35 @@ describe('points in polygons', () => {
     expect(strictlyInside([13, 1], pentagon)).toBe(false);
     expect(strictlyInside([5, 20], ell)).toBe(true);
     expect(strictlyInside([20, 20], ell)).toBe(false);
+  });
+});
+
+describe('a point within a polygon', () => {
+  const draws = (values: number[]) => {
+    let next = 0;
+    return () => values[next++ % values.length] as number;
+  };
+  const square: Point[] = [[0, 0], [10, 0], [10, 10], [0, 10]];
+  // An L: the bounding box's upper right quarter is outside it.
+  const bent: Point[] = [[0, 0], [4, 0], [4, 6], [10, 6], [10, 10], [0, 10]];
+
+  it('is where the draws put it when that is inside', () => {
+    expect(pointWithinPolygon(square, draws([0.25, 0.5]), 4)).toEqual([2.5, 5]);
+  });
+
+  it('is still inside when every draw misses', () => {
+    // Each try lands in the corner the L leaves out.
+    const point = pointWithinPolygon(bent, draws([0.9, 0.1]), 3);
+    expect(strictlyInside(point, bent)).toBe(true);
+    expect(strictlyInside(pointWithinPolygon(bent, draws([0.9, 0.1]), 0), bent)).toBe(true);
+  });
+
+  it('is the same for the same draws', () => {
+    expect(pointWithinPolygon(bent, draws([0.3, 0.9, 0.1]), 2)).toEqual(pointWithinPolygon(bent, draws([0.3, 0.9, 0.1]), 2));
+  });
+
+  it('refuses a polygon with no area', () => {
+    expect(() => pointWithinPolygon([[0, 0], [5, 0], [9, 0]], draws([0.5]), 2)).toThrow(/no area/);
   });
 });
 
