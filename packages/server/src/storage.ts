@@ -114,10 +114,22 @@ export class WorldStore {
     return typeof stored.gameTime === 'number' && typeof stored.rate === 'number' ? { gameTime: stored.gameTime, rate: stored.rate } : undefined;
   }
 
-  /** Stores the world clock. It is the only state kept besides the imported world. */
+  /** Stores the world clock. With the avatar, it is the only state kept besides the imported world. */
   saveClock(clock: { gameTime: number; rate: number }): void {
     this.requireWorld();
     this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run('clock', JSON.stringify(clock));
+  }
+
+  /** The avatar's state as last stored, unchecked; nothing if it was never spawned. Importing a world clears it. */
+  loadAvatar(): unknown {
+    const text = this.meta('avatar');
+    return text === undefined ? undefined : JSON.parse(text);
+  }
+
+  /** Stores the avatar's state. */
+  saveAvatar(avatar: unknown): void {
+    this.requireWorld();
+    this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run('avatar', JSON.stringify(avatar));
   }
 
   /** Every stored row as text, in a fixed order. Two stores with equal dumps hold identical data. */

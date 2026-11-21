@@ -4,6 +4,7 @@
  */
 import { PackError } from '@worldsim/core';
 import { buildApp } from './app.ts';
+import { AvatarKeeper } from './avatar.ts';
 import { WorldClock } from './clock.ts';
 import { packPathFromEnv, storePathFromEnv } from './config.ts';
 import { loadPack } from './pack-loader.ts';
@@ -29,11 +30,16 @@ try {
     save: (state) => store.saveClock(state),
   });
 
-  const app = buildApp(world, report, pack, { clock });
+  // The avatar is written to the store whenever it changes, and restored here.
+  const avatar = new AvatarKeeper({ stored: store.loadAvatar(), save: (state) => store.saveAvatar(state) });
+
+  const app = buildApp(world, report, pack, { clock, avatar });
   await app.listen({ host, port });
   console.log(`Serving ${world.info.name} (${world.settlements.length} settlements) from ${storePath}`);
   console.log(`Setting pack ${pack.pack.name} ${pack.pack.version} from ${packPath}`);
   console.log(`The clock is paused at game time ${Math.floor(clock.read().gameTime)}, rate ${clock.read().rate}`);
+  const present = avatar.read();
+  console.log(present ? `The avatar is in ${present.settlementId}` : 'There is no avatar yet');
   console.log(`API at http://${host}:${port}/api/world`);
 
   let stopping = false;

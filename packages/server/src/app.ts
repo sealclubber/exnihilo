@@ -1,10 +1,21 @@
 /**
- * The HTTP API. Read-only: the server owns the world and the browser views it.
+ * The HTTP API. The server owns the world and the browser views it; the only
+ * things a browser can change are the clock and the avatar.
  */
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import {
   type ApiError,
+  type AvatarPerception,
+  type AvatarReport,
+  type AvatarState,
+  AvatarError,
+  leaveBuilding,
+  perceive,
+  spawnAvatar,
+  stopAvatar,
+  walkToBuilding,
+  walkToPoint,
   type HouseholdNow,
   LayoutPathError,
   LifeError,
@@ -21,6 +32,7 @@ import {
   packLabels,
 } from '@worldsim/core';
 import { type CityFilters, type CityView, type PageRequest, CityCache, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './cities.ts';
+import { AvatarKeeper } from './avatar.ts';
 import { ClockError, WorldClock } from './clock.ts';
 import { mapGeometry, settlementList, worldSummary } from './views.ts';
 
@@ -63,6 +75,8 @@ function filtersOf(query: Query): CityFilters {
 export interface AppOptions {
   /** The world clock. Left out, a clock of its own is made that starts paused at day 1 and is not stored. */
   clock?: WorldClock;
+  /** The avatar. Left out, there is none until one is spawned, and it is not stored. */
+  avatar?: AvatarKeeper;
 }
 
 /** The longest window of game time one request for trips may cover. */
@@ -120,6 +134,95 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     scope.get('/api/clock/stream', { websocket: true }, (socket) => {
       socket.send(JSON.stringify(clock.read()));
       const stop = clock.subscribe((state) => socket.send(JSON.stringify(state)));
+      socket.on('close', stop);
+    });
+  });
+
+  // ---- The avatar ---------------------------------------------------------------------
+  // The avatar is never stepped: the server keeps its state and the viewer is sent that state,
+  // a resting place or a trip, and works out the position itself as it does for residents.
+  const avatar = options.avatar ?? new AvatarKeeper();
+  const reportAvatar = (): AvatarReport => ({ avatar: avatar.read() ?? null });
+  const NO_AVATAR = 'there is no avatar yet: spawn one first, with POST /api/avatar/spawn';
+  app.get('/api/avatar', (_request, reply) => reply.send(reportAvatar()));
+  const pointOf = (value: unknown): [number, number] | undefined =>
+    Array.isArray(value) && value.length === 2 && value.every((part) => typeof part === 'number' && Number.isFinite(part)) ? [value[0] as number, value[1] as number] : undefined;
+  /** An action on the avatar: given what was posted and the game time, the new state, or a message saying what was wrong with the request. */
+  const act = (path: string, change: (body: Record<string, unknown>, time: number) => AvatarState | string) => {
+    app.post<{ Body: unknown }>(`/api/avatar/${path}`, (request, reply) => {
+      try {
+        const body = typeof request.body === 'object' && request.body !== null ? (request.body as Record<string, unknown>) : {};
+        const result = change(body, clock.read().gameTime);
+        if (typeof result === 'string') return send(reply, 400, result);
+        avatar.set(result);
+        return reply.send(reportAvatar());
+      } catch (error) {
+        // An action that makes no sense as things stand is refused, with the reason.
+        if (error instanceof AvatarError) return send(reply, 409, error.message);
+        throw error;
+      }
+    });
+  };
+  /** An action that needs an avatar to act on, and the town it is in. */
+  const actOn = (path: string, change: (state: AvatarState, view: CityView, body: Record<string, unknown>, time: number) => AvatarState | string) => {
+    act(path, (body, time) => {
+      const state = avatar.read();
+      if (!state) throw new AvatarError(NO_AVATAR);
+      return change(state, cities.get(briefs.get(state.settlementId) as SettlementBrief), body, time);
+    });
+  };
+  act('spawn', (body) => {
+    const brief = typeof body.settlementId === 'string' ? briefs.get(body.settlementId) : undefined;
+    if (!brief) return `spawning needs a settlementId that exists; "${String(body.settlementId)}" does not`;
+    const point = pointOf(body.point);
+    if (!point) return 'spawning needs a point: [x, y] in metres on the town map';
+    return spawnAvatar(cities.get(brief).avatarTown, point);
+  });
+  actOn('walk-to-point', (state, view, body, time) => {
+    const point = pointOf(body.point);
+    if (!point) return 'walking to a street point needs a point: [x, y] in metres on the town map';
+    return walkToPoint(state, view.avatarTown, point, time, pack.avatar.walkingSpeed);
+  });
+  actOn('walk-to-building', (state, view, body, time) => {
+    if (typeof body.buildingId !== 'string') return 'walking to a building needs a buildingId';
+    return walkToBuilding(state, view.avatarTown, body.buildingId, time, pack.avatar.walkingSpeed);
+  });
+  actOn('stop', (state, _view, _body, time) => stopAvatar(state, time));
+  actOn('leave', (state, view, _body, time) => leaveBuilding(state, view.avatarTown, time));
+  app.get<{ Querystring: Query }>('/api/avatar/perception', (request, reply) => {
+    const state = avatar.read();
+    if (!state) return send(reply, 409, NO_AVATAR);
+    const time = numberOf(request.query, 'time', clock.read().gameTime);
+    if (typeof time === 'string') return send(reply, 400, time);
+    const view = cities.get(briefs.get(state.settlementId) as SettlementBrief);
+    const seen = perceive(state, view.life, pack.avatar.perceptionRadius, time);
+    const { settlementId } = state;
+    const body: AvatarPerception =
+      seen.where === 'building'
+        ? {
+            where: 'building',
+            time,
+            settlementId,
+            buildingId: seen.buildingId,
+            buildingType: view.buildingTypes([seen.buildingId])[seen.buildingId] as string,
+            occupants: seen.occupants.map((occupant) => ({ ...occupant, person: view.person(occupant.personId)! })),
+          }
+        : {
+            where: 'street',
+            time,
+            settlementId,
+            point: seen.point,
+            radius: seen.radius,
+            nearby: seen.nearby.map((entry) => ({ ...entry, person: view.person(entry.personId)! })),
+            buildings: view.buildingTypes(seen.nearby.flatMap((entry) => (entry.kind === 'walking' ? [entry.fromBuildingId, entry.toBuildingId] : [entry.buildingId]))),
+          };
+    return reply.send(body);
+  });
+  // Viewers hear of avatar changes the way they hear of clock changes.
+  void app.register(async (scope) => {
+    scope.get('/api/avatar/stream', { websocket: true }, (socket) => {
+      socket.send(JSON.stringify(reportAvatar()));
+      const stop = avatar.subscribe(() => socket.send(JSON.stringify(reportAvatar())));
       socket.on('close', stop);
     });
   });

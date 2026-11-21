@@ -2,7 +2,8 @@
  * Shapes of the server's HTTP responses, shared so the client can type them.
  */
 import type { Building, District, Household, Person } from './city/records.ts';
-import type { DayPlan, Occupant, OpenSpan, OutsideStay, Trip, Whereabouts } from './life/records.ts';
+import type { AvatarState } from './avatar/records.ts';
+import type { DayPlan, Nearby, Occupant, OpenSpan, OutsideStay, Trip, Whereabouts } from './life/records.ts';
 import type { AvatarSettings, Calendar } from './pack/schema.ts';
 import type { CategoryId } from './pack/schema.ts';
 import type { ImportReport, Point, RouteKind, SizeGroup, WorldInfo } from './schema.ts';
@@ -150,6 +151,34 @@ export interface OccupantsNow {
   hours: OpenSpan[];
   occupants: Array<Occupant & { person: Person }>;
 }
+
+/** The avatar as the server reports it: its state, or nothing until it has been spawned. */
+export interface AvatarReport {
+  avatar: AvatarState | null;
+}
+
+/** What the avatar perceives at a moment, with who each person is. */
+export type AvatarPerception =
+  | {
+      where: 'street';
+      time: number;
+      settlementId: string;
+      point: Point;
+      radius: number;
+      /** Residents walking or out of doors within the radius, nearest first. */
+      nearby: Array<Nearby & { person: Person }>;
+      /** The type of each building the answer names, by building ID. */
+      buildings: Record<string, string>;
+    }
+  | {
+      where: 'building';
+      time: number;
+      settlementId: string;
+      buildingId: string;
+      buildingType: string;
+      /** Everyone at the building, inside it or outside on its lot. */
+      occupants: Array<Occupant & { person: Person }>;
+    };
 
 /** What each member of a household is doing at a moment. */
 export interface HouseholdNow {

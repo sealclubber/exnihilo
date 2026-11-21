@@ -17,11 +17,13 @@ import {
   type LayoutPath,
   type Page,
   type PathFinder,
+  type AvatarTown,
   type SettlementLife,
   type Person,
   type SettingPack,
   type SettlementBrief,
   allOccupations,
+  avatarTown,
   createLife,
   createPathFinder,
   generateCity,
@@ -65,6 +67,7 @@ export class CityView {
   private madeLayout: Layout | undefined;
   private pathFinder: PathFinder | undefined;
   private livedLife: SettlementLife | undefined;
+  private townForAvatar: AvatarTown | undefined;
 
   constructor(city: City, pack: SettingPack, brief: SettlementBrief) {
     this.city = city;
@@ -115,8 +118,16 @@ export class CityView {
 
   /** The shortest walking path between two lots. Throws LayoutPathError for a lot that does not exist. */
   path(fromLotId: string, toLotId: string): LayoutPath {
-    this.pathFinder ??= createPathFinder(this.layout);
-    return this.pathFinder.path(fromLotId, toLotId);
+    return this.finder.path(fromLotId, toLotId);
+  }
+
+  private get finder(): PathFinder {
+    return (this.pathFinder ??= createPathFinder(this.layout));
+  }
+
+  /** What the avatar's actions need to know of this town. */
+  get avatarTown(): AvatarTown {
+    return (this.townForAvatar ??= avatarTown(this.city, this.layout, this.finder));
   }
 
   private districtOfHousehold(household: Household): string {
