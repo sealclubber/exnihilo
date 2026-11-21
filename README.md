@@ -97,12 +97,12 @@ with Ctrl-C so the clock is stored on the way out.
 | `POST /api/clock/rate` with `{"rate": 30}` | Sets the rate, in game seconds per real second, to one of the pack's presets |
 | `POST /api/clock/time` with `{"gameTime": 86400}` | Sets the game time, forward or back |
 | WebSocket `/api/clock/stream` | The clock's state on connecting, then again after every change |
-| `GET .../life/trips?from=&to=` | The trips under way in a window of game time, optionally only those through a region (`minX`, `minY`, `maxX`, `maxY`) |
+| `GET .../life/trips?from=&to=` | Everyone who can be seen in a window of game time: the trips under way, and the stays out of doors (who, where, from when, until when). Optionally only those in a region (`minX`, `minY`, `maxX`, `maxY`) |
 | `GET .../life/people/<id>/plan?day=` | A person's plan for a day, by default the clock's day |
 | `GET .../life/people/<id>/now` | Where a person is and what they are doing |
-| `GET .../life/buildings/<id>/occupants` | Who is inside a building |
+| `GET .../life/buildings/<id>/occupants` | Who is at a building, inside or outside on its lot, whether it is open, and its hours that day |
 | `GET .../life/households/<id>/now` | What each member of a household is doing |
-| `GET .../life/summary?day=` | A day hour by hour: people asleep, at home, at work, visiting and travelling |
+| `GET .../life/summary?day=` | A day hour by hour: people asleep, at home, at work, visiting, travelling, and out of doors |
 
 "Now" is the clock's game time unless the request gives `time=`. The server
 sends trips, not positions: the viewer moves each dot along its trip's line by
@@ -157,11 +157,14 @@ it is a rest day, and the time, with the map darkened at night. **Run** and
 **Pause** start and stop it; the rate buttons set how fast game time passes
 (1× is real time, 30× is a game day in 48 real minutes, 3,600× a game day in
 24 real seconds); **Morning**, **Midday** and **Evening** jump to the next
-sunrise, midday or sunset. Residents out on the streets are moving dots, with
-a count of how many there are. Clicking a dot opens that person: who they are,
-what they are doing now, and today's plan as a timeline, with **Follow on the
-map** to keep the map centred on them. Clicking a lot also shows who is inside
-now, and the household view shows what each member is doing now.
+sunrise, midday or sunset. Residents who are walking somewhere are dark moving
+dots. Residents who are out of doors at a place, such as a market stall, a
+yard or their own doorstep, are smaller brown dots that stay where they are.
+The corner of the map counts the two apart. Clicking either kind of dot opens
+that person: who they are, what they are doing now, and today's plan as a
+timeline, with **Follow on the map** to keep the map centred on them. Clicking
+a lot also shows who is there now, whether the building is open and its hours
+that day, and the household view shows what each member is doing now.
 
 The viewer looks for the API on port 3001 of the host it was loaded from. If
 the server is somewhere else, say where when starting the viewer:
@@ -199,8 +202,8 @@ npm run day -- settlement-641 --day 2
 ```
 
 This prints the day as text: for each hour the average number of people
-asleep, at home, at work, visiting and travelling, the trips begun, and the
-busiest street segments. `--day` defaults to 1; `--db` and `--pack` choose the
+asleep, at home, at work, visiting, travelling and out of doors, the trips
+begun, and the busiest street segments. `--day` defaults to 1; `--db` and `--pack` choose the
 world file and the pack. Nothing is stored.
 
 ## The setting pack
@@ -214,15 +217,15 @@ numbers.
 | `pack.yaml` | The pack's name and version, the status tiers, the apprentice age and label, and a few household settings |
 | `calendar.yaml` | The days of the week and which are rest days, the days in a year, sunrise and sunset |
 | `time.yaml` | The clock's rate presets and the default rate |
-| `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default |
-| `visits.yaml` | Each kind of visit: who makes it, on which days, how likely, when, for how long, and to which building types |
+| `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default. Shifts also decide when each building is open |
+| `visits.yaml` | Whether places keep opening hours (`openingHours`), and each kind of visit: who makes it, on which days and `weekdays`, how likely, when, for how long, to which building types or to `home`, and whether it is spent `outside` |
 | `categories.yaml` | The seven workforce categories and their base shares |
 | `modifiers.yaml` | Multipliers on category shares by size group and condition |
-| `occupations.yaml` | Every job: category, workplace or employer, weight, status, specialty tags, minimum population, who may hold it (`minAge`, `maxAge`, `sexes`, `apprenticeUntil`), and its `shift` |
+| `occupations.yaml` | Every job: category, workplace or employer, weight, status, specialty tags, minimum population, who may hold it (`minAge`, `maxAge`, `sexes`, `apprenticeUntil`), and its `shift`, which may be a list that splits the job across shifts by share |
 | `specialties.yaml` | How specialty tags fill the trade category, and which tags are ignored |
-| `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district |
+| `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district, and whether it is `openAir` or `alwaysOpen` |
 | `dwellings.yaml` | Housing types by status tier |
-| `landmarks.yaml` | The buildings and fixed posts that flags and status add |
+| `landmarks.yaml` | The buildings and fixed posts that flags and status add, with the same `openAir` and `alwaysOpen` flags |
 | `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations) |
 | `cultures.yaml` | Which species each culture belongs to |
 | `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside |
@@ -328,16 +331,37 @@ personal day depends only on the person and its number and always begins and
 ends asleep at home, so days join without a seam; a calendar day's plan is the
 midnight-to-midnight slice across the personal days that overlap it.
 
-- **Work.** Everyone in the workforce works their occupation's shift on work
-  days, arriving at its start give or take a personal habit (the same every
-  day) and a smaller daily variation. On rest days only shifts marked as
-  worked on rest days are worked, by the share of each occupation the shift
-  gives, taking turns. Someone whose workplace is their own home has no
-  commute.
+- **Work.** Everyone in the workforce works their shift on work days,
+  arriving at its start give or take a personal habit (the same every day)
+  and a smaller daily variation. On rest days only shifts marked as worked on
+  rest days are worked, by the share the shift gives, taking turns. Someone
+  whose workplace is their own home has no commute.
+- **Split shifts.** An occupation can be split across several shifts by
+  share, as the watch is between day and night. Within a settlement the
+  shares are met exactly by the largest-remainder method; who gets which
+  shift is drawn from the seed, and a worker keeps theirs every day. Those
+  who share an occupation and a shift take their rest-day turns together.
+- **Opening hours.** A building is open at a moment when at least one of the
+  people who work there is on shift then, by the shift's own hours and
+  rest-day duty. Openness never looks at anyone's plan, so it too is a pure
+  function of game time and no plan depends on another. A building type
+  marked `alwaysOpen` never closes. With `openingHours: true` in
+  `visits.yaml`, a visit goes only to a place that is open when the visitor
+  arrives and ends by closing time; if closing would cut it below its
+  shortest duration the visitor tries elsewhere, and failing that stays home.
 - **Visits** come from the pack: a market stop for those keeping house, a
-  drink after work, worship on rest days, errands. A destination is chosen
-  among buildings of an allowed type, favouring nearer ones; with none in the
-  settlement, the visit does not happen.
+  drink after work or in the evening, worship and the square on rest days,
+  errands, the Marketday market. A destination is chosen among buildings of
+  an allowed type, favouring nearer ones; with none in the settlement, the
+  visit does not happen. A visit can be limited to named `weekdays`. The
+  destination `home` is the person's own dwelling, reached without a walk.
+- **Being outside.** A stay at work or on a visit is either inside or
+  outside. It is outside when the building's type is marked `openAir` or the
+  visit is marked `outside`: stallholders and yard workers, people at the
+  market, children playing by their home, elders on the doorstep. An outside
+  stay has a point inside the building's lot, derived from the person, the
+  building and when the stay begins, which does not move during the stay.
+  Sleep and time at home are always indoors.
 - **Sleep** is at home, at the species' usual hours, moved but not shortened
   to fit the shift: the night watch sleeps by day.
 - **Trips** follow the path function between two lots' entrances and take the
@@ -345,8 +369,41 @@ midnight-to-midnight slice across the personal days that overlap it.
 
 The queries, all on the object `createLife({ city, layout, pack })` returns:
 `plan(personId, day)`, `whereabouts(personId, time)`, `occupants(buildingId,
-time)`, `trips(from, to, region?)`, `daySummary(day)` and `segmentLoads(day)`.
-Every rule a plan must satisfy is in `life/invariants.ts`.
+time)`, `trips(from, to, region?)`, `outsideStays(from, to, region?)`,
+`isOpen(buildingId, time)`, `openingHours(buildingId, day)`,
+`shiftOf(personId)`, `daySummary(day)` and `segmentLoads(day)`. Every rule a
+plan must satisfy is in `life/invariants.ts`. Shifts, rest-day duty and
+opening hours are in `life/hours.ts`.
+
+Daily life has its own `LIFE_VERSION`, now 2, in `life/records.ts`. A pack
+with none of the phase 4.5 fields (`openingHours`, `openAir`, `alwaysOpen`,
+`outside`, `weekdays`, `home`, split shifts) gives exactly the plans of
+version 1; a test holds a fingerprint of Badanos's phase 4 plans to prove it.
+
+**What phase 4.5 changed in Badanos** (default seed; day 1 is a work day, day 7
+the rest day):
+
+| Measure | Phase 4 | Phase 4.5 |
+| --- | --- | --- |
+| Visits arriving at a closed place, over a week | Present | 0 |
+| Watchmen at work at 12:30 on a work day | 0 of 97 | 49 |
+| Watchmen at work at 03:00 after a work day | 97 of 97 | 48 |
+| People on a visit at 20:30 on a work day | 0 | 483, all in open taverns |
+| Children outside at 15:00 on a work day | 0 | 460 |
+| Anyone outside at 00:00 to 04:00 | n/a | 0 |
+| People to be seen at 12:30 on a work day | 31 walking | 31 walking and 1,000 outside |
+| Market visits on the rest day | 872, to closed stalls | 0: Badanos has no market square, and its stalls and shops rest |
+| Trips begun on day 1 | 10,166 | 11,620 |
+
+Most of the 1,000 outside at 12:30 are at work in the open-air yards and at
+the 38 market stalls (938); the rest are at market, on errands or playing.
+
+Two things the opening-hours rule does that may surprise. A tavern whose
+keeper's household employs a day servant is open from 08:00, because the
+servant works in that building and is on shift. And the day watch (06:00 to
+18:00) and the night watch (22:00 to 06:00) leave the watch houses to the
+sergeants and gaolers from 18:00 to 22:00. Both follow from the pack's
+placeholder shifts and can be changed there.
 
 The module reads the layout format and uses the path function, and nothing
 from the layout generator.
@@ -380,7 +437,9 @@ built by hand), `layout-geometry.test.ts`, `layout.test.ts` (the generator and
 the path function on single settlements) and `lomia-cities.test.ts`; phase 4's
 are in `calendar.test.ts`, `life.test.ts` (plans, whereabouts, behaviour,
 determinism, pack edits and cost) and, in the server and client packages,
-`clock.test.ts` and `life-api.test.ts`.
+`clock.test.ts` and `life-api.test.ts`; phase 4.5's are in
+`life-places.test.ts` (split shifts, opening hours, being outside, home
+visits, weekdays and pack behaviour) and `baselines/badanos-phase4-plans.json`.
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
 and checks every invariant on each. With generator version 2 it takes about 9
@@ -392,14 +451,19 @@ Laying out all 682 settlements, 526,006 lots, takes about 5 seconds more,
 again including the generator's own check of every layout invariant. No
 settlement takes longer than 0.1 seconds; Pombal's 8,413 lots take about that.
 
-Planning one day for all 9,607 residents of Badanos takes about 0.12 seconds,
-against a target of 3. Pombal's 47,603 residents take about 1.1 seconds for
-the first day, which includes preparing the path tables for its layout, and
-about 0.3 seconds for each day after. Planning one day for every one of
-Lomia's 2,935,089 residents takes about 28 seconds.
+Planning one day for all 9,607 residents of Badanos takes about 0.2 seconds,
+against a target of 1; it was about 0.12 before phase 4.5, which added some
+4,800 visits a day and the opening-hours checks. Pombal's 47,603 residents
+take about 2.5 seconds for the first day, which includes preparing the path
+tables for its layout, and about 0.8 seconds for each day after. Planning one
+day for every one of Lomia's 2,935,089 residents takes about 49 seconds, and
+every plan of a work day and a rest day in all 682 settlements passes every
+plan rule.
 
-One of the gameplan's behaviour thresholds does not hold everywhere. At 03:00
-at least 95% of residents are asleep at home in 666 of the 682 settlements,
-Badanos and Vereceldo among them; in the 16 forts the figure is about 90%,
-because the night watch, which is at work then, is a tenth of a fort's
-people. The test checks Badanos and Vereceldo.
+One of the phase 4 gameplan's behaviour thresholds does not quite hold
+everywhere. At 03:00 at least 95% of residents are asleep at home in 669 of
+the 682 settlements, Badanos and Vereceldo among them; in 13 of the 16 forts
+the figure is between 94.8% and 95.0%, because the night watch, which is at
+work then, is about a twentieth of a fort's people. Before the watch was
+split between day and night it was about 90%. The test checks Badanos and
+Vereceldo.

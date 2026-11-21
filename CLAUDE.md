@@ -86,10 +86,19 @@ enforce them. Do not weaken that test to make a change pass.
 15. **`core` never reads a clock.** Game time is always an argument. The
     world clock lives in `server`, and is the only state stored besides the
     imported world.
-16. **The client stays thin.** It moves dots along the trips it was sent and
-    shows a clock. It does not plan, choose or decide.
+16. **The client stays thin.** It moves dots along the trips it was sent,
+    shows the outside stays it was sent at their points, and shows a clock.
+    It does not plan, choose or decide.
 17. **`life` reads the layout format and the path function**, and nothing
     from the layout generator.
+18. **Openness comes from shifts, not plans.** A building is open when
+    someone who works there is on shift, worked out in `life/hours.ts` from
+    shifts and rest-day duty alone. One person's plan must never depend on
+    another person's plan.
+19. **Place flags live in the pack.** Code must not know which building
+    types are open-air or always open, or which visits are spent outside. An
+    outside stay's point is derived from the person, the building and the
+    stay, never remembered.
 
 ## The layout format
 
@@ -119,7 +128,12 @@ centre, x east and y south; bearings are degrees clockwise from north.
   would change, and raise the pack's `version` when the pack's data changes.
   Layouts have their own `LAYOUT_VERSION` in
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
-  inputs would change.
+  inputs would change. Daily life has its own `LIFE_VERSION` in
+  `packages/core/src/life/records.ts`, raised whenever the plans for the same
+  inputs would change. Today they are 2, 1 and 2.
+- **New pack fields are optional.** A pack without a field behaves as it did
+  before the field existed; `packages/core/test/baselines` holds the
+  fingerprints that prove it.
 - **Invariants.** Every rule a generated city must satisfy goes in
   `packages/core/src/city/invariants.ts`, and every rule a layout must satisfy
   in `packages/core/src/layout/invariants.ts`. Each generator runs them on its
