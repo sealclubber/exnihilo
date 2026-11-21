@@ -3,13 +3,15 @@
  * lots that can be clicked, a tool that shows the walking path between two
  * lots, and the residents who can be seen: those walking as moving dots, and
  * those out of doors at a place as smaller dots that stay where they are.
+ * The avatar is drawn too, with the reach of what it perceives around it.
  *
  * It draws what the layout format holds and nothing more: water, segments as
  * polylines of their own width, and lots as polygons. The dots are moved
  * along the trips the server sends, by the clock; nothing here plans or
  * decides where anyone goes.
  */
-import type { District, Layout, LayoutPath, Lot, OutsideStay, Point, Region, Trip } from '@worldsim/core';
+import type { AvatarState, District, Layout, LayoutPath, Lot, OutsideStay, Point, Region, Trip } from '@worldsim/core';
+import { avatarPlace, followScale } from './avatar.ts';
 import { tripPosition, tripWindow } from './clock.ts';
 import { describeSeen } from './town-format.ts';
 import { h } from './dom.ts';
@@ -35,6 +37,10 @@ const OUTSIDE_REACH = 4;
 const OUTSIDE_INK = '#b4530a';
 const OUTSIDE_INK_NIGHT = '#ffb86b';
 const DOT_REACH = 8;
+const AVATAR_INK = '#1d4ed8';
+const AVATAR_RADIUS = 5;
+/** The ring around a resident the avatar perceives. */
+const PERCEIVED_RING = 5.5;
 /** After a failed request for trips, how long to wait before asking again, in real milliseconds. */
 const RETRY_AFTER = 3000;
 
@@ -49,6 +55,12 @@ export interface TownMap {
   follow(person: { personId: string; buildingId?: string } | undefined): void;
   /** Call when the clock has been set or its rate changed, so the trips on hand are checked afresh. */
   clockChanged(): void;
+  /** The avatar to draw, as the server sent it, and how far it perceives; nothing if it is not in this town. */
+  setAvatar(avatar: { state: AvatarState; radius: number } | undefined): void;
+  /** The residents the avatar perceives, to be ringed on the map. */
+  setPerceived(personIds: ReadonlySet<string>): void;
+  /** Keeps the map centred on the avatar, at a zoom where a street fills the view. */
+  followAvatar(on: boolean): void;
 }
 
 export interface TownMapHandlers {
@@ -63,6 +75,13 @@ export interface TownMapHandlers {
   /** Asked for the trips under way in a window of game time that pass through a region, and the stays out of doors in it. */
   loadTrips(from: number, to: number, region: Region): Promise<{ trips: Trip[]; outside: OutsideStay[] }>;
   onPersonClick(personId: string): void;
+  /** Asked to place the avatar on the street nearest a point of the map. */
+  onSpawn(point: Point): void;
+  /** Asked to walk the avatar to the street nearest a point, or into a building. */
+  onWalkToPoint(point: Point): void;
+  onWalkToBuilding(buildingId: string): void;
+  /** Told that the map has stopped following the avatar, because the whole town was asked for. */
+  onUnfollowAvatar(): void;
 }
 
 export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): TownMap {
@@ -70,9 +89,13 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   const note = h('p', { class: 'map-note' });
   const pathButton = h('button', { attrs: { type: 'button' }, title: 'Show the shortest walking path between two lots' }, 'Path');
   const fitButton = h('button', { attrs: { type: 'button' }, title: 'Show the whole town' }, '⌂');
+  const spawnButton = h('button', { attrs: { type: 'button' }, title: 'Place your avatar: click this, then a point on the map, to stand on the nearest street' }, 'Spawn');
+  /** What a click offers when the avatar could act on it. Inspecting never moves the avatar; only these buttons do. */
+  const menu = h('div', { class: 'map-menu' });
+  menu.hidden = true;
   const pathStatus = h('span', { class: 'path-status' });
   const streetCount = h('span', { class: 'street-count', title: 'Residents who can be seen at this moment: walking somewhere, or out of doors at a place' });
-  root.replaceChildren(canvas, note, h('div', { class: 'map-tools' }, fitButton, pathButton, pathStatus), streetCount);
+  root.replaceChildren(canvas, note, h('div', { class: 'map-tools' }, fitButton, pathButton, spawnButton, pathStatus), streetCount, menu);
   const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
   /** Everything that does not move is drawn here once per change of view, then copied each frame under the dots. */
   const base = document.createElement('canvas');
@@ -102,6 +125,11 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   /** The dots drawn in the last frame, for finding the one under a click. */
   let dots: Array<{ personId: string; x: number; y: number; reach: number }> = [];
   let followed: { personId: string; buildingId?: string } | undefined;
+  let avatar: { state: AvatarState; radius: number } | undefined;
+  let perceived: ReadonlySet<string> = new Set();
+  let followingAvatar = false;
+  /** The spawn tool: on, the next click on the map places the avatar. */
+  let spawning = false;
   let lastTime: number | undefined;
   let lastLight: boolean | undefined;
 
@@ -280,6 +308,18 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       }
     }
 
+    // The avatar: on the street at a point, or in a building, shown at the middle of its lot.
+    const place = avatar && time !== undefined ? avatarPlace(avatar.state, time) : undefined;
+    const avatarAt = place ? (place.kind === 'street' ? place.point : lotCentres.get(place.buildingId)) : undefined;
+    if (followingAvatar && avatarAt) {
+      const x = size.width / 2 - avatarAt[0] * view.scale;
+      const y = size.height / 2 - avatarAt[1] * view.scale;
+      if (Math.abs(x - view.x) > 0.01 || Math.abs(y - view.y) > 0.01) {
+        view = { scale: view.scale, x, y };
+        baseStale = true;
+      }
+    }
+
     if (!baseStale && time === lastTime && light === lastLight) return;
     lastTime = time;
     lastLight = light;
@@ -332,6 +372,38 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       ctx.arc(x, y, DOT_RADIUS + 5, 0, Math.PI * 2);
       ctx.strokeStyle = '#d92d20';
       ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    // Residents the avatar perceives are ringed.
+    if (perceived.size > 0) {
+      ctx.beginPath();
+      for (const dot of dots) {
+        if (!perceived.has(dot.personId)) continue;
+        ctx.moveTo(dot.x + PERCEIVED_RING, dot.y);
+        ctx.arc(dot.x, dot.y, PERCEIVED_RING, 0, Math.PI * 2);
+      }
+      ctx.strokeStyle = AVATAR_INK;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    if (avatar && place && avatarAt) {
+      const [x, y] = toScreen(view, avatarAt);
+      if (place.kind === 'street') {
+        // How far it perceives from the street.
+        ctx.beginPath();
+        ctx.arc(x, y, avatar.radius * view.scale, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(29, 78, 216, 0.08)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(29, 78, 216, 0.55)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, AVATAR_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = place.kind === 'street' ? AVATAR_INK : '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = place.kind === 'street' ? '#ffffff' : AVATAR_INK;
+      ctx.lineWidth = place.kind === 'street' ? 2 : 3;
       ctx.stroke();
     }
   }
@@ -393,6 +465,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   }
 
   pathButton.addEventListener('click', () => {
+    setSpawning(false);
     picking = picking ? undefined : {};
     path = undefined;
     showPathStatus(picking ? 'Pick the lot to walk from.' : '');
@@ -400,12 +473,51 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   });
   fitButton.addEventListener('click', () => {
     followed = undefined;
+    if (followingAvatar) handlers.onUnfollowAvatar();
+    followingAvatar = false;
     fit();
+  });
+  const setSpawning = (on: boolean) => {
+    spawning = on;
+    spawnButton.classList.toggle('active', on);
+    canvas.style.cursor = on ? 'crosshair' : '';
+    if (on) showPathStatus('Click where you want to stand.');
+    else if (!picking) showPathStatus('');
+  };
+  spawnButton.addEventListener('click', () => {
+    picking = undefined;
+    path = undefined;
+    pathButton.classList.remove('active');
+    pathButton.textContent = 'Path';
+    setSpawning(!spawning);
+    redraw();
+  });
+  const hideMenu = () => {
+    menu.hidden = true;
+    menu.replaceChildren();
+  };
+  /** Offers, beside a click, what the avatar could do there. */
+  const offer = (x: number, y: number, choices: Array<[string, () => void]>) => {
+    if (choices.length === 0) return hideMenu();
+    menu.replaceChildren(
+      ...choices.map(([text, act]) =>
+        h('button', { attrs: { type: 'button' }, onClick: () => { hideMenu(); act(); } }, text),
+      ),
+    );
+    menu.hidden = false;
+    menu.style.left = `${Math.min(x + 8, size.width - 170)}px`;
+    menu.style.top = `${Math.min(y + 8, size.height - 34 * choices.length - 8)}px`;
+  };
+  window.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    hideMenu();
+    if (spawning) setSpawning(false);
   });
 
   let drag: { pointerId: number; lastX: number; lastY: number; travelled: number } | undefined;
   canvas.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
+    hideMenu();
     drag = { pointerId: event.pointerId, lastX: event.offsetX, lastY: event.offsetY, travelled: 0 };
     canvas.setPointerCapture(event.pointerId);
   });
@@ -426,6 +538,11 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     const wasClick = drag.travelled <= CLICK_SLOP;
     drag = undefined;
     if (!wasClick || !layout) return;
+    const point = toMap(view, event.offsetX, event.offsetY);
+    if (spawning) {
+      setSpawning(false);
+      return handlers.onSpawn(point);
+    }
     // A person on the street is picked before the lot behind them.
     if (!picking) {
       let nearest: { personId: string; away: number } | undefined;
@@ -435,10 +552,19 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       }
       if (nearest) return handlers.onPersonClick(nearest.personId);
     }
-    const lot = lotAt(layout.lots, toMap(view, event.offsetX, event.offsetY));
-    if (!lot) return;
-    if (picking) void pick(lot);
-    else handlers.onLotClick(lot);
+    const lot = lotAt(layout.lots, point);
+    if (picking) {
+      if (lot) void pick(lot);
+      return;
+    }
+    // A lot is inspected as ever. With the avatar in town, the click also offers to walk there:
+    // looking at something never moves the avatar, only choosing to does.
+    if (lot) {
+      handlers.onLotClick(lot);
+      offer(event.offsetX, event.offsetY, avatar ? [['Walk into this building', () => handlers.onWalkToBuilding(lot.buildingId)]] : []);
+    } else {
+      offer(event.offsetX, event.offsetY, [...(avatar ? [['Walk here', () => handlers.onWalkToPoint(point)] as [string, () => void]] : []), ['Spawn here', () => handlers.onSpawn(point)]]);
+    }
   });
   canvas.addEventListener('pointercancel', () => (drag = undefined));
   canvas.addEventListener(
@@ -461,6 +587,10 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       path = undefined;
       picking = undefined;
       followed = undefined;
+      avatar = undefined;
+      perceived = new Set();
+      hideMenu();
+      setSpawning(false);
       trips = undefined;
       asked++;
       dots = [];
@@ -512,6 +642,25 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     },
     follow(person) {
       followed = person ? { ...person } : undefined;
+      // The map can keep to one thing at a time.
+      if (person) followingAvatar = false;
+      redraw();
+    },
+    setAvatar(next) {
+      avatar = next;
+      lastTime = undefined;
+    },
+    setPerceived(personIds) {
+      perceived = personIds;
+      lastTime = undefined;
+    },
+    followAvatar(on) {
+      followingAvatar = on;
+      if (on) {
+        followed = undefined;
+        // Zoom once to where a street fills the view; after that only the centre is kept.
+        if (avatar && size.width > 0) view = { ...view, scale: Math.min(fitScale * 80, Math.max(view.scale, followScale(avatar.radius, size.width, size.height))) };
+      }
       redraw();
     },
     clockChanged() {

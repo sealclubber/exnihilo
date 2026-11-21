@@ -2,7 +2,7 @@
  * The city inspector: a generated city's summary, its districts, a searchable
  * list of households, and views of one household or one building.
  */
-import type { BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
+import type { AvatarPerception, AvatarState, BuildingDetail, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
 import {
   fetchBuilding,
   fetchCitySummary,
@@ -12,7 +12,12 @@ import {
   fetchHouseholdNow,
   fetchHouseholds,
   fetchLayout,
+  fetchAvatar,
   fetchOccupants,
+  fetchPerception,
+  postAvatar,
+  watchAvatar,
+  type AvatarAction,
   fetchPackLabels,
   fetchPath,
   fetchPersonNow,
@@ -39,12 +44,15 @@ import {
 import { ClockSync, clockFace } from './clock.ts';
 import { createClockBar } from './clock-bar.ts';
 import { h, link } from './dom.ts';
+import { createAroundYou } from './around-you.ts';
 import { activityWord, describeHours, describeWhereabouts, timeline } from './life-format.ts';
 import { createTownMap } from './town-map.ts';
 
 const PAGE = 100;
 const OCCUPATIONS_SHOWN = 12;
 const SEARCH_DELAY = 250;
+/** How often the viewer asks who the avatar perceives, in real milliseconds. */
+const PERCEIVE_EVERY = 1000;
 
 /** Which summary section sets which filter when one of its bars is clicked. */
 const FILTER_OF: Partial<Record<BarSection['key'], keyof HouseholdFilters>> = {
@@ -78,6 +86,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     sync.apply(state);
     clockBar.refresh();
     townMap.clockChanged();
+    perceive();
   };
   watchClock(heard);
   void fetchClock().then(heard, () => undefined);
@@ -120,7 +129,63 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     isLight: (time) => (labels ? clockFace(time, labels.calendar).isLight : true),
     loadTrips: (from, to, region) => fetchTrips(settlementId, from, to, region),
     onPersonClick: (personId) => void showPerson(personId),
+    onSpawn: (point) => act('spawn', { settlementId, point }),
+    onWalkToPoint: (point) => act('walk-to-point', { point }),
+    onWalkToBuilding: (buildingId) => act('walk-to-building', { buildingId }),
+    onUnfollowAvatar: () => aroundYou.unfollow(),
   });
+
+  // ---- The avatar -----------------------------------------------------------------------
+  // The server keeps the avatar's state and says who it perceives. The viewer is sent the state,
+  // moves the avatar along its trip by the clock, and asks about once a second who is around.
+  let avatar: AvatarState | undefined;
+  let perception: AvatarPerception | undefined;
+  let perceiving = false;
+  const avatarHere = () => (avatar !== undefined && avatar.settlementId === settlementId ? avatar : undefined);
+  const aroundYou = createAroundYou({
+    onStop: () => act('stop'),
+    onLeave: () => act('leave'),
+    onFollow: (on) => townMap.followAvatar(on),
+    onPerson: (personId) => void showPerson(personId),
+    onBuilding: (buildingId) => void showBuilding(buildingId),
+  });
+  /** Asks the server for one of the avatar's actions, and shows its reason if it refuses. */
+  function act(action: AvatarAction, body: object = {}): void {
+    aroundYou.note('');
+    postAvatar(action, body).then(
+      (report) => heardAvatar(report.avatar ?? undefined),
+      (error: Error) => aroundYou.note(error.message),
+    );
+  }
+  const showAvatar = () => {
+    if (!labels) return;
+    const here = avatarHere();
+    townMap.setAvatar(here ? { state: here, radius: labels.avatar.perceptionRadius } : undefined);
+    const seen = here && perception?.settlementId === settlementId ? perception : undefined;
+    townMap.setPerceived(new Set(seen ? (seen.where === 'street' ? seen.nearby.map((entry) => entry.personId) : seen.occupants.map((occupant) => occupant.personId)) : []));
+    aroundYou.render(avatar, here !== undefined, sync.now() ?? 0, seen, labels);
+  };
+  /** Asks who the avatar perceives now. Called about once a real second, and whenever the avatar or the clock changes. */
+  function perceive(): void {
+    if (root.hidden || !avatarHere() || perceiving) return showAvatar();
+    perceiving = true;
+    fetchPerception()
+      .then((seen) => (perception = seen), () => (perception = undefined))
+      .finally(() => {
+        perceiving = false;
+        showAvatar();
+      });
+  }
+  function heardAvatar(state: AvatarState | undefined): void {
+    avatar = state;
+    perception = undefined;
+    showAvatar();
+    perceive();
+  }
+  watchAvatar((report) => heardAvatar(report.avatar ?? undefined));
+  void fetchAvatar().then((report) => heardAvatar(report.avatar ?? undefined), () => undefined);
+  setInterval(perceive, PERCEIVE_EVERY);
+  mapBox.append(aroundYou.element);
   /** A moment in words, for saying when an answer was true. */
   const asOf = (time: number) => {
     const shown = clockFace(time, labels.calendar);
@@ -327,6 +392,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     detailBox.replaceChildren(
       h('h2', {}, buildingTypeName(building.type, labels)),
       h('p', { class: 'subtitle' }, `${buildingKindName(building.kind)} · ${districtLabel(district, labels)} · ${building.id}`),
+      ...(avatarHere() ? [h('p', { class: 'avatar-actions' }, h('button', { attrs: { type: 'button' }, title: 'Walk your avatar into this building', onClick: () => act('walk-to-building', { buildingId: building.id }) }, 'Walk here'))] : []),
       ...inside,
       h('h3', {}, `People working here (${workers.length})`),
       workers.length === 0 ? hint('Nobody works here.') : workersTable(workers),
@@ -400,6 +466,17 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       h('h3', {}, `Now, ${asOf(time)}`),
       h('p', {}, describeWhereabouts(whereabouts, buildings, labels, homeId), where ? ' · ' : '', where ? link('Show the building', () => void showBuilding(where)) : ''),
       h('p', {}, h('label', { attrs: { for: 'follow-person' } }, follow, ' Follow on the map')),
+      ...(avatarHere()
+        ? [
+            h(
+              'p',
+              { class: 'avatar-actions' },
+              h('button', { attrs: { type: 'button' }, title: 'Walk your avatar to where this person is now', onClick: () => (whereabouts.kind === 'travel' ? act('walk-to-point', { point: whereabouts.point }) : act('walk-to-building', { buildingId: whereabouts.buildingId })) }, 'Walk to them'),
+              homeId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: homeId }) }, 'Walk to their home') : '',
+              person.workplaceId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: person.workplaceId as string }) }, 'Walk to their workplace') : '',
+            ),
+          ]
+        : []),
       h('h3', {}, 'Today\'s plan'),
       h(
         'table',
@@ -466,7 +543,14 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         // The map loads beside the lists, not before them.
         townMap.message('Laying out the town…');
         void fetchLayout(id).then(
-          (layout) => settlementId === id && townMap.show(layout, districts),
+          (layout) => {
+            if (settlementId !== id) return;
+            townMap.show(layout, districts);
+            aroundYou.unfollow();
+            perception = undefined;
+            showAvatar();
+            perceive();
+          },
           (error: Error) => settlementId === id && townMap.message(error.message),
         );
         await loadHouseholds(false);

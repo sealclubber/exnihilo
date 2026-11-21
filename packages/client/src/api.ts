@@ -1,4 +1,6 @@
 import type {
+  AvatarPerception,
+  AvatarReport,
   BuildingDetail,
   CitySummary,
   ClockState,
@@ -85,12 +87,17 @@ export async function postClock(action: 'run' | 'pause' | 'rate' | 'time', body:
  * change. Reconnects if the connection drops. Returns a function that stops listening.
  */
 export function watchClock(onState: (state: ClockState) => void): () => void {
+  return watch('/api/clock/stream', onState);
+}
+
+/** Listens to one of the server's streams, reconnecting if the connection drops. Returns a function that stops listening. */
+function watch<T>(path: string, onState: (state: T) => void): () => void {
   let socket: WebSocket | undefined;
   let stopped = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
   const connect = () => {
-    socket = new WebSocket(`${API_URL.replace(/^http/, 'ws')}/api/clock/stream`);
-    socket.addEventListener('message', (event) => onState(JSON.parse(String(event.data)) as ClockState));
+    socket = new WebSocket(`${API_URL.replace(/^http/, 'ws')}${path}`);
+    socket.addEventListener('message', (event) => onState(JSON.parse(String(event.data)) as T));
     socket.addEventListener('close', () => {
       if (!stopped) retry = setTimeout(connect, 2000);
     });
@@ -118,3 +125,23 @@ export const fetchOccupants = (id: string, buildingId: string, time: number) =>
   get<OccupantsNow>(`${settlement(id)}/life/buildings/${encodeURIComponent(buildingId)}/occupants?time=${time}`);
 export const fetchHouseholdNow = (id: string, householdId: string, time: number) =>
   get<HouseholdNow>(`${settlement(id)}/life/households/${encodeURIComponent(householdId)}/now?time=${time}`);
+
+// ---- The avatar ------------------------------------------------------------------
+
+export const fetchAvatar = () => get<AvatarReport>('/api/avatar');
+export const fetchPerception = () => get<AvatarPerception>('/api/avatar/perception');
+
+export type AvatarAction = 'spawn' | 'walk-to-point' | 'walk-to-building' | 'stop' | 'leave';
+
+/** Asks the server for one of the avatar's actions. A refusal comes back as an error with the server's reason. */
+export async function postAvatar(action: AvatarAction, body: object = {}): Promise<AvatarReport> {
+  const response = await fetch(`${API_URL}/api/avatar/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const answer = (await response.json()) as AvatarReport & { error?: string };
+  if (!response.ok) throw new Error(answer.error ?? `The server answered ${response.status}`);
+  return answer;
+}
+
+/** Listens for the avatar's changes: its state on connecting, then after every change. */
+export function watchAvatar(onState: (report: AvatarReport) => void): () => void {
+  return watch('/api/avatar/stream', onState);
+}
