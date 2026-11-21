@@ -83,3 +83,14 @@ describe('following the avatar', () => {
     expect(followScale(30, 300, 600)).toBe(2);
   });
 });
+
+describe('people on rounds and on the street, as the avatar sees them', () => {
+  const buildings = { 'building-1-000002': 'tannery' };
+  it('says so when there is no building to name', () => {
+    expect(describeNearby({ personId: 'person-1-000001', distance: 4, point: [0, 0], kind: 'walking', fromBuildingId: 'building-1-000002', round: true }, buildings, labels)).toBe('On their round, walking along the street');
+    expect(describeNearby({ personId: 'person-1-000001', distance: 4, point: [0, 0], kind: 'walking', toBuildingId: 'building-1-000002', round: true }, buildings, labels)).toBe('On their round, walking to the tannery');
+    expect(describeNearby({ personId: 'person-1-000001', distance: 4, point: [0, 0], kind: 'outside', segmentId: 'segment-1-000001', activity: 'work', round: true }, buildings, labels)).toBe('On their round, stopped in the street');
+    expect(describeNearby({ personId: 'person-1-000001', distance: 4, point: [0, 0], kind: 'outside', segmentId: 'segment-1-000001', activity: 'visit', visitId: 'market' }, buildings, labels)).toBe('Going to market, in the street');
+    expect(describeNearby({ personId: 'person-1-000001', distance: 4, point: [0, 0], kind: 'walking', fromBuildingId: 'building-1-000002' }, buildings, labels)).toBe('Walking along the street');
+  });
+});

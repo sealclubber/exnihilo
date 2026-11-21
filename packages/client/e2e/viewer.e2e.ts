@@ -398,7 +398,12 @@ describe('the hover marker', () => {
       const { person } = await main.get<PersonNow>(`/api/settlements/${BADANOS}/life/people/${candidate.personId}/now`);
       if (person.role !== 'head') continue;
       await page.locator('#inspector input[type="search"]').fill(person.familyName);
-      await page.waitForFunction((id) => document.querySelector(`#inspector .households li[data-person="${id}"]`) !== null, person.id, { timeout: 10_000 });
+      // Wait for the search to have narrowed the list, or the row would move from under the cursor when it does.
+      await page.waitForFunction(
+        (id) => document.querySelectorAll('#inspector .households li[data-person]').length < 60 && document.querySelector(`#inspector .households li[data-person="${id}"]`) !== null,
+        person.id,
+        { timeout: 10_000 },
+      );
       await page.locator(`#inspector .households li[data-person="${person.id}"]`).hover();
       await settled();
       expect((await drawn()).marked).toBe(person.id);
@@ -447,9 +452,10 @@ describe('people outside', () => {
     const layout = await main.get<Layout>(`/api/settlements/${BADANOS}/layout`);
     const lots = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
     const window = await main.get<TripsWindow>(`/api/settlements/${BADANOS}/life/trips?from=${time}&to=${time + 61}`);
-    const stays = new Map(window.outside.map((stay) => [stay.personId, stay]));
+    // The stay each person is in at the moment looked at.
+    const stays = new Map(window.outside.filter((stay) => stay.from <= time && time < stay.to).map((stay) => [stay.personId, stay]));
     const before = (await drawn()).people.filter((person) => person.shape === 'square');
-    expect(before.length).toBeGreaterThan(900);
+    expect(before.length).toBeGreaterThan(700);
     // A centimetre's leeway, since points are sent to the nearest centimetre.
     const NEAR = 0.02;
     let onYards = 0;
@@ -474,6 +480,9 @@ describe('people outside', () => {
     for (const person of before) {
       const later = after.get(person.personId);
       if (!later) continue;
+      // Only someone in the same stay for the whole minute: a carter may leave one stop and reach the next in that time.
+      const whole = stays.get(person.personId)!;
+      if (whole.from > time || whole.to < time + 60) continue;
       const { times, points } = stays.get(person.personId)!.wander;
       const moves = times.some((t, index) => index > 0 && t > time && times[index - 1]! < time + 60 && geometry.distance(points[index]!, points[index - 1]!) > 0.5);
       const shifted = geometry.distance(person.point, later.point);

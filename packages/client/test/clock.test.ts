@@ -209,3 +209,31 @@ describe('moving about outside', () => {
     expect(wanderPosition({ times: [5, 5], points: [[1, 1], [2, 2]] }, 5)).toEqual([1, 1]);
   });
 });
+
+describe('rounds, strolls and the street, in words', () => {
+  const labels = { buildingTypes: { tannery: 'Tannery', cottage: 'Cottage', well: 'Well' }, visits: { play: 'Playing outside', walk: 'An evening walk' } } as unknown as PackLabels;
+  const buildings = { 'building-1-000001': 'cottage', 'building-1-000002': 'tannery', 'building-1-000003': 'well' };
+  const home = 'building-1-000001';
+  const path = { segmentIds: ['segment-1-000001'], walked: [120], length: 120, points: [[0, 0], [120, 0]] as [number, number][] };
+  const wander = { times: [0, 60], points: [[1, 2], [1, 2]] as [number, number][] };
+  const street = { segmentId: 'segment-1-000001', point: [120, 0] as [number, number] };
+
+  it('says when a walk or a stop is part of a round', () => {
+    const leg: Activity = { kind: 'travel', start: 0, end: 90, fromBuildingId: 'building-1-000002', toStreet: street, departAt: 0, arriveAt: 90, path, round: true };
+    expect(describeActivity(leg, buildings, labels, home)).toBe('On their round: walk along the street (120 m)');
+    expect(describeActivity({ ...leg, toStreet: undefined, toBuildingId: 'building-1-000003' } as Activity, buildings, labels, home)).toBe('On their round: walk to the well (120 m)');
+    expect(describeActivity({ kind: 'street', start: 0, end: 60, segmentId: 'segment-1-000001', wander, purpose: 'work', round: true }, buildings, labels, home)).toBe('On their round: a stop in the street');
+    expect(describeActivity({ kind: 'work', start: 0, end: 60, buildingId: 'building-1-000003', outside: true, wander, round: true }, buildings, labels, home)).toBe('On their round: a stop outside at the well');
+    expect(activityWord('street')).toBe('On the street');
+  });
+
+  it('says where someone is who is on a round, on a stroll or out in front of a building', () => {
+    const at = (where: object) => describeWhereabouts({ personId: 'person-1-000001', time: 0, since: 0, until: 17 * 3600 + 3 * 60, ...where } as Whereabouts, buildings, labels, home);
+    expect(at({ kind: 'travel', point: [0, 0], segmentId: 'segment-1-000001', fromBuildingId: 'building-1-000002', toStreet: street, round: true })).toBe('On their round, walking along the street, arriving at 17:03');
+    expect(at({ kind: 'street', point: [0, 0], segmentId: 'segment-1-000001', purpose: 'work', round: true })).toBe('On their round, stopped in the street, until 17:03');
+    expect(at({ kind: 'street', point: [0, 0], segmentId: 'segment-1-000001', purpose: 'visit', visitId: 'walk' })).toBe('An evening walk, pausing in the street, until 17:03');
+    expect(at({ kind: 'travel', point: [0, 0], segmentId: 'segment-1-000001', fromBuildingId: home, toStreet: street })).toBe('Walking along the street, arriving at 17:03');
+    expect(at({ kind: 'visit', buildingId: home, visitId: 'play', outside: true, onStreet: true, point: [1, 2] })).toBe('Playing outside, in the street outside their home, until 17:03');
+    expect(at({ kind: 'work', buildingId: 'building-1-000003', outside: true, point: [1, 2], round: true })).toBe('On their round, stopped outside at the well, until 17:03');
+  });
+});

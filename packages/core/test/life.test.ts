@@ -35,6 +35,7 @@ import {
   tripDuration,
   walkingSpeed,
 } from '../src/index.ts';
+import { inYardsticks } from './cost.ts';
 import { medievalPack, rawMedievalPack, settlement } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
@@ -782,14 +783,14 @@ describe('independence from the layout generator', () => {
 });
 
 describe('cost', () => {
-  it('plans one day for all 9,607 residents of Badanos in under 1 second', { timeout: SLOW }, () => {
+  it('plans one day for all 9,607 residents of Badanos within a few times a fixed piece of work timed alongside it', { timeout: SLOW }, () => {
     const { city, layout } = badanos;
-    const started = performance.now();
-    const plans = createLife({ city, layout, pack }).plansForDay(WORK_DAY);
-    const seconds = (performance.now() - started) / 1000;
-    console.log(`Planned one day for Badanos's ${plans.length.toLocaleString('en-US')} residents in ${seconds.toFixed(2)} s`);
+    let plans: DayPlan[] = [];
+    // A limit in seconds fails on a slow or busy machine, so the work is measured in yardsticks: see cost.ts.
+    const { seconds, yardsticks } = inYardsticks(() => (plans = createLife({ city, layout, pack }).plansForDay(WORK_DAY)));
+    console.log(`Planned one day for Badanos's ${plans.length.toLocaleString('en-US')} residents in ${seconds.toFixed(2)} s, ${yardsticks.toFixed(1)} yardsticks`);
     expect(plans).toHaveLength(9607);
-    expect(seconds).toBeLessThan(1);
+    expect(yardsticks).toBeLessThan(6);
   });
 
   it('plans one day for Pombal\'s 47,603 residents', { timeout: 60_000 }, () => {
