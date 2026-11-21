@@ -658,3 +658,17 @@ main {
   white-space: nowrap;
   width: 1%;
 }
+
+/* ---- Opening hours ---- */
+
+#inspector .hours {
+  font-variant-numeric: tabular-nums;
+}
+
+#inspector .hours.open {
+  color: #1f7a3d;
+}
+
+#inspector .hours.closed {
+  color: #8a5a2b;
+}

@@ -17,10 +17,11 @@ export function describeDay(life: SettlementLife, day: number, inputs: { layout:
     `${settlementName}, day ${day}: ${moment.weekdayName}${moment.isRestDay ? ', a rest day' : ''}`,
     `Sunrise ${formatTimeOfDay(pack.calendar.sunrise)}, sunset ${formatTimeOfDay(pack.calendar.sunset)}. ${summary.trips.toLocaleString('en-US')} trips begun.`,
     '',
-    'Average number of people in each state during each hour, and trips begun in it',
+    'Average number of people in each state during each hour, and trips begun in it.',
+    'Outside counts those at work or visiting who are out of doors.',
   ];
   const rows = [
-    ['Hour', 'Asleep', 'At home', 'At work', 'Visiting', 'Travelling', 'Trips begun'],
+    ['Hour', 'Asleep', 'At home', 'At work', 'Visiting', 'Travelling', 'Outside', 'Trips begun'],
     ...summary.hours.map((hour) => [
       `${String(hour.hour).padStart(2, '0')}:00`,
       whole(hour.asleep),
@@ -28,6 +29,7 @@ export function describeDay(life: SettlementLife, day: number, inputs: { layout:
       whole(hour.atWork),
       whole(hour.visiting),
       hour.travelling.toFixed(1),
+      whole(hour.outside),
       hour.tripsStarted.toLocaleString('en-US'),
     ]),
   ];

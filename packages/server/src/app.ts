@@ -211,7 +211,9 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     const region: Region | undefined = given === 4 ? { minX: minX as number, minY: minY as number, maxX: maxX as number, maxY: maxY as number } : undefined;
     // Coordinates are sent to the nearest tenth of a metre, which is plenty for a dot on a map.
     const trips = view.life.trips(from, to, region).map((trip) => ({ ...trip, length: round(trip.length), points: trip.points.map(([x, y]): [number, number] => [round(x), round(y)]) }));
-    return { from, to, trips };
+    // Stays, not positions: whoever is out of doors in the window, where, and from when until when.
+    const outside = view.life.outsideStays(from, to, region).map((stay) => ({ ...stay, point: [round(stay.point[0]), round(stay.point[1])] as [number, number] }));
+    return { from, to, trips, outside };
   });
   life('/summary', (view, query) => {
     const day = numberOf(query, 'day', dayOf(clock.read().gameTime));
@@ -235,7 +237,7 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     const time = timeOf(query);
     if (typeof time === 'string') return time;
     const occupants = view.life.occupants(record, time).map((occupant) => ({ ...occupant, person: view.person(occupant.personId)! }));
-    return { time, buildingId: record, occupants };
+    return { time, buildingId: record, open: view.life.isOpen(record, time), hours: view.life.openingHours(record, dayOf(time)), occupants };
   });
   life('/households/:record/now', (view, query, record): HouseholdNow | string => {
     const time = timeOf(query);

@@ -70,3 +70,9 @@ export function describePath(path: { length: number; segmentIds: string[] }): st
   const count = path.segmentIds.length;
   return `${formatMetres(path.length)} along ${count} ${count === 1 ? 'street segment' : 'street segments'}`;
 }
+
+/** How many people can be seen on the map: "31 walking · 1,000 outside", with "in view" when the map shows only part of the town. */
+export function describeSeen(walking: number, outside: number, wholeTown: boolean): string {
+  const count = (value: number) => value.toLocaleString('en-US');
+  return `${count(walking)} walking · ${count(outside)} outside${wholeTown ? '' : ', in view'}`;
+}

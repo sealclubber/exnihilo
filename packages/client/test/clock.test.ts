@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Activity, Calendar, ClockState, PackLabels, Trip, Whereabouts } from '@worldsim/core';
 import { ClockSync, clockFace, describeRate, formatClock, nextTimeOfDay, tripPosition, tripWindow } from '../src/clock.ts';
-import { activityWord, describeActivity, describeWhereabouts, timeline } from '../src/life-format.ts';
+import { activityWord, describeActivity, describeHours, describeWhereabouts, timeline } from '../src/life-format.ts';
+import { describeSeen } from '../src/town-format.ts';
 
 const DAY = 86_400;
 const calendar: Calendar = {
@@ -116,7 +117,7 @@ describe('moving a dot along a trip', () => {
 describe('daily life in words', () => {
   const labels = {
     buildingTypes: { tannery: 'Tannery', tavern: 'Tavern', cottage: 'Cottage' },
-    visits: { tavern: 'A drink after work' },
+    visits: { tavern: 'A drink after work', play: 'Playing outside' },
   } as unknown as PackLabels;
   const buildings = { 'building-1-000001': 'cottage', 'building-1-000002': 'tannery', 'building-1-000003': 'tavern' };
   const home = 'building-1-000001';
@@ -163,5 +164,29 @@ describe('daily life in words', () => {
     expect(at({ kind: 'visit', buildingId: 'building-1-000003', visitId: 'tavern' })).toBe('A drink after work, at the tavern, until 17:03');
     expect(at({ kind: 'travel', point: [0, 0], segmentId: 'segment-1-000001', fromBuildingId: 'building-1-000002', toBuildingId: home })).toBe('Walking home, arriving at 17:03');
     expect(at({ kind: 'travel', point: [0, 0], segmentId: 'segment-1-000001', fromBuildingId: home, toBuildingId: 'building-1-000003' })).toBe('Walking to the tavern, arriving at 17:03');
+  });
+
+  it('says when someone is out of doors, at a place or outside their own home', () => {
+    const at = (where: Partial<Whereabouts>) => describeWhereabouts({ personId: 'person-1-000001', time: 0, since: 0, until: DAY + 17 * 3600 + 3 * 60, ...where } as Whereabouts, buildings, labels, home);
+    expect(at({ kind: 'work', buildingId: 'building-1-000002', outside: true, point: [1, 2] })).toBe('At work, outside at the tannery, until 17:03');
+    expect(at({ kind: 'visit', buildingId: 'building-1-000003', visitId: 'tavern', outside: true, point: [1, 2] })).toBe('A drink after work, outside at the tavern, until 17:03');
+    expect(at({ kind: 'visit', buildingId: home, visitId: 'play', outside: true, point: [1, 2] })).toBe('Playing outside, outside their home, until 17:03');
+    expect(at({ kind: 'visit', buildingId: home, visitId: 'play' })).toBe('Playing outside, at home, until 17:03');
+    expect(describeActivity({ kind: 'work', start: 0, end: 1, buildingId: 'building-1-000002', outside: true, point: [1, 2] }, buildings, labels, home)).toBe('Work, outside at the tannery');
+    expect(describeActivity({ kind: 'visit', start: 0, end: 1, buildingId: home, visitId: 'play', outside: true, point: [1, 2] }, buildings, labels, home)).toBe('Playing outside, outside their home');
+  });
+
+  it('says whether a building is open, and its hours that day', () => {
+    expect(describeHours(true, [{ from: DAY + 15 * 3600, to: DAY + 23 * 3600 }])).toBe('Open now · today 15:00 – 23:00');
+    expect(describeHours(false, [{ from: DAY + 15 * 3600, to: DAY + 23 * 3600 }])).toBe('Closed now · today 15:00 – 23:00');
+    expect(describeHours(false, [])).toBe('Closed now · closed all day');
+    expect(describeHours(true, [{ from: DAY, to: 2 * DAY }])).toBe('Open now · open all day');
+    // A night shift seen from one day: the small hours, then the late evening up to midnight.
+    expect(describeHours(true, [{ from: DAY, to: DAY + 18 * 3600 }, { from: DAY + 22 * 3600, to: 2 * DAY }])).toBe('Open now · today 00:00 – 18:00, 22:00 – 24:00');
+  });
+
+  it('counts the people to be seen, walking and outside apart', () => {
+    expect(describeSeen(31, 1000, true)).toBe('31 walking · 1,000 outside');
+    expect(describeSeen(4, 0, false)).toBe('4 walking · 0 outside, in view');
   });
 });

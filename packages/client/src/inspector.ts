@@ -39,7 +39,7 @@ import {
 import { ClockSync, clockFace } from './clock.ts';
 import { createClockBar } from './clock-bar.ts';
 import { h, link } from './dom.ts';
-import { activityWord, describeWhereabouts, timeline } from './life-format.ts';
+import { activityWord, describeHours, describeWhereabouts, timeline } from './life-format.ts';
 import { createTownMap } from './town-map.ts';
 
 const PAGE = 100;
@@ -118,7 +118,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     now: () => sync.now(),
     rate: () => sync.current?.rate ?? 1,
     isLight: (time) => (labels ? clockFace(time, labels.calendar).isLight : true),
-    loadTrips: async (from, to, region) => (await fetchTrips(settlementId, from, to, region)).trips,
+    loadTrips: (from, to, region) => fetchTrips(settlementId, from, to, region),
     onPersonClick: (personId) => void showPerson(personId),
   });
   /** A moment in words, for saying when an answer was true. */
@@ -298,9 +298,11 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     const { building, district, workers, households } = detail;
     const inside = now
       ? [
-          h('h3', {}, `Inside now (${now.occupants.length}), ${asOf(now.time)}`),
+          // Hours are worth showing for a place someone works at or that never closes, not for a plain dwelling.
+          ...(workers.length > 0 || now.open ? [h('p', { class: now.open ? 'hours open' : 'hours closed' }, describeHours(now.open, now.hours))] : []),
+          h('h3', {}, `Here now (${now.occupants.length}), ${asOf(now.time)}`),
           now.occupants.length === 0
-            ? hint('Nobody is inside.')
+            ? hint('Nobody is here.')
             : h(
                 'table',
                 {},
@@ -314,7 +316,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
                       {},
                       h('td', {}, `${occupant.person.givenName} ${occupant.person.familyName}`),
                       h('td', { class: 'number' }, String(occupant.person.age)),
-                      h('td', {}, occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind)),
+                      h('td', {}, `${occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind)}${occupant.outside ? ' (outside)' : ''}`),
                       h('td', {}, link('Open', () => void showPerson(occupant.personId), 'Show this person\'s day')),
                     ),
                   ),

@@ -2,7 +2,7 @@
  * Shapes of the server's HTTP responses, shared so the client can type them.
  */
 import type { Building, District, Household, Person } from './city/records.ts';
-import type { DayPlan, Occupant, Trip, Whereabouts } from './life/records.ts';
+import type { DayPlan, Occupant, OpenSpan, OutsideStay, Trip, Whereabouts } from './life/records.ts';
 import type { Calendar } from './pack/schema.ts';
 import type { CategoryId } from './pack/schema.ts';
 import type { ImportReport, Point, RouteKind, SizeGroup, WorldInfo } from './schema.ts';
@@ -109,11 +109,16 @@ export interface ClockState {
   rates: number[];
 }
 
-/** The trips under way at some point in a window of game time. */
+/**
+ * Everyone who can be seen at some point in a window of game time: the trips
+ * under way, and the stays out of doors. A viewer moves a dot along each trip
+ * and shows each stay at its point from `from` until `to`.
+ */
 export interface TripsWindow {
   from: number;
   to: number;
   trips: Trip[];
+  outside: OutsideStay[];
 }
 
 /** A person at a moment: who they are and where. */
@@ -133,10 +138,14 @@ export interface PersonPlan {
   buildings: Record<string, string>;
 }
 
-/** Who is inside a building at a moment. */
+/** Who is at a building at a moment, inside or outside on its lot, and whether it is open. */
 export interface OccupantsNow {
   time: number;
   buildingId: string;
+  /** Whether the building is open at the moment: someone who works there is on shift, or it never closes. */
+  open: boolean;
+  /** The stretches of the moment's day during which it is open. */
+  hours: OpenSpan[];
   occupants: Array<Occupant & { person: Person }>;
 }
 

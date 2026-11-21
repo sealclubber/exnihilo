@@ -13,6 +13,7 @@ import {
   type TripsWindow,
   DayPlanSchema,
   DaySummarySchema,
+  OutsideStaySchema,
   TripSchema,
   WhereaboutsSchema,
   createLife,
@@ -81,6 +82,27 @@ describe('trips in a window', () => {
       expect(Math.abs(y - full.points[index]![1])).toBeLessThanOrEqual(0.05 + 1e-9);
       expect(Number.isInteger(Math.round(x * 10))).toBe(true);
     });
+  });
+
+  it('sends, alongside the trips, the stays out of doors that overlap the window', async () => {
+    const from = at(2, 12);
+    const to = at(2, 12, 20);
+    const { body } = await get<TripsWindow>(`${LIFE}/trips?from=${from}&to=${to}`);
+    const stays = expected.outsideStays(from, to);
+    expect(body.outside.length).toBeGreaterThan(900);
+    expect(body.outside.map((stay) => [stay.personId, stay.buildingId, stay.from, stay.to])).toEqual(stays.map((stay) => [stay.personId, stay.buildingId, stay.from, stay.to]));
+    for (const stay of body.outside.slice(0, 100)) expect(OutsideStaySchema.safeParse(stay).success).toBe(true);
+    // Who, where, from when, until when: a point to a tenth of a metre, and no path.
+    const sent = body.outside[0]!;
+    expect(sent.point).toEqual(stays[0]!.point.map((value) => Math.round(value * 10) / 10));
+    expect(Object.keys(sent).sort()).toEqual(['buildingId', 'from', 'kind', 'personId', 'point', 'to']);
+    // At night nobody is out.
+    expect((await get<TripsWindow>(`${LIFE}/trips?from=${at(2, 2)}&to=${at(2, 2, 20)}`)).body.outside).toEqual([]);
+    // A region limits the stays as it does the trips.
+    const local = (await get<TripsWindow>(`${LIFE}/trips?from=${from}&to=${to}&minX=0&minY=0&maxX=120&maxY=120`)).body.outside;
+    expect(local.length).toBe(expected.outsideStays(from, to, { minX: 0, minY: 0, maxX: 120, maxY: 120 }).length);
+    expect(local.length).toBeGreaterThan(0);
+    expect(local.length).toBeLessThan(body.outside.length);
   });
 
   it('can be limited to a region of the map', async () => {
@@ -168,6 +190,23 @@ describe('buildings and households', () => {
     expect((await get(`${LIFE}/buildings/building-641-999999/occupants`)).status).toBe(404);
   });
 
+  it('says whether a building is open and its hours that day, and who is outside at it', async () => {
+    const tavern = city.buildings.find((building) => building.type === 'tavern' && building.workerIds.every((id) => expected.shiftOf(id)!.id === 'evening'))!;
+    const evening = (await get<OccupantsNow>(`${LIFE}/buildings/${tavern.id}/occupants?time=${at(2, 20)}`)).body;
+    expect(evening.open).toBe(true);
+    expect(evening.hours).toEqual([{ from: at(2, 15), to: at(2, 23) }]);
+    const morning = (await get<OccupantsNow>(`${LIFE}/buildings/${tavern.id}/occupants?time=${at(2, 9)}`)).body;
+    expect(morning.open).toBe(false);
+    expect(morning.hours).toEqual(evening.hours);
+    const stall = city.buildings.find((building) => building.type === 'market-stall')!;
+    const noon = (await get<OccupantsNow>(`${LIFE}/buildings/${stall.id}/occupants?time=${at(2, 11)}`)).body;
+    expect(noon.open).toBe(true);
+    expect(noon.occupants.length).toBeGreaterThan(0);
+    expect(noon.occupants.every((occupant) => occupant.outside === true)).toBe(true);
+    const rest = (await get<OccupantsNow>(`${LIFE}/buildings/${stall.id}/occupants?time=${at(7, 11)}`)).body;
+    expect(rest).toMatchObject({ open: false, hours: [] });
+  });
+
   it('says what each member of a household is doing', async () => {
     const household = city.households.find((entry) => entry.memberIds.length >= 4)!;
     const { status, body } = await get<HouseholdNow>(`${LIFE}/households/${household.id}/now?time=${at(2, 12)}`);
@@ -203,7 +242,7 @@ describe('the day command', () => {
   it('prints a settlement\'s day: the hourly counts and the busiest segments', () => {
     const text = describeSettlementDay({ settlementId: 'settlement-641', day: 2, storePath, packPath: MEDIEVAL_PATH });
     expect(text).toContain('Badanos, day 2: Tilsday');
-    expect(text).toMatch(/Hour\s+Asleep\s+At home\s+At work\s+Visiting\s+Travelling\s+Trips begun/);
+    expect(text).toMatch(/Hour\s+Asleep\s+At home\s+At work\s+Visiting\s+Travelling\s+Outside\s+Trips begun/);
     expect(text.split('\n').filter((line) => /^\s+\d\d:00\s/.test(line))).toHaveLength(24);
     expect(text).toMatch(/Busiest segments[^\n]*\n\s+segment-641-\d{6}\s+[\d,]+\s+bridge/);
     expect(text).toBe(describeSettlementDay({ settlementId: 'settlement-641', day: 2, storePath, packPath: MEDIEVAL_PATH }));

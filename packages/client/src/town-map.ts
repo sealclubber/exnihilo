@@ -1,15 +1,17 @@
 /**
  * The town map: a layout drawn on a canvas, with pan and zoom, a scale bar,
  * lots that can be clicked, a tool that shows the walking path between two
- * lots, and the residents who are out on the streets as moving dots.
+ * lots, and the residents who can be seen: those walking as moving dots, and
+ * those out of doors at a place as smaller dots that stay where they are.
  *
  * It draws what the layout format holds and nothing more: water, segments as
  * polylines of their own width, and lots as polygons. The dots are moved
  * along the trips the server sends, by the clock; nothing here plans or
  * decides where anyone goes.
  */
-import type { District, Layout, LayoutPath, Lot, Point, Region, Trip } from '@worldsim/core';
+import type { District, Layout, LayoutPath, Lot, OutsideStay, Point, Region, Trip } from '@worldsim/core';
 import { tripPosition, tripWindow } from './clock.ts';
+import { describeSeen } from './town-format.ts';
 import { h } from './dom.ts';
 import { describePath, districtColours, fitBox, formatMetres, lotAt, scaleBar } from './town-format.ts';
 import { type View, panBy, toMap, toScreen, zoomAt } from './view.ts';
@@ -26,6 +28,12 @@ const SEGMENT_COLOURS: Record<Layout['segments'][number]['kind'], string> = {
 };
 const CLICK_SLOP = 4;
 const DOT_RADIUS = 2.6;
+/** People out of doors at a place are drawn smaller than walkers, in another colour. */
+const OUTSIDE_RADIUS = 1.9;
+/** Someone standing on a lot is picked only by a click close to them, so that the lot itself can still be clicked. */
+const OUTSIDE_REACH = 4;
+const OUTSIDE_INK = '#b4530a';
+const OUTSIDE_INK_NIGHT = '#ffb86b';
 const DOT_REACH = 8;
 /** After a failed request for trips, how long to wait before asking again, in real milliseconds. */
 const RETRY_AFTER = 3000;
@@ -52,8 +60,8 @@ export interface TownMapHandlers {
   rate(): number;
   /** Whether the sun is up at a game time. */
   isLight(time: number): boolean;
-  /** Asked for the trips under way in a window of game time that pass through a region. */
-  loadTrips(from: number, to: number, region: Region): Promise<Trip[]>;
+  /** Asked for the trips under way in a window of game time that pass through a region, and the stays out of doors in it. */
+  loadTrips(from: number, to: number, region: Region): Promise<{ trips: Trip[]; outside: OutsideStay[] }>;
   onPersonClick(personId: string): void;
 }
 
@@ -63,7 +71,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   const pathButton = h('button', { attrs: { type: 'button' }, title: 'Show the shortest walking path between two lots' }, 'Path');
   const fitButton = h('button', { attrs: { type: 'button' }, title: 'Show the whole town' }, '⌂');
   const pathStatus = h('span', { class: 'path-status' });
-  const streetCount = h('span', { class: 'street-count', title: 'Residents walking somewhere at this moment' });
+  const streetCount = h('span', { class: 'street-count', title: 'Residents who can be seen at this moment: walking somewhere, or out of doors at a place' });
   root.replaceChildren(canvas, note, h('div', { class: 'map-tools' }, fitButton, pathButton, pathStatus), streetCount);
   const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
   /** Everything that does not move is drawn here once per change of view, then copied each frame under the dots. */
@@ -87,12 +95,12 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   let looping = false;
 
   // The trips on hand: those of a window of game time, through a region of the map.
-  let trips: { from: number; to: number; region: Region; list: Trip[] } | undefined;
+  let trips: { from: number; to: number; region: Region; list: Trip[]; outside: OutsideStay[] } | undefined;
   let asking = false;
   let asked = 0;
   let notBefore = 0;
   /** The dots drawn in the last frame, for finding the one under a click. */
-  let dots: Array<{ personId: string; x: number; y: number }> = [];
+  let dots: Array<{ personId: string; x: number; y: number; reach: number }> = [];
   let followed: { personId: string; buildingId?: string } | undefined;
   let lastTime: number | undefined;
   let lastLight: boolean | undefined;
@@ -226,9 +234,9 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     const to = time + ahead;
     handlers
       .loadTrips(from, to, region)
-      .then((list) => {
+      .then((loaded) => {
         if (request !== asked) return;
-        trips = { from, to, region, list };
+        trips = { from, to, region, list: loaded.trips, outside: loaded.outside };
         // Draw again even if the clock is standing still.
         lastTime = undefined;
       })
@@ -248,13 +256,17 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     const light = time === undefined ? true : handlers.isLight(time);
     if (time !== undefined) ensureTrips(time);
 
-    // Following someone: on their dot while they walk, otherwise on the building they are in.
+    // Following someone: on their dot while they walk or stand outside, otherwise on the building they are in.
     let position: Point | undefined;
     if (followed && time !== undefined) {
       const walking = trips?.list.find((trip) => trip.personId === followed!.personId && time >= trip.departAt && time <= trip.arriveAt);
+      const standing = walking ? undefined : trips?.outside.find((stay) => stay.personId === followed!.personId && time >= stay.from && time < stay.to);
       if (walking) {
         position = tripPosition(walking, time);
         followed.buildingId = walking.toBuildingId;
+      } else if (standing) {
+        position = standing.point;
+        followed.buildingId = standing.buildingId;
       } else if (followed.buildingId !== undefined) {
         position = lotCentres.get(followed.buildingId);
       }
@@ -283,20 +295,34 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
 
     dots = [];
     if (time !== undefined && trips) {
+      // Those out of doors at a place first, so that walkers pass over them.
+      let standing = 0;
+      ctx.fillStyle = light ? OUTSIDE_INK : OUTSIDE_INK_NIGHT;
+      ctx.beginPath();
+      for (const stay of trips.outside) {
+        if (time < stay.from || time >= stay.to) continue;
+        standing++;
+        const [x, y] = toScreen(view, stay.point);
+        dots.push({ personId: stay.personId, x, y, reach: OUTSIDE_REACH });
+        if (x < -5 || y < -5 || x > size.width + 5 || y > size.height + 5) continue;
+        ctx.moveTo(x + OUTSIDE_RADIUS, y);
+        ctx.arc(x, y, OUTSIDE_RADIUS, 0, Math.PI * 2);
+      }
+      ctx.fill();
       ctx.fillStyle = light ? INK : '#ffe9a8';
       ctx.beginPath();
       for (const trip of trips.list) {
         const at = tripPosition(trip, time);
         if (!at) continue;
         const [x, y] = toScreen(view, at);
-        dots.push({ personId: trip.personId, x, y });
+        dots.push({ personId: trip.personId, x, y, reach: DOT_REACH });
         if (x < -5 || y < -5 || x > size.width + 5 || y > size.height + 5) continue;
         ctx.moveTo(x + DOT_RADIUS, y);
         ctx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
       }
       ctx.fill();
       const whole = contains(trips.region, layout.summary.bounds);
-      streetCount.textContent = `${dots.length.toLocaleString('en-US')} on the streets${whole ? '' : ' in view'}`;
+      streetCount.textContent = describeSeen(dots.length - standing, standing, whole);
     } else {
       streetCount.textContent = '';
     }
@@ -405,7 +431,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       let nearest: { personId: string; away: number } | undefined;
       for (const dot of dots) {
         const away = Math.hypot(dot.x - event.offsetX, dot.y - event.offsetY);
-        if (away <= DOT_REACH && (!nearest || away < nearest.away)) nearest = { personId: dot.personId, away };
+        if (away <= dot.reach && (!nearest || away < nearest.away)) nearest = { personId: dot.personId, away };
       }
       if (nearest) return handlers.onPersonClick(nearest.personId);
     }
