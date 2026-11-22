@@ -34,6 +34,29 @@ describe('GET /api/settlements/:id/layout', () => {
     expect(body.summary.generator).toBe('grown');
   });
 
+  it('serves the layout a named generator makes of the same town', async () => {
+    const city = generateCity(brief, medievalPack());
+    for (const generator of ['grid', 'grown'] as const) {
+      const { status, body } = await get<Layout>(`${LAYOUT}?generator=${generator}`);
+      expect(status, generator).toBe(200);
+      expect(body.summary.generator).toBe(generator);
+      expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(generateLayout(city, brief, medievalPack(), { generator }))));
+    }
+    // The grid has no walls or open places, and asking for it changes nothing about the layout served without the query.
+    const grid = (await get<Layout>(`${LAYOUT}?generator=grid`)).body;
+    expect(grid.summary.counts).toMatchObject({ walls: 0, gates: 0, places: 0 });
+    expect((await get<Layout>(LAYOUT)).body).toEqual(JSON.parse(JSON.stringify(expected)));
+  });
+
+  it('answers 400 for a generator it does not have, naming the parameter and the ones it has', async () => {
+    for (const query of ['?generator=rings', '?generator=', '?generator=grid&generator=grown']) {
+      const { status, body } = await get<{ error: string }>(`${LAYOUT}${query}`);
+      expect(status, query).toBe(400);
+      expect(body.error).toMatch(/^generator must be one of grid, grown/);
+    }
+    expect((await get<{ error: string }>('/api/settlements/settlement-9999/layout?generator=grid')).status).toBe(404);
+  });
+
   it('answers 404 for a settlement that does not exist', async () => {
     const { status, body } = await get<{ error: string }>('/api/settlements/settlement-9999/layout');
     expect(status).toBe(404);

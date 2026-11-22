@@ -1,7 +1,8 @@
 /**
  * The viewer, in a headless browser, against a server of its own: panes,
  * the hover marker, colour by role, the legend, people moving about outside,
- * outsiders, and how fast the town map draws.
+ * outsiders, the town as laid out with its river, wall and plaza, and how
+ * fast the town map draws.
  *
  * Run with `npm run test:viewer`. It needs a browser: `npx playwright install chromium`.
  */
@@ -803,6 +804,146 @@ describe('outsiders', () => {
     const drawnMerchants = (await drawn()).people.filter((person) => merchants.has(person.personId));
     expect(drawnMerchants.length).toBeGreaterThan(0);
     expect(drawnMerchants.every((person) => person.colour === OTHER_MERCHANT)).toBe(true);
+  });
+});
+
+describe('the town as laid out', () => {
+  const CEVILEFON = 'settlement-3';
+  const VERECELDO = 'settlement-455';
+  const fact = (key: string, on: Page = page) => pane('summary', on).locator(`dd[data-fact="${key}"]`);
+  const layoutOf = (settlementId: string, query = '') => main.get<Layout>(`/api/settlements/${settlementId}/layout${query}`);
+  /** Opens a town as a named generator lays it out, and waits for the map to have drawn it. No people are waited for: none are shown. */
+  async function openAs(settlementId: string, generator: string, on: Page = page): Promise<void> {
+    await on.goto(`${viewer}/?api=${encodeURIComponent(main.url)}&generator=${generator}#${settlementId}/city`);
+    await on.waitForFunction(() => document.querySelector('#inspector [data-fact="generator"]') !== null, null, { timeout: 90_000 });
+    await settled(on);
+  }
+
+  it('names the generator in the town pane, and draws a grown town with a river', async () => {
+    await setTime(main, at(1, 12, 30));
+    await open(main, BADANOS);
+    const layout = await layoutOf(BADANOS);
+    expect(layout.summary.generator).toBe('grown');
+    const rivers = layout.waters.filter((water) => water.kind === 'river');
+    expect(rivers.length).toBeGreaterThan(0);
+    // Its width varies along its length, which is what the outline is drawn from.
+    expect(rivers.some((river) => river.kind === 'river' && new Set(river.widths ?? []).size > 1)).toBe(true);
+    expect(await fact('generator').innerText()).toBe('grown');
+    expect(await pane('summary').locator('.layout-note').count()).toBe(0);
+    // Badanos has no wall, so nothing is said of gates.
+    expect(layout.walls).toHaveLength(0);
+    expect(await fact('gates').count()).toBe(0);
+    const state = await drawn();
+    expect(state.town).toEqual({ generator: 'grown', rivers: rivers.length, walls: 0, gates: 0, places: layout.places.length, living: true });
+    expect(state.people.length).toBeGreaterThan(900);
+    expect(errors).toEqual([]);
+  });
+
+  it('says how many gates a walled town has and how large its plaza is, and draws them', async () => {
+    for (const settlementId of [POMBAL, CEVILEFON, VERECELDO]) {
+      await open(main, settlementId);
+      const layout = await layoutOf(settlementId);
+      expect(layout.walls.length, settlementId).toBeGreaterThan(0);
+      expect(layout.summary.counts.gates, settlementId).toBeGreaterThan(0);
+      expect(await fact('generator').innerText(), settlementId).toBe('grown');
+      expect(await fact('gates').innerText(), settlementId).toBe(String(layout.summary.counts.gates));
+      const plazas = layout.places.filter((place) => place.kind === 'plaza');
+      if (plazas.length > 0) {
+        const area = plazas.reduce((sum, place) => sum + geometry.polygonArea(place.polygon), 0);
+        expect(await fact('plaza').innerText(), settlementId).toBe(`${Math.round(area).toLocaleString('en-US')} m²`);
+      } else {
+        expect(await fact('plaza').count(), settlementId).toBe(0);
+      }
+      expect((await drawn()).town, settlementId).toEqual({
+        generator: 'grown',
+        rivers: layout.waters.filter((water) => water.kind === 'river').length,
+        walls: layout.walls.length,
+        gates: layout.summary.counts.gates,
+        places: layout.places.length,
+        living: true,
+      });
+    }
+    // Pombal and Cevilefon have a plaza each.
+    for (const settlementId of [POMBAL, CEVILEFON]) expect((await layoutOf(settlementId)).places.length, settlementId).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+  });
+
+  it('shows the grid\'s layout of the same town on ?generator=grid, without its people, and says so', async () => {
+    const asked: string[] = [];
+    const listen = (request: { url(): string }) => asked.push(request.url());
+    page.on('request', listen);
+    await setTime(main, at(1, 12, 30));
+    await openAs(POMBAL, 'grid');
+    expect(await fact('generator').innerText()).toBe('grid');
+    // The grid has no wall and no plaza.
+    expect(await fact('gates').count()).toBe(0);
+    expect(await fact('plaza').count()).toBe(0);
+    const note = await pane('summary').locator('.layout-note').innerText();
+    expect(note).toMatch(/grid generator/);
+    expect(note).toMatch(/People are not shown/);
+    await page.waitForTimeout(1500);
+    const state = await drawn();
+    expect(state.town).toMatchObject({ generator: 'grid', walls: 0, gates: 0, places: 0, living: false });
+    expect(state.people).toEqual([]);
+    expect(state.avatar).toBeUndefined();
+    expect(await page.locator('#inspector .street-count').innerText()).toBe('');
+    // Nothing was asked of the server about anyone's movements, and the tools that act through the streets are put away.
+    expect(asked.some((url) => url.includes('generator=grid'))).toBe(true);
+    expect(asked.filter((url) => /\/life\/trips|\/avatar\/perception/.test(url))).toEqual([]);
+    expect(await page.locator('#inspector .map-tools button:visible').allInnerTexts()).toEqual(['⌂']);
+    // A lot can still be looked at: hovering names it and clicking shows its building, and no menu offers to walk there.
+    const layout = await layoutOf(POMBAL, '?generator=grid');
+    const lot = layout.lots.find((entry) => {
+      const [x, y] = toScreen(geometry.polygonCentroid(entry.polygon), state);
+      return inTheClear(x, y, state.size);
+    })!;
+    const box = await canvasBox();
+    const [x, y] = toScreen(geometry.polygonCentroid(lot.polygon), state);
+    await page.mouse.move(box.x + x, box.y + y);
+    await settled();
+    expect((await drawn()).hover).toMatchObject({ kind: 'lot', id: lot.id });
+    const avatarBefore = JSON.stringify(await main.get<AvatarReport>('/api/avatar'));
+    await page.mouse.click(box.x + x, box.y + y);
+    await page.waitForFunction(() => /building/i.test(document.querySelector('[data-pane="detail"] > .pane-head')?.textContent ?? ''), null, { timeout: 10_000 });
+    expect(await page.locator('#inspector .map-menu').isVisible()).toBe(false);
+    expect(JSON.stringify(await main.get<AvatarReport>('/api/avatar'))).toBe(avatarBefore);
+    page.off('request', listen);
+    // The layout served without the query is the pack's, as before.
+    expect((await layoutOf(POMBAL)).summary.generator).toBe('grown');
+    expect(errors).toEqual([]);
+  });
+
+  it('shows the grown layout when asked for by name, with the plaza a lot like any other under the cursor', async () => {
+    await openAs(POMBAL, 'grown');
+    expect(await fact('generator').innerText()).toBe('grown');
+    expect(await pane('summary').locator('.layout-note').innerText()).toMatch(/grown generator.*People are not shown/s);
+    const layout = await layoutOf(POMBAL);
+    const state = await drawn();
+    expect(state.town).toMatchObject({ generator: 'grown', walls: layout.walls.length, gates: layout.summary.counts.gates, places: layout.places.length, living: false });
+    expect(state.people).toEqual([]);
+    // The plaza is no rectangle's worth of assumption: the lot found under a point inside its polygon is its own.
+    const plaza = layout.places[0]!;
+    const lot = layout.lots.find((entry) => entry.buildingId === plaza.buildingId)!;
+    expect(lot.footprints).toEqual([]);
+    const inside = geometry.pointInPolygon(geometry.polygonCentroid(plaza.polygon), plaza.polygon) ? geometry.polygonCentroid(plaza.polygon) : undefined;
+    expect(inside, 'the plaza\'s middle is inside it').toBeDefined();
+    const [x, y] = toScreen(inside!, state);
+    expect(inTheClear(x, y, state.size)).toBe(true);
+    const box = await canvasBox();
+    await page.mouse.move(box.x + x, box.y + y);
+    await settled();
+    expect((await drawn()).hover).toMatchObject({ kind: 'lot', id: lot.id });
+    await page.mouse.move(5, 5);
+    expect(errors).toEqual([]);
+  });
+
+  it('says what is wrong with a generator it does not have', async () => {
+    // On a page of its own: the server's refusal is logged by the browser as a failed request.
+    const other = await browser.newPage({ viewport: { width: 1400, height: 800 } });
+    await other.goto(`${viewer}/?api=${encodeURIComponent(main.url)}&generator=rings#${BADANOS}/city`);
+    await other.waitForFunction(() => /generator must be one of grid, grown/.test(document.querySelector('#inspector .map-note')?.textContent ?? ''), null, { timeout: 90_000 });
+    expect(await fact('generator', other).count()).toBe(0);
+    await other.close();
   });
 });
 

@@ -3,7 +3,7 @@
  * list of households, views of one household, one building, one resident or
  * one outsider, and the outsiders in town that day.
  */
-import type { Activity, AvatarPerception, AvatarState, BuildingDetail, BuildingTypes, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, OutsiderDetail, OutsidersToday, PackLabels, PersonNow, PersonPlan, Whereabouts } from '@worldsim/core';
+import type { Activity, AvatarPerception, AvatarState, BuildingDetail, BuildingTypes, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, Layout, OccupantsNow, OutsiderDetail, OutsidersToday, PackLabels, PersonNow, PersonPlan, Whereabouts } from '@worldsim/core';
 import {
   fetchBuilding,
   fetchBuildingTypes,
@@ -53,6 +53,7 @@ import { legendEntries, outsiderLegendEntries, renderLegend } from './legend.ts'
 import { byRoute, describeOutsider, describeRouteEnd, isOutsider, kindName, outsiderGroups, relativeDay, routeEndName, seenLabel } from './outsider-format.ts';
 import { createFoldAll, createPane } from './pane.ts';
 import { activityWord, describeHours, describeWhereabouts, timeline } from './life-format.ts';
+import { layoutFacts } from './town-format.ts';
 import { createTownMap } from './town-map.ts';
 
 const PAGE = 100;
@@ -141,6 +142,13 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   let selected: string | undefined;
   let allOccupations = false;
   let summary: CitySummary;
+  /** The layout on the map, once it has come. */
+  let layout: Layout | undefined;
+  /**
+   * A generator named in the page's address, as ?generator=grid: the town is then shown as that generator lays it
+   * out, for comparison. The residents walk the pack's layout, not that one, so the people are left off the map.
+   */
+  const comparing = new URLSearchParams(location.search).get('generator') ?? undefined;
   /** Counts requests so that a slow answer to an old question is dropped. */
   let listRequest = 0;
   let detailRequest = 0;
@@ -182,6 +190,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   let perception: AvatarPerception | undefined;
   let perceiving = false;
   const avatarHere = () => (avatar !== undefined && avatar.settlementId === settlementId ? avatar : undefined);
+  /** The avatar as the map may draw it: not at all on a layout shown for comparison, which is not the one it stands on. */
+  const avatarOnMap = () => (comparing === undefined ? avatarHere() : undefined);
   const aroundYou = createAroundYou({
     onStop: () => act('stop'),
     onLeave: () => act('leave'),
@@ -202,15 +212,16 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const showAvatar = () => {
     if (!labels) return;
     const here = avatarHere();
-    townMap.setAvatar(here ? { state: here, radius: labels.avatar.perceptionRadius } : undefined);
-    const seen = here && perception?.settlementId === settlementId ? perception : undefined;
+    const onMap = avatarOnMap();
+    townMap.setAvatar(onMap ? { state: onMap, radius: labels.avatar.perceptionRadius } : undefined);
+    const seen = onMap && perception?.settlementId === settlementId ? perception : undefined;
     townMap.setPerceived(new Set(seen ? (seen.where === 'street' ? seen.nearby.map((entry) => entry.personId) : seen.occupants.map((occupant) => occupant.personId)) : []));
     aroundYou.render(avatar, here !== undefined, sync.now() ?? 0, seen, labels);
     aroundPane.setSummary(aroundYou.count());
   };
   /** Asks who the avatar perceives now. Called about once a real second, and whenever the avatar or the clock changes. */
   function perceive(): void {
-    if (root.hidden || !avatarHere() || perceiving) return showAvatar();
+    if (root.hidden || !avatarOnMap() || perceiving) return showAvatar();
     perceiving = true;
     fetchPerception()
       .then((seen) => (perception = seen), () => (perception = undefined))
@@ -292,9 +303,20 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
           : undefined;
       return h('section', {}, h('h3', {}, section.title), h('ul', { class: 'bars' }, ...rows), toggle);
     });
+    // The town as laid out: who laid it out, and its wall and plaza where it has them.
+    const laidOut = layout
+      ? h(
+          'section',
+          { class: 'layout-facts' },
+          h('h3', {}, 'Town'),
+          h('dl', { class: 'totals' }, ...layoutFacts(layout).flatMap((fact) => [h('dt', {}, fact.label), h('dd', { attrs: { 'data-fact': fact.key } }, fact.value)])),
+          comparing !== undefined ? h('p', { class: 'hint layout-note' }, `Shown as the ${layout.summary.generator} generator lays this town out, for comparison. People are not shown on it: they walk the pack's layout.`) : undefined,
+        )
+      : undefined;
     const scroll = summaryBox.scrollTop;
     summaryBox.replaceChildren(
       totals,
+      ...(laidOut ? [laidOut] : []),
       ...sections,
       hint(`Generator version ${summary.generatorVersion}, pack ${summary.pack.name} ${summary.pack.version}, seed ${summary.seed}`),
     );
@@ -769,6 +791,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       detailBox.replaceChildren(hint('Choose a household, or click a lot on the map, to see who lives and works there.'));
       detailShows('Details', 'nothing chosen');
       buildingTypes = {};
+      layout = undefined;
       townMap.markHomesWithWork(new Set());
       legendBody.replaceChildren();
       outsidersToday = undefined;
@@ -800,10 +823,12 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         );
         // The map loads beside the lists, not before them.
         townMap.message('Laying out the town…');
-        void fetchLayout(id).then(
-          (layout) => {
+        void fetchLayout(id, comparing).then(
+          (made) => {
             if (settlementId !== id) return;
-            townMap.show(layout, districts);
+            layout = made;
+            renderSummary();
+            townMap.show(made, districts, { living: comparing === undefined });
             aroundYou.unfollow();
             perception = undefined;
             showAvatar();

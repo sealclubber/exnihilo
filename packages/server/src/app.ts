@@ -10,6 +10,9 @@ import {
   type AvatarReport,
   type AvatarState,
   AvatarError,
+  GRID_GENERATOR,
+  GROWN_GENERATOR,
+  generateLayout,
   leaveBuilding,
   perceive,
   spawnAvatar,
@@ -83,6 +86,9 @@ export interface AppOptions {
   /** The avatar. Left out, there is none until one is spawned, and it is not stored. */
   avatar?: AvatarKeeper;
 }
+
+/** The layout generators a request may name. */
+const LAYOUT_GENERATORS = [GRID_GENERATOR, GROWN_GENERATOR] as const;
 
 /** The longest window of game time one request for trips may cover. */
 export const MAX_TRIP_WINDOW = 2 * 86_400;
@@ -281,10 +287,17 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
   city('/buildings/:record', (view, _query, record) => view.building(record));
 
   // The town's layout, generated with the city and kept in memory beside it.
-  app.get<{ Params: { id: string } }>('/api/settlements/:id/layout', (request, reply) => {
+  // Asked for by generator, it is that generator's layout of the same town, made for the asking and not kept:
+  // a way to compare the two. Residents walk the pack's layout whatever is asked for here.
+  app.get<{ Params: { id: string }; Querystring: Query }>('/api/settlements/:id/layout', (request, reply) => {
     const brief = briefs.get(request.params.id);
     if (!brief) return send(reply, 404, `no settlement has the ID "${request.params.id}"`);
-    return reply.send(cities.get(brief).layout);
+    const { generator } = request.query;
+    if (generator === undefined) return reply.send(cities.get(brief).layout);
+    const wanted = LAYOUT_GENERATORS.find((name) => name === generator);
+    if (wanted === undefined) return send(reply, 400, `generator must be one of ${LAYOUT_GENERATORS.join(', ')}; "${String(generator)}" is not`);
+    const view = cities.get(brief);
+    return reply.send(view.layout.summary.generator === wanted ? view.layout : generateLayout(view.city, brief, pack, { generator: wanted }));
   });
   app.get<{ Params: { id: string }; Querystring: Query }>('/api/settlements/:id/layout/path', (request, reply) => {
     const brief = briefs.get(request.params.id);

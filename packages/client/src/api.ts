@@ -72,7 +72,9 @@ export const fetchHouseholds = (id: string, filters: HouseholdFilters, offset: n
 export const fetchHousehold = (id: string, householdId: string) =>
   get<HouseholdDetail>(`${settlement(id)}/city/households/${encodeURIComponent(householdId)}`);
 export const fetchBuildingTypes = (id: string) => get<BuildingTypes>(`${settlement(id)}/city/building-types`);
-export const fetchLayout = (id: string) => get<Layout>(`${settlement(id)}/layout`);
+/** The town's layout: the one its people walk, or, for comparison, the one a named generator makes of the same town. */
+export const fetchLayout = (id: string, generator?: string) =>
+  get<Layout>(`${settlement(id)}/layout${generator === undefined ? '' : `?generator=${encodeURIComponent(generator)}`}`);
 export const fetchPath = (id: string, fromLotId: string, toLotId: string) =>
   get<LayoutPath>(`${settlement(id)}/layout/path?from=${encodeURIComponent(fromLotId)}&to=${encodeURIComponent(toLotId)}`);
 export const fetchBuilding = (id: string, buildingId: string) =>

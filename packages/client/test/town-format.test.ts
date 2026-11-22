@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Lot, Point } from '@worldsim/core';
-import { describePath, districtColours, fitBox, formatMetres, insidePolygon, lotAt, scaleBar } from '../src/town-format.ts';
+import { describePath, districtColours, fitBox, formatMetres, insidePolygon, lotAt, polygonArea, riverOutline, scaleBar, wallRuns } from '../src/town-format.ts';
 import { toMap, toScreen } from '../src/view.ts';
 
 describe('fitBox', () => {
@@ -85,5 +85,65 @@ describe('district colours and paths', () => {
     expect(describePath({ length: 412.6, segmentIds: ['a', 'b', 'c'] })).toBe('413 m along 3 street segments');
     expect(describePath({ length: 12, segmentIds: ['a'] })).toBe('12 m along 1 street segment');
     expect(describePath({ length: 0, segmentIds: ['a'] })).toBe('0 m along 1 street segment');
+  });
+});
+
+describe('a river\'s outline', () => {
+  const river = (widths?: number[]) => ({ id: 'water-1-001', kind: 'river' as const, centreLine: [[0, 0], [10, 0], [20, 0]] as Point[], width: 4, ...(widths && { widths }) });
+
+  it('is the centre line pushed out by half the width on either side', () => {
+    expect(riverOutline(river())).toEqual([[0, 2], [10, 2], [20, 2], [20, -2], [10, -2], [0, -2]]);
+  });
+
+  it('follows the width at each point where the river has one', () => {
+    expect(riverOutline(river([2, 6, 10]))).toEqual([[0, 1], [10, 3], [20, 5], [20, -5], [10, -3], [0, -1]]);
+  });
+});
+
+describe('polygonArea', () => {
+  it('measures a polygon of any shape, whichever way round it is given', () => {
+    const ell: Point[] = [[0, 0], [10, 0], [10, 4], [4, 4], [4, 10], [0, 10]];
+    expect(polygonArea(ell)).toBe(64);
+    expect(polygonArea([...ell].reverse())).toBe(64);
+    expect(polygonArea([[0, 0], [6, 0], [0, 8]])).toBe(24);
+  });
+});
+
+describe('a wall with its gates left open', () => {
+  const square: Point[] = [[0, 0], [100, 0], [100, 100], [0, 100]];
+  const length = (run: Point[]) => run.slice(1).reduce((sum, point, index) => sum + Math.hypot(point[0] - run[index]![0], point[1] - run[index]![1]), 0);
+
+  const near = (point: Point, wanted: Point) => {
+    expect(point[0]).toBeCloseTo(wanted[0], 9);
+    expect(point[1]).toBeCloseTo(wanted[1], 9);
+  };
+
+  it('is one unbroken line when it has no gates', () => {
+    expect(wallRuns(square.slice(0, 3), false, [])).toEqual([[[0, 0], [100, 0], [100, 100]]]);
+    const closed = wallRuns(square, true, []);
+    expect(closed).toHaveLength(1);
+    expect(length(closed[0]!)).toBeCloseTo(400);
+  });
+
+  it('leaves a gap of the gate\'s length about the point nearest the gate', () => {
+    const runs = wallRuns(square.slice(0, 3), false, [{ position: [50, 3], gap: 10 }]);
+    expect(runs.map((run) => run.length)).toEqual([2, 3]);
+    near(runs[0]![1]!, [45, 0]);
+    near(runs[1]![0]!, [55, 0]);
+    expect(runs[1]!.slice(1)).toEqual([[100, 0], [100, 100]]);
+  });
+
+  it('joins a closed wall through its first point, and breaks it there when a gate stands on it', () => {
+    const through = wallRuns(square, true, [{ position: [50, 0], gap: 10 }, { position: [50, 100], gap: 10 }]);
+    expect(through).toHaveLength(2);
+    near(through[0]![0]!, [45, 100]);
+    expect(through[0]).toContainEqual([0, 0]);
+    near(through[0]![through[0]!.length - 1]!, [45, 0]);
+    expect(through.reduce((sum, run) => sum + length(run), 0)).toBeCloseTo(380);
+    const corner = wallRuns(square, true, [{ position: [0, 0], gap: 10 }]);
+    expect(corner).toHaveLength(1);
+    near(corner[0]![0]!, [5, 0]);
+    near(corner[0]![corner[0]!.length - 1]!, [0, 5]);
+    expect(length(corner[0]!)).toBeCloseTo(390);
   });
 });

@@ -91,7 +91,7 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET .../city/households/<id>` | One household with its members and its home |
 | `GET .../city/buildings/<id>` | One building with the people who work and live there |
 | `GET .../city/building-types` | The type of every building, by ID, for naming lots on the map |
-| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas and a summary |
+| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas, walls, places and a summary. `?generator=grid` or `?generator=grown` gives that generator's layout of the same town, made for the request and kept nowhere |
 | `GET .../layout/path?from=<lot>&to=<lot>` | The shortest walking path between two lots: the segments in order, the length in metres, and the line walked |
 
 **The clock and daily life**
@@ -166,7 +166,13 @@ the household that employs them.
 
 Beside the lists is the **town map**: the water, the streets drawn by kind,
 and every building's lot coloured by district, with the exits labelled by
-their route and a scale bar in metres. Drag to pan and scroll to zoom.
+their route and a scale bar in metres. A river is drawn at its true width
+from place to place, a wall as a dark line open at each gate with a ring on
+the gate, and a plaza as pale paved ground. The summary's **Town** section
+names the generator that laid the town out, the wall's gates and the plaza's
+area. Adding `?generator=grid` before the `#` shows the grid's layout of the
+same town for comparison, without people: they walk the pack's layout, which
+is not the one on screen. Drag to pan and scroll to zoom.
 Clicking a lot shows its building; choosing a household or a building in the
 lists outlines its lot. **Path** shows the shortest walking path between two
 lots you pick, with its length.

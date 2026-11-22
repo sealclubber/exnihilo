@@ -6,22 +6,28 @@
  * The avatar is drawn too, with the reach of what it perceives around it.
  *
  * It draws what the layout format holds and nothing more: water, segments as
- * polylines of their own width, and lots as polygons. The dots are moved
+ * polylines of their own width, open places, lots as polygons, and walls
+ * as lines of their own width, open at their gates. The dots are moved
  * along the trips the server sends, by the clock; nothing here plans or
  * decides where anyone goes.
  */
 import type { AvatarState, District, Layout, LayoutPath, Lot, OutsideStay, Point, Region, Seen, Trip } from '@worldsim/core';
 import { avatarPlace, followScale } from './avatar.ts';
 import { tripPosition, tripWindow, wanderPosition } from './clock.ts';
-import { describeSeen } from './town-format.ts';
 import { h } from './dom.ts';
-import { describePath, districtColours, fitBox, formatMetres, lotAt, scaleBar } from './town-format.ts';
+import { describePath, describeSeen, districtColours, fitBox, formatMetres, lotAt, riverOutline, scaleBar, wallRuns } from './town-format.ts';
 import { type View, panBy, toMap, toScreen, zoomAt } from './view.ts';
 
 // A small palette, flat fills and thin lines: every mark says something.
 const LAND = '#f6f4ee';
 const WATER = '#a9cbe8';
 const INK = '#23272e';
+/** Open paved ground, such as a plaza: paler than a street and warmer than the land, with no district's tint. */
+const PAVED = '#ebe4d2';
+/** A town wall: the darkest line on the map, so that it reads as the one thing streets do not cross. */
+const WALL = '#4b443a';
+/** A wall is never drawn thinner than this many pixels, so that it can be seen with the whole town in view. */
+const WALL_LEAST = 1.5;
 /** Night dims the town without hiding it; people are drawn over the dimming, so they stay as clear as by day. */
 const NIGHT = 'rgba(22, 32, 64, 0.26)';
 /** Streets are told apart by tone and by their own width: the arterials that carry the routes are warmest. */
@@ -62,8 +68,12 @@ const PERCEIVED_RING = 5.5;
 const RETRY_AFTER = 3000;
 
 export interface TownMap {
-  /** Shows a layout, fitted to the canvas. */
-  show(layout: Layout, districts: District[]): void;
+  /**
+   * Shows a layout, fitted to the canvas. With `living` false the town is shown without its people: no trips are
+   * asked for, nobody is drawn, and the tools that act through the street graph are put away. That is for a layout
+   * other than the one the residents walk.
+   */
+  show(layout: Layout, districts: District[], options?: { living?: boolean }): void;
   /** Shows a message in place of a map, while loading or on failure. */
   message(text: string): void;
   /** Outlines the lot of a building, or clears the outline. */
@@ -107,6 +117,8 @@ export interface Drawn {
   marked: string | undefined;
   /** How many buildings are marked as both a home and a workplace. */
   homesWithWork: number;
+  /** What of the town itself was drawn: the generator that made the layout, and how many rivers, walls, gates and open places. */
+  town: { generator: string; rivers: number; walls: number; gates: number; places: number; living: boolean } | undefined;
   /** How many frames have been drawn since the map was shown, and the real milliseconds spent drawing them. */
   frames: number;
   drawMs: number;
@@ -163,6 +175,12 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   const baseCtx = base.getContext('2d') as CanvasRenderingContext2D;
 
   let layout: Layout | undefined;
+  /** Whether the people of the town are shown on this layout. */
+  let living = true;
+  /** Water, open places and walls are built once per layout, in map coordinates, like the lots and the streets. */
+  let waterPath = new Path2D();
+  let placePath = new Path2D();
+  let walls: Array<{ width: number; standing: Path2D; gates: Path2D; gateCount: number }> = [];
   let districtNames = new Map<string, string>();
   /** Paths are built once per layout, in map coordinates, and redrawn under the view's transform. */
   let lotPaths: Array<{ colour: string; ground: Path2D; built: Path2D }> = [];
@@ -238,26 +256,22 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     const px = 1 / view.scale;
     target.lineJoin = 'round';
     target.lineCap = 'butt';
-    for (const water of layout.waters) {
-      target.beginPath();
-      if (water.kind === 'sea') {
-        trace(target, water.polygon, true);
-        target.fillStyle = WATER;
-        target.fill();
-      } else {
-        trace(target, water.centreLine, false);
-        target.strokeStyle = WATER;
-        target.lineWidth = water.width;
-        target.stroke();
-      }
-    }
+    // The sea as its polygon, a river as the outline of its two banks: one flat fill.
+    target.fillStyle = WATER;
+    target.fill(waterPath);
     for (const { colour, width, path: line } of segmentPaths) {
       target.strokeStyle = colour;
       target.lineWidth = Math.max(width, px);
       target.stroke(line);
     }
-    // A lot is open ground, drawn faintly, with its buildings drawn solidly on it: a yard and a house can be told apart.
     const hairline = Math.min(0.4, px);
+    // An open place is paved ground with a thin edge.
+    target.fillStyle = PAVED;
+    target.fill(placePath);
+    target.strokeStyle = OUTLINE;
+    target.lineWidth = hairline;
+    target.stroke(placePath);
+    // A lot is open ground, drawn faintly, with its buildings drawn solidly on it: a yard and a house can be told apart.
     for (const { colour, ground, built } of lotPaths) {
       target.globalAlpha = GROUND_ALPHA;
       target.fillStyle = colour;
@@ -275,6 +289,14 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       target.strokeStyle = 'rgba(35, 39, 46, 0.55)';
       target.lineWidth = Math.min(0.5, 1.2 * px);
       target.stroke(homeMarks);
+    }
+    // A wall is a dark line of its own width, open at each gate, with a thin ring about the opening to mark the gate.
+    target.strokeStyle = WALL;
+    for (const wall of walls) {
+      target.lineWidth = Math.max(wall.width, WALL_LEAST * px);
+      target.stroke(wall.standing);
+      target.lineWidth = Math.max(wall.width / 4, px);
+      target.stroke(wall.gates);
     }
 
     const outline = (lot: Lot, colour: string) => {
@@ -381,7 +403,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     if (root.offsetParent === null || size.width === 0) return;
     const time = handlers.now();
     const light = time === undefined ? true : handlers.isLight(time);
-    if (time !== undefined) ensureTrips(time);
+    if (time !== undefined && living) ensureTrips(time);
 
     // Following someone: on their dot while they walk or stand outside, otherwise on the building they are in.
     let position: Point | undefined;
@@ -729,6 +751,12 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     const wasClick = drag.travelled <= CLICK_SLOP;
     drag = undefined;
     if (!wasClick || !layout) return;
+    // Without its people the town can only be looked at: a lot is inspected, and nothing is offered.
+    if (!living) {
+      const lot = lotAt(layout.lots, toMap(view, event.offsetX, event.offsetY));
+      if (lot) handlers.onLotClick(lot);
+      return;
+    }
     const point = toMap(view, event.offsetX, event.offsetY);
     if (spawning) {
       setSpawning(false);
@@ -781,8 +809,11 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   new ResizeObserver(resize).observe(root);
 
   return {
-    show(next, districts) {
+    show(next, districts, options = {}) {
       layout = next;
+      living = options.living !== false;
+      pathButton.hidden = !living;
+      spawnButton.hidden = !living;
       note.hidden = true;
       highlighted = undefined;
       path = undefined;
@@ -800,11 +831,37 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       const colours = districtColours(districts.map((district) => district.id));
       const byColour = new Map<string, { ground: Path2D; built: Path2D }>();
       lotCentres = new Map();
+      waterPath = new Path2D();
+      for (const water of next.waters) trace(waterPath, water.kind === 'sea' ? water.polygon : riverOutline(water), true);
+      // An open place is the lot of its building: it is drawn as paved ground, not in its district's tint.
+      placePath = new Path2D();
+      for (const place of next.places) trace(placePath, place.polygon, true);
+      const paved = new Set(next.places.map((place) => place.buildingId));
+      // A gate's opening is as long as the widest street through it and the wall's own width besides.
+      const junctions = new Map(next.junctions.map((junction) => [junction.id, junction.position]));
+      const widest = new Map<string, number>();
+      for (const segment of next.segments) {
+        for (const junctionId of [segment.fromJunctionId, segment.toJunctionId]) widest.set(junctionId, Math.max(widest.get(junctionId) ?? 0, segment.width));
+      }
+      walls = next.walls.map((wall) => {
+        const gates = wall.gates.flatMap((gate) => {
+          const position = junctions.get(gate.junctionId);
+          return position ? [{ position, gap: (widest.get(gate.junctionId) ?? wall.width) + wall.width }] : [];
+        });
+        const standing = new Path2D();
+        for (const run of wallRuns(wall.line, wall.closed, gates)) trace(standing, run, false);
+        const frames = new Path2D();
+        for (const { position: [x, y], gap } of gates) {
+          frames.moveTo(x + gap / 2, y);
+          frames.arc(x, y, gap / 2, 0, Math.PI * 2);
+        }
+        return { width: wall.width, standing, gates: frames, gateCount: gates.length };
+      });
       for (const lot of next.lots) {
         const colour = colours.get(lot.districtId) ?? '#dddddd';
         let shape = byColour.get(colour);
         if (!shape) byColour.set(colour, (shape = { ground: new Path2D(), built: new Path2D() }));
-        trace(shape.ground, lot.polygon, true);
+        if (!paved.has(lot.buildingId)) trace(shape.ground, lot.polygon, true);
         for (const footprint of lot.footprints) trace(shape.built, footprint, true);
         const sum = lot.polygon.reduce((total, point) => [total[0] + point[0], total[1] + point[1]] as Point, [0, 0] as Point);
         lotCentres.set(lot.buildingId, [sum[0] / lot.polygon.length, sum[1] / lot.polygon.length]);
@@ -870,6 +927,14 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
         avatar: drawnAvatar,
         marked: marked !== undefined && dots.some((dot) => dot.personId === marked) ? marked : undefined,
         homesWithWork: homeMarkCount,
+        town: layout && {
+          generator: layout.summary.generator,
+          rivers: layout.waters.filter((water) => water.kind === 'river').length,
+          walls: walls.length,
+          gates: walls.reduce((sum, wall) => sum + wall.gateCount, 0),
+          places: layout.places.length,
+          living,
+        },
         frames,
         drawMs,
         size: { ...size },

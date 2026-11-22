@@ -1160,6 +1160,35 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         const dryWay = Array.from({ length: steps + 1 }, (_, at): Point => [from[0] + ((point[0] - from[0]) * at) / steps, from[1] + ((point[1] - from[1]) * at) / steps]).every((spot) => dryBy(spot) >= widths.arterial / 2 + 1);
         if (reach <= 0 || distance(from, point) < widths.arterial || distance(from, point) > 4 * grown.exitReach || !dryWay || crossesTown(from, point) || exitDrafts.some((other) => other && distance(other.point, point) < widths.arterial)) continue;
         for (const id of road.edges.slice(0, upTo ?? last)) streets.add(id);
+        if (upTo === undefined) {
+          // The exit leaves from a junction off its road: the streets between the two become the road's last stretch,
+          // by the shortest way that is dry enough for a main road. Lots along them are drawn back from the wider roadway.
+          const onRoad = new Set(road.corners.slice(0, last + 1));
+          const cameBy = new Map<number, [number, number]>();
+          const seen = new Set([joins]);
+          const queue = [joins];
+          let met: number | undefined;
+          for (let at = 0; at < queue.length && met === undefined; at++) {
+            for (const way of ways[queue[at] as number] as Way[]) {
+              const edge = edgeById(way.edge);
+              if (seen.has(way.to) || edge.bridge || !isStreet(edge) || edge.kind === 'court' || drynessOf(edge) < roadDry || (wallCorners.has(way.to) && !gates.has(way.to))) continue;
+              seen.add(way.to);
+              cameBy.set(way.to, [queue[at] as number, way.edge]);
+              queue.push(way.to);
+              if (onRoad.has(way.to)) {
+                met = way.to;
+                break;
+              }
+            }
+          }
+          if (met === undefined && !onRoad.has(joins)) continue;
+          for (let back = met; back !== undefined && cameBy.has(back); back = (cameBy.get(back) as [number, number])[0]) {
+            const edge = edgeById((cameBy.get(back) as [number, number])[1]);
+            edge.kind = 'arterial';
+            edge.exit ??= road.exit;
+            streets.add(edge.id);
+          }
+        }
         exitDrafts[road.exit] = { point, joins };
         joined = true;
         break;

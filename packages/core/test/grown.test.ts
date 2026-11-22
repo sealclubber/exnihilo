@@ -330,6 +330,43 @@ describe('walls, gates and the plaza', () => {
     }
   });
 
+  it('leads every main road from the plaza\'s edge, and every way through the wall by a gate', () => {
+    for (const name of ['Pombal', 'Cevilefon']) {
+      const { layout } = town(name);
+      const plaza = layout.places.find((place) => place.kind === 'plaza')!;
+      const junctions = new Map(layout.junctions.map((junction) => [junction.id, junction]));
+      const reach = pack.layout.streetWidths.arterial + grown.roadside + 1;
+      // By main roads all the way: one may join another before the plaza, and they reach it together.
+      const beside = new Map<string, string[]>();
+      for (const segment of layout.segments) {
+        if (segment.kind !== 'arterial' && segment.kind !== 'bridge') continue;
+        beside.set(segment.fromJunctionId, [...(beside.get(segment.fromJunctionId) ?? []), segment.toJunctionId]);
+        beside.set(segment.toJunctionId, [...(beside.get(segment.toJunctionId) ?? []), segment.fromJunctionId]);
+      }
+      for (const exit of layout.exits) {
+        const reached = new Set([exit.junctionId]);
+        const queue = [exit.junctionId];
+        for (let at = 0; at < queue.length; at++) for (const next of beside.get(queue[at]!) ?? []) if (!reached.has(next)) (reached.add(next), queue.push(next));
+        expect([...reached].some((id) => geometry.distanceToPolygonEdge(junctions.get(id)!.position, plaza.polygon) <= reach), `${name} ${exit.id}`).toBe(true);
+      }
+      // From a lot outside the wall to one inside, the way passes a gate.
+      const ring = layout.walls.reduce((longest, wall) => (wall.line.length > longest.line.length ? wall : longest));
+      const line = ring.closed ? [...ring.line, ring.line[0]!] : ring.line;
+      const gatehouses = new Set(layout.walls.flatMap((wall) => wall.gates.map((gate) => gate.buildingId)));
+      const beyond = (lot: Layout['lots'][number]) => geometry.crossingsOfPolyline([0, 0], polygonCentroid(lot.polygon), line) % 2 === 1;
+      const lots = layout.lots.filter((lot) => !gatehouses.has(lot.buildingId));
+      const inside = lots.find((lot) => !beyond(lot))!;
+      const outside = lots.filter(beyond);
+      const finder = createPathFinder(layout);
+      const segments = new Map(layout.segments.map((segment) => [segment.id, segment]));
+      for (let at = 0; at < outside.length; at += Math.max(1, Math.floor(outside.length / 25))) {
+        const path = finder.path(outside[at]!.id, inside.id);
+        const passed = path.segmentIds.flatMap((id) => [segments.get(id)!.fromJunctionId, segments.get(id)!.toJunctionId]);
+        expect(passed.some((id) => junctions.get(id)!.kind === 'gate'), `${name} ${outside[at]!.id}`).toBe(true);
+      }
+    }
+  });
+
   it('builds outside the wall of a large town and keeps a small one wholly within', () => {
     const outside = (name: string) => {
       const { layout } = town(name);
