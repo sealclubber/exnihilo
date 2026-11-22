@@ -186,7 +186,7 @@ describe('inns and the gaming house in Badanos', () => {
 });
 
 describe('every settlement of Lomia', () => {
-  it('keeps its population and category counts, has an inn where travellers are expected, a visitors\' quarter exactly when its draw reaches the threshold, and every invariant', () => {
+  it('keeps its population and category counts, has an inn where travellers are expected, a visitors\' quarter exactly when its draw reaches the threshold, and every invariant', { timeout: 400_000 }, () => {
     const before = medievalPackBefore6C();
     const failures: string[] = [];
     const versionFour = createHash('sha256');

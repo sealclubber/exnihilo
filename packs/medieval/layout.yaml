@@ -191,7 +191,7 @@ grown:
   # width varying by a share along its length; the length of the pieces its
   # line is cut into; and the size above which a town on both banks has a
   # second bridge.
-  river: {meanderLength: 11, meanderSwing: 0.14, widthVariation: 0.25, pieceLength: 3, secondBridgeAbove: 5000}
+  river: {meanderLength: 11, meanderSwing: 0.14, widthVariation: 0.25, pieceLength: 2.5, secondBridgeAbove: 5000}
   # The coast: broad bays and headlands, a smaller wobble on top, and the bay
   # a port's harbour stands in. Lengths are along the shore, depths across it.
   coast:

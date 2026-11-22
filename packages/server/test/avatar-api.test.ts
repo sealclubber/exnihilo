@@ -37,7 +37,8 @@ const world = importAfmg(loadLomia());
 const brief = world.world.settlements.find((entry) => entry.id === 'settlement-641')!;
 const city = generateCity(brief, pack);
 const layout = generateLayout(city, brief, pack);
-const expected = createLife({ city, layout, pack });
+// With the brief, as the server makes it: the outsiders in town are to be seen with the residents.
+const expected = createLife({ city, layout, pack, brief });
 const at = (day: number, hours: number, minutes = 0) => startOfDay(day) + hours * 3600 + minutes * 60;
 const T0 = at(1, 7, 45);
 

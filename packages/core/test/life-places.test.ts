@@ -347,8 +347,10 @@ describe('being outside', () => {
     const workers = there.filter((occupant) => occupant.kind === 'work');
     const points = workers.map((occupant) => (life.whereabouts(occupant.personId, time) as { point: [number, number] }).point.join());
     expect(new Set(points).size).toBe(points.length);
-    const again = life.whereabouts(workers[0]!.personId, time + 86_400) as { point: [number, number] };
-    expect(again.point.join()).not.toBe(points[0]);
+    // The next day that finds them there at this hour: on some days they are still on the way.
+    const later = workers.flatMap((worker, index) => [1, 2, 3, 4, 5].map((days) => ({ index, where: life.whereabouts(worker.personId, time + days * 86_400) as { point?: [number, number]; buildingId?: string } })));
+    const again = later.find(({ where }) => where.point !== undefined && where.buildingId === stall.id)!;
+    expect(again.where.point!.join()).not.toBe(points[again.index]);
     // Someone in an ordinary workplace is inside, with no point.
     const tannery = city.buildings.find((building) => building.type === 'tannery')!;
     const inside = life.whereabouts(tannery.workerIds[0]!, at(WORK_DAY, 11));

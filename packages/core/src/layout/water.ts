@@ -14,6 +14,8 @@ import { bearingVector, distance } from './geometry.ts';
 const TAU = 2 * Math.PI;
 /** How many squares out from a point the nearest stretch of a river is looked for; further off, it is far and no more is said. */
 const FAR_RINGS = 6;
+/** How many pieces the long bend of a river's course beside the centre is cut into, so that no one of them turns by much. */
+const BEND_STEPS = 120;
 
 /** A river as it lies on the map: its centre line, cut finely, and its width at each point of it. */
 export interface River {
@@ -77,8 +79,8 @@ export function makeRiver(brief: SettlementBrief, meanWidth: number, settings: G
     const start = toward(apex, from, round);
     const finish = toward(apex, to, round);
     course = [from];
-    for (let step = 0; step <= 24; step++) {
-      const t = step / 24;
+    for (let step = 0; step <= BEND_STEPS; step++) {
+      const t = step / BEND_STEPS;
       course.push([(1 - t) * (1 - t) * start[0] + 2 * t * (1 - t) * apex[0] + t * t * finish[0], (1 - t) * (1 - t) * start[1] + 2 * t * (1 - t) * apex[1] + t * t * finish[1]]);
     }
     course.push(to);

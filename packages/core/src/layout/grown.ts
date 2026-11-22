@@ -52,6 +52,10 @@ const APART_BLOCKS = 3;
 const BLOCK_TRIES = 16;
 /** A pair of seeds either side of a line stand this share of the spacing from it. */
 const PAIR_REACH = 0.42;
+/** A lot cut from a block has between these shares of the area asked for, and at most this many times its typical frontage. */
+const LEAST_AREA = 0.7;
+const MOST_AREA = 1.35;
+const WIDEST = 3.5;
 /** An exit stands this far beyond the last junction of its road. */
 const EXIT_REACH = 70;
 /** An exit lies within this many degrees of the brief's bearing. */
@@ -103,8 +107,6 @@ interface Edge {
   fixed: boolean;
   /** The exit whose main road it carries. */
   exit?: number;
-  /** As wide as a main road though it is none: a port's quay. */
-  quay?: true;
   /** For a court: the corner it is entered from. */
   from?: number;
   /** For a bridge: not a boundary between blocks at all. */
@@ -152,7 +154,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   };
   const widths = settings.streetWidths;
   const { roadside } = grown;
-  const widthOf = (edge: Edge): number => (edge.bridge ? widths.bridge : edge.quay || edge.kind === 'arterial' ? widths.arterial : edge.kind === 'street' ? widths.street : widths.lane);
+  const widthOf = (edge: Edge): number => (edge.bridge ? widths.bridge : edge.kind === 'arterial' ? widths.arterial : edge.kind === 'street' ? widths.street : widths.lane);
 
   // ---- How much ground ------------------------------------------------------------------
   const lotArea = (building: Building) => {
@@ -220,11 +222,11 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     }
   }
   // Along each bank, so that a street can follow the water.
-  // Any road may come to run along a bank, so the street there keeps a main road's half-width clear of the water.
-  // A street between two corners is straight and the bank is not, so it stands a lane's width further back, and
-  // corners along the water are near enough together that the bank bows no further than that between them.
-  const bankside = widths.arterial / 2 + roadside + widths.lane + 1;
-  const chordOn = (bendRadius: number) => Math.sqrt(8 * bendRadius * widths.lane);
+  // The street along a bank is a street's width and no main road takes it, so that what fronts it stands near the
+  // water. A street between two corners is straight and the bank is not, so it stands half a lane's width further
+  // back, and corners along the water are near enough together that the bank bows no further than that between them.
+  const bankside = widths.street / 2 + roadside + widths.lane / 2 + 1;
+  const chordOn = (bendRadius: number) => Math.sqrt(4 * bendRadius * widths.lane);
   const riverStep = chordOn((grown.river.meanderLength * settings.riverWidth) / (4 * Math.PI * Math.PI * grown.river.meanderSwing));
   const shoreStep = chordOn(grown.coast.wobble.length ** 2 / (4 * Math.PI * Math.PI * grown.coast.wobble.depth));
   if (river) {
@@ -287,8 +289,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
 
   // ---- Cells and edges ---------------------------------------------------------------------------
   const outlineOf = (cell: FabricCell): Point[] => cell.corners.map((corner) => corners[corner] as Point);
-  /** Water comes too near a point for a road to pass there. */
-  const tooWet = (point: Point) => dryBy(point) < widths.arterial / 2 + roadside / 2;
+  /** Water comes too near a point for a street to pass there. */
+  const tooWet = (point: Point) => dryBy(point) < widths.street / 2 + roadside / 2;
   const cells: Cell[] = fabric.cells.map((cell) => {
     const outline = outlineOf(cell);
     const centre = polygonCentroid(outline);
@@ -309,17 +311,25 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   }
   const lengthOf = (edge: Edge) => distance(corners[edge.a] as Point, corners[edge.b] as Point);
   /** A boundary a street could run along: not the wall, with ground on at least one side and dry at both ends. */
-  const dryAlong = new Map<number, boolean>();
-  const isDry = (edge: Edge) => {
+  /** How near the water comes to the straight line between two points. */
+  const drynessBetween = (a: Point, b: Point) => {
+    const pieces = Math.max(1, Math.ceil(distance(a, b) / 5));
+    let least = Infinity;
+    for (let at = 0; at <= pieces; at++) least = Math.min(least, dryBy([a[0] + ((b[0] - a[0]) * at) / pieces, a[1] + ((b[1] - a[1]) * at) / pieces]));
+    return least;
+  };
+  const dryAlong = new Map<number, number>();
+  const drynessOf = (edge: Edge) => {
     let dry = dryAlong.get(edge.id);
     if (dry === undefined) {
-      const [a, b] = [corners[edge.a] as Point, corners[edge.b] as Point];
-      const pieces = Math.max(1, Math.ceil(distance(a, b) / 5));
-      dry = Array.from({ length: pieces + 1 }, (_, at): Point => [a[0] + ((b[0] - a[0]) * at) / pieces, a[1] + ((b[1] - a[1]) * at) / pieces]).every((point) => !tooWet(point));
+      dry = drynessBetween(corners[edge.a] as Point, corners[edge.b] as Point);
       dryAlong.set(edge.id, dry);
     }
     return dry;
   };
+  const isDry = (edge: Edge) => drynessOf(edge) >= widths.street / 2 + roadside / 2;
+  /** Dry enough for a main road, which is wider. */
+  const roadDry = widths.arterial / 2 + roadside / 2;
   const passable = (edge: Edge) => edge.kind !== 'wall' && edge.cells.some(isGround) && edge.cells.every((id) => !(cells[id] as Cell).rim) && isDry(edge);
   const atWater = (edge: Edge) => edge.cells.length === 2 && edge.cells.some(isGround) && edge.cells.some((id) => (cells[id] as Cell).water);
   const wallCorners = new Set(edges.filter((edge) => edge.kind === 'wall').flatMap((edge) => [edge.a, edge.b]));
@@ -402,6 +412,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       const far = Math.hypot(toward[0], toward[1]) || 1;
       for (const way of ways[corner] as Way[]) {
         const edge = edgeById(way.edge);
+        // The street along the water is left to the water: a main road keeps a block back from it.
+        if (!edge.bridge && (atWater(edge) || drynessOf(edge) < roadDry)) continue;
         const there = corners[way.to] as Point;
         const length = distance(here, there);
         const cosine = ((there[0] - here[0]) * toward[0] + (there[1] - here[1]) * toward[1]) / (length * far || 1);
@@ -464,6 +476,19 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   // More ways out: local streets in the widest gaps between the roads there are, until the town has the pack's number.
   {
     const bearings = brief.routes.map((route) => (route.bearing * Math.PI) / 180);
+    // A town with a river in reach and no road over it has a street that crosses: the first of its local ones.
+    if (river && bridges.length > 0 && !roads.some((road) => road.edges.some((id) => edgeById(id).bridge === true))) {
+      const near = river.nearest([0, 0]);
+      const away = Math.hypot(near.point[0], near.point[1]);
+      if (away > 0 && near.away < townRadius) {
+        const beyond = (away + near.width + 0.5 * townRadius) / away;
+        const road = roadTo([near.point[0] * beyond, near.point[1] * beyond], spare.length > 0);
+        if (road && road.edges.some((id) => edgeById(id).bridge === true)) {
+          takeRoad(road, 'street');
+          bearings.push(bearingOf(near.point));
+        }
+      }
+    }
     for (let tries = 0; roads.length < grown.roadsOut && tries < 2 * grown.roadsOut; tries++) {
       const sorted = [...bearings].sort((a, b) => a - b);
       let widest = sorted.length === 0 ? TAU : 0;
@@ -489,23 +514,49 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       const sides = (ways[corner] as Way[]).map((way) => edgeById(way.edge)).filter((edge) => !edge.bridge && edge.cells.length === 2 && edge.cells.every(isGround));
       return { inward: sides.find((edge) => edge.cells.every((id) => (cells[id] as Cell).inside)), outward: sides.find((edge) => edge.cells.every((id) => !(cells[id] as Cell).inside)) };
     };
-    const candidates = [...wallCorners].filter((corner) => !gates.has(corner) && through(corner).inward && through(corner).outward).sort((a, b) => a - b);
-    while (spare.length > 0 && candidates.length > 0) {
-      let chosen = 0;
-      let furthest = -1;
-      candidates.forEach((corner, index) => {
-        const away = Math.min(TAU, ...[...gates.keys()].map((gate) => apart(bearingOf(corners[gate] as Point), bearingOf(corners[corner] as Point))));
-        if (away > furthest) {
-          furthest = away;
-          chosen = index;
+    // A lesser gate needs a street on each side that leads on somewhere: one whose far end is not on the wall
+    // itself, and has another boundary there that the wall does not close.
+    const leadsOn = (edge: Edge | undefined, corner: number) => {
+      if (!edge) return false;
+      const far = edge.a === corner ? edge.b : edge.a;
+      return !wallCorners.has(far) && (ways[far] as Way[]).some((way) => way.edge !== edge.id && !wallCorners.has(way.to) && edgeById(way.edge).kind !== 'none');
+    };
+    // And it must be on the centre's side of any water: where the streets inside the wall can be walked to.
+    const within = new Set<number>(starts);
+    {
+      const queue = [...starts];
+      for (let at = 0; at < queue.length; at++) {
+        for (const way of ways[queue[at] as number] as Way[]) {
+          const edge = edgeById(way.edge);
+          if (within.has(way.to) || (edge.bridge && !usedByRoad.has(edge.id)) || (wallCorners.has(way.to) && !gates.has(way.to))) continue;
+          within.add(way.to);
+          queue.push(way.to);
         }
-      });
-      const [corner] = candidates.splice(chosen, 1) as [number];
-      gates.set(corner, spare.shift() as Building);
-      for (const edge of Object.values(through(corner))) {
-        if (!edge || edge.fixed) continue;
-        edge.kind = 'lane';
-        edge.fixed = true;
+      }
+    }
+    const farEnd = (edge: Edge | undefined, corner: number) => (edge === undefined ? -1 : edge.a === corner ? edge.b : edge.a);
+    // Where the wall has too few such places for all its gatehouses, the rest go where a street passes at all.
+    const sound = (corner: number) => leadsOn(through(corner).inward, corner) && leadsOn(through(corner).outward, corner);
+    const reached = (corner: number) => within.has(farEnd(through(corner).inward, corner));
+    for (const fits of [(corner: number) => sound(corner) && reached(corner), reached, () => true]) {
+      const candidates = [...wallCorners].filter((corner) => !gates.has(corner) && through(corner).inward && through(corner).outward && fits(corner)).sort((a, b) => a - b);
+      while (spare.length > 0 && candidates.length > 0) {
+        let chosen = 0;
+        let furthest = -1;
+        candidates.forEach((corner, index) => {
+          const away = Math.min(TAU, ...[...gates.keys()].map((gate) => apart(bearingOf(corners[gate] as Point), bearingOf(corners[corner] as Point))));
+          if (away > furthest) {
+            furthest = away;
+            chosen = index;
+          }
+        });
+        const [corner] = candidates.splice(chosen, 1) as [number];
+        gates.set(corner, spare.shift() as Building);
+        for (const edge of Object.values(through(corner))) {
+          if (!edge || edge.fixed) continue;
+          edge.kind = 'lane';
+          edge.fixed = true;
+        }
       }
     }
     if (spare.length > 0) fail(`${spare.length} of its ${gatehouses.length} gatehouses have no place in the wall for a gate`);
@@ -536,11 +587,16 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
           const here = corners[corner] as Point;
           const moved: Point = [here[0] + (((before[0] + after[0]) / 2 - here[0]) * grown.wander.ease) / 2, here[1] + (((before[1] + after[1]) / 2 - here[1]) * grown.wander.ease) / 2];
           // Never so far that a boundary at the corner would be left with no length.
+          // Never so far that a boundary at the corner would be left with no length, or brought too near the water.
           const clear = (around[corner] as number[]).every((id) => {
             const edge = edges[id] as Edge;
-            return distance(moved, corners[edge.a === corner ? edge.b : edge.a] as Point) > grown.shortestStreet;
+            const other = corners[edge.a === corner ? edge.b : edge.a] as Point;
+            return distance(moved, other) > grown.shortestStreet && (drynessOf(edge) === Infinity || drynessBetween(moved, other) >= Math.min(drynessOf(edge), roadDry));
           });
-          if (clear) corners[corner] = moved;
+          if (clear) {
+            corners[corner] = moved;
+            for (const id of around[corner] as number[]) dryAlong.delete(id);
+          }
         }
       }
     }
@@ -567,11 +623,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     const spared = (corner: number) => open[corner] !== 2;
     for (const edge of edges) {
       if (edge.kind === 'wall') continue;
-      // A street along the water, as wide as a main road on a port's shore.
-      if (atWater(edge) && edge.kind !== 'none') {
-        edge.fixed = true;
-        if (brief.flags.port && coast && Math.min(coast.gap(corners[edge.a] as Point), coast.gap(corners[edge.b] as Point)) < quayside + grown.spacing.centre / 2) edge.quay = true;
-      }
+      // A street along the water.
+      if (atWater(edge) && edge.kind !== 'none') edge.fixed = true;
       if (edge.fixed) continue;
       const [one, other] = edge.cells;
       const draw = rng.next();
@@ -594,6 +647,27 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     }
   }
 
+  // Only ground that can be walked to from the centre is built on: the far bank only where a road's bridge leads.
+  const reachable = new Uint8Array(cells.length);
+  /** The corners that can be walked to from the centre along streets, through gates and over the bridges roads use. */
+  const walked = new Set<number>(starts);
+  {
+    const open = (edge: Edge) => (edge.bridge ? usedByRoad.has(edge.id) : edge.kind !== 'none' && edge.kind !== 'court' && edge.kind !== 'wall');
+    const queue = [...starts];
+    for (let at = 0; at < queue.length; at++) {
+      for (const way of ways[queue[at] as number] as Way[]) {
+        const edge = edgeById(way.edge);
+        if (walked.has(way.to) || !open(edge) || (wallCorners.has(way.to) && !gates.has(way.to))) continue;
+        walked.add(way.to);
+        queue.push(way.to);
+      }
+    }
+    // A block can be walked to if a street along one of its sides can.
+    for (const cell of cells) if (cell.edges.some((id) => open(edges[id] as Edge) && passable(edges[id] as Edge) && walked.has((edges[id] as Edge).a) && walked.has((edges[id] as Edge).b))) reachable[cell.id] = 1;
+  }
+  /** A street that can be walked to, or that leads to a gate and will be joined to the rest: lots open only onto these. */
+  const walkable = (edge: Edge) => (edge.kind === 'court' ? walked.has(edge.from as number) : (walked.has(edge.a) && walked.has(edge.b)) || gates.has(edge.a) || gates.has(edge.b));
+
   // ---- Blocks ------------------------------------------------------------------------------------------
   const halfOf = (edge: Edge) => (edge.kind === 'court' ? widths.lane : widthOf(edge)) / 2;
   /** The clear ground round a corner: enough for the widest roadway that ends there. */
@@ -615,7 +689,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       if (edge.kind === 'wall') return { a, b, inset: grown.wall.width / 2 + (cell.inside ? grown.wall.clearStrip : roadside) };
       if (edge.kind === 'none') return { a, b, inset: 0 };
       // A boundary too near the water to pass is no street, but the block keeps clear of it all the same.
-      if (!passable(edge)) return { a, b, inset: halfOf(edge) + roadside };
+      if (!passable(edge) || !walkable(edge)) return { a, b, inset: halfOf(edge) + roadside };
       if (edge.kind === 'court') return { a, b, inset: halfOf(edge) + roadside, street: edge.id, part: edge.from === corner ? [0, 0.5] : [0.5, 1] };
       return { a, b, inset: halfOf(edge) + roadside, street: edge.id };
     });
@@ -663,12 +737,11 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     const at = corners[corner] as Point;
     const size = lotSizeOf(gatehouse.type, pack);
     // On the gate's own street where a block inside the wall has frontage enough there; otherwise on whatever
-    // frontage of a block at the gate comes nearest it.
+    // frontage of a block at the gate comes nearest it, and outside the wall only where there is none within.
     let done = false;
     const gateStreets = new Set((ways[corner] as Way[]).map((way) => way.edge));
     const options = [...new Set(groundAt(corner))]
-      .filter((id) => (cells[id] as Cell).inside)
-      .flatMap((id) => blockOf(cells[id] as Cell).tracks.map((track) => ({ cell: cells[id] as Cell, track, away: Math.min(distance(frontage(track, track.from), at), distance(frontage(track, track.to), at)) + (gateStreets.has(track.street) && track.to - track.from >= size.frontage ? 0 : 1000) })))
+      .flatMap((id) => blockOf(cells[id] as Cell).tracks.map((track) => ({ cell: cells[id] as Cell, track, away: Math.min(distance(frontage(track, track.from), at), distance(frontage(track, track.to), at)) + (gateStreets.has(track.street) && track.to - track.from >= size.frontage ? 0 : 1000) + ((cells[id] as Cell).inside ? 0 : 5000) })))
       .sort((one, other) => one.away - other.away);
     for (const { cell, track } of options) {
       const width = Math.min(size.frontage, track.to - track.from);
@@ -685,7 +758,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       done = true;
       break;
     }
-    if (!done) fail(`the gate at bearing ${Math.round((bearingOf(at) * 180) / Math.PI)} has no ground inside the wall for its gatehouse`);
+    if (!done) fail(`the gate at bearing ${Math.round((bearingOf(at) * 180) / Math.PI)} has no ground beside it for its gatehouse`);
   }
   const spreadCivic = spreadCivicTypes(pack);
   /** Where the spread civic buildings placed so far stand, by type, for keeping the next apart from them. */
@@ -728,23 +801,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     const pull = Math.max(grown.outline.arterialPull * Math.exp(-toRoad / grown.outline.reach), grown.outline.waterPull * Math.exp(-Math.max(0, dryBy(cell.centre)) / grown.outline.reach));
     cost[index] = fromCentre * (1 - pull) + (luck[index] as number) * grown.outline.ragged;
   });
-  // Only ground that can be walked to from the centre is built on: the far bank only where a road's bridge leads.
-  const reachable = new Uint8Array(cells.length);
-  {
-    const open = (edge: Edge) => (edge.bridge ? usedByRoad.has(edge.id) : edge.kind !== 'none' && edge.kind !== 'court' && edge.kind !== 'wall');
-    const walked = new Set<number>(starts);
-    const queue = [...starts];
-    for (let at = 0; at < queue.length; at++) {
-      for (const way of ways[queue[at] as number] as Way[]) {
-        const edge = edgeById(way.edge);
-        if (walked.has(way.to) || !open(edge) || (wallCorners.has(way.to) && !gates.has(way.to))) continue;
-        walked.add(way.to);
-        queue.push(way.to);
-      }
-    }
-    // A block can be walked to if a street along one of its sides can.
-    for (const cell of cells) if (cell.edges.some((id) => open(edges[id] as Edge) && passable(edges[id] as Edge) && walked.has((edges[id] as Edge).a) && walked.has((edges[id] as Edge).b))) reachable[cell.id] = 1;
-  }
   const isFree = (cell: number) => owner[cell] === -1 && reachable[cell] === 1 && isGround(cell) && !(cells[cell] as Cell).barred;
   const best = (among: Iterable<number>, score: (cell: number) => number): number | undefined => {
     let found: number | undefined;
@@ -805,6 +861,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (buildings.length === 0) return;
     const kind = (city.districts[district] as District).kind;
     const filled = grown.lots.filled.includes(kind);
+    const byWater = placementOf(city.districts[district] as District) === 'waterside' && (river !== undefined || coast !== undefined);
     const gapChance = grown.lots.gaps[kind] ?? 0;
     const blocks: Cell[] = [];
     const frontier = new Map<number, number>();
@@ -821,8 +878,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     };
     // The ground of the plaza, where the district has it, is where it begins.
     for (const id of cellsOf[district] as number[]) for (const next of (cells[id] as Cell).touching) if (isFree(next)) frontier.set(next, 1);
-    const grow = (): Cell => {
-      const cell = best(frontier.keys(), (candidate) => (frontier.get(candidate) as number) * grown.outline.compact + (cost[candidate] as number));
+    /** Takes one more block: the cheapest beside the district, or the one that scores least by a measure given. */
+    const grow = (score?: (cell: number) => number): Cell => {
+      const cell = best(frontier.keys(), score ?? ((candidate) => (frontier.get(candidate) as number) * grown.outline.compact + (cost[candidate] as number)));
       if (cell === undefined) throw new TooSmall(3);
       return addBlock(cell, frontier.get(cell) as number);
     };
@@ -838,7 +896,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       for (const track of (cell.block as Block).tracks) {
         const room = track.to - track.cursor;
         if (room < grown.lots.leastFrontage) continue;
-        const used = (track.cursor - track.from) / (track.to - track.from);
+        // The frontage with most room left; in a district by the water, the one nearest the water.
+        const used = byWater ? dryBy(frontage(track, (track.from + track.to) / 2)) : (track.cursor - track.from) / (track.to - track.from);
         if (used >= emptiest) continue;
         // A first cut at the typical frontage shows how deep the block lets the lot run; the frontage is then set to give the lot its area.
         let width = Math.min(room, Math.max(grown.lots.leastFrontage, typical * spread));
@@ -849,12 +908,14 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
           width = next;
           cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, 0);
         }
-        // What is left of the frontage, if too little for another lot, goes to this one.
-        const last = room - width < grown.lots.leastFrontage;
-        const lean = last ? 0 : (lotRng.next() * 2 - 1) * leanMost;
+        // What is left of the frontage, if too little for another lot, goes to this one where that does not make it much too big.
+        const last = room - width < grown.lots.leastFrontage && cutLot(track, track.cursor, track.cursor + room, deepest, track.lean, 0).area <= wanted * MOST_AREA;
+        const lean = last || room - width < grown.lots.leastFrontage ? 0 : (lotRng.next() * 2 - 1) * leanMost;
         if (last) width = room;
+        // Or else it is drawn in to leave room enough for another.
+        else if (room - width < grown.lots.leastFrontage && room - grown.lots.leastFrontage >= grown.lots.leastFrontage) width = room - grown.lots.leastFrontage;
         cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, lean);
-        if (cut.area < wanted * 0.55 || cut.area > wanted * 1.8 || cut.depth < depth * grown.lots.depth.min * 0.6) continue;
+        if (cut.area < wanted * LEAST_AREA || cut.area > wanted * MOST_AREA || width > typical * WIDEST) continue;
         found = { track, cut, lean };
         emptiest = used;
       }
@@ -866,8 +927,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       track.lean = lot.lean;
       // In the outer districts a gap is sometimes left before the next lot.
       if (!filled && lotRng.next() < gapChance) {
+        // The next lot begins on a line that leans as this one's side does, so that the two never meet behind the gap.
         track.cursor = Math.min(track.to, track.cursor + grown.lots.gapWidth.min + lotRng.next() * (grown.lots.gapWidth.max - grown.lots.gapWidth.min));
-        track.lean = 0;
       }
       placed.push({ building, cell, polygon: cut.polygon, track, cut, street: track.street, door: frontage(track, (cut.from + cut.to) / 2) });
     };
@@ -878,13 +939,19 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         const block = cell.block as Block;
         if (cell.whole || block.polygon.length < 3 || block.tracks.length === 0 || block.tracks.some((track) => track.cursor > track.from) || reserved.has(cell.id)) return false;
         const area = polygonArea(block.polygon);
-        return loosely ? area > wanted * 0.25 : area > wanted * 0.4 && area < wanted * 2.5;
+        return loosely ? area > wanted * 0.25 : area > wanted * 0.6 && area < wanted * 1.6;
       };
-      let chosen = blocks.find((cell) => suits(cell, false));
+      // The block nearest its size; in a district by the water, the one nearest the water.
+      const off = (cell: Cell) => (byWater ? dryBy(cell.centre) : Math.abs(Math.log(polygonArea((cell.block as Block).polygon) / wanted)));
+      let chosen = blocks.filter((cell) => suits(cell, false)).reduce<Cell | undefined>((nearest, cell) => (nearest === undefined || off(cell) < off(nearest) ? cell : nearest), undefined);
+      // By the water it grows along the water, and takes a block there whatever its size: blocks at the bank are small.
+      const toWater = (cell: number) => Math.min(...outlineOf(cells[cell] as Cell).map(dryBy));
+      if (byWater) chosen = blocks.filter((cell) => suits(cell, true) && toWater(cell.id) < 2 * bankside).reduce<Cell | undefined>((largest, cell) => (largest === undefined || polygonArea((cell.block as Block).polygon) > polygonArea((largest.block as Block).polygon) ? cell : largest), undefined) ?? chosen;
       for (let tries = 0; !chosen && tries < BLOCK_TRIES; tries++) {
-        const cell = grow();
-        if (suits(cell, tries > BLOCK_TRIES / 2)) chosen = cell;
+        const cell = byWater ? grow(toWater) : grow();
+        if (suits(cell, byWater || tries > BLOCK_TRIES / 2)) chosen = cell;
       }
+      chosen ??= blocks.filter((cell) => suits(cell, true)).reduce<Cell | undefined>((nearest, cell) => (nearest === undefined || off(cell) < off(nearest) ? cell : nearest), undefined);
       if (!chosen) throw new TooSmall(4);
       chosen.whole = true;
       const block = chosen.block as Block;
@@ -916,25 +983,19 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       return found;
     };
     const place = (building: Building) => {
-      if (lotArea(building) >= grown.lots.wholeBlock) return placeWhole(building);
       const spread = 1 + (lotRng.next() * 2 - 1) * grown.lots.frontageSpread;
-      // A lot much deeper than a block lets a lot run takes a whole side of one.
-      const deep = lotSizeOf(building.type, pack).depth > grown.spacing.centre / 2 + 4;
-      if (deep) {
-        const side = fitSide(blocks, building, 0.35);
-        if (side) return take(side.cell, building, side.lot);
-      } else {
-        for (const block of blocks) {
-          const lot = fit(block, building, spread);
-          if (lot) return take(block, building, lot);
-        }
-      }
-      for (let tries = 0; tries < (deep ? BLOCK_TRIES / 4 : BLOCK_TRIES); tries++) {
-        const block = grow();
-        const lot = deep ? fitSide([block], building, 0.35)?.lot : fit(block, building, spread);
+      for (const block of blocks) {
+        const lot = fit(block, building, spread);
         if (lot) return take(block, building, lot);
       }
-      // Whatever side is nearest its size, however far off, rather than no place at all.
+      // What is too big to be cut from the side of a block has a block to itself.
+      if (lotArea(building) >= grown.lots.wholeBlock) return placeWhole(building);
+      for (let tries = 0; tries < BLOCK_TRIES; tries++) {
+        const block = grow();
+        const lot = fit(block, building, spread);
+        if (lot) return take(block, building, lot);
+      }
+      // Whatever side of a block is nearest its size, however far off, rather than no place at all.
       const side = fitSide(blocks, building, 0.1);
       if (side) return take(side.cell, building, side.lot);
       throw new TooSmall(5);
@@ -1051,7 +1112,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const used = cells.filter((cell) => (owner[cell.id] as number) >= 0 || reserved.has(cell.id));
   const usedSet = new Set(used.map((cell) => cell.id));
   const streets = new Set<number>();
-  const isStreet = (edge: Edge) => edge.bridge === true || (edge.kind !== 'none' && edge.kind !== 'wall' && passable(edge));
+  const isStreet = (edge: Edge) => edge.bridge === true || (edge.kind !== 'none' && edge.kind !== 'wall' && passable(edge) && (walkable(edge) || usedByRoad.has(edge.id)));
   for (const cell of used) for (const id of cell.edges) if (isStreet(edges[id] as Edge)) streets.add(id);
   // Each road runs as far as the town does, and a main road on to its exit.
   const exitDrafts: Array<{ point: Point; joins: number } | undefined> = brief.routes.map(() => undefined);
@@ -1103,8 +1164,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
           reach -= EXIT_REACH / 10;
           point = [direction[0] * reach, direction[1] * reach];
         }
-        const steps = Math.max(1, Math.ceil(distance(from, point) / 6));
-        const dryWay = Array.from({ length: steps + 1 }, (_, at): Point => [from[0] + ((point[0] - from[0]) * at) / steps, from[1] + ((point[1] - from[1]) * at) / steps]).every((spot) => dryBy(spot) >= widths.arterial / 2);
+        const steps = Math.max(1, Math.ceil(distance(from, point) / 2));
+        const dryWay = Array.from({ length: steps + 1 }, (_, at): Point => [from[0] + ((point[0] - from[0]) * at) / steps, from[1] + ((point[1] - from[1]) * at) / steps]).every((spot) => dryBy(spot) >= widths.arterial / 2 + 1);
         if (reach <= 0 || distance(from, point) < widths.arterial || distance(from, point) > 4 * EXIT_REACH || !dryWay || crossesTown(from, point) || exitDrafts.some((other) => other && distance(other.point, point) < widths.arterial)) continue;
         for (const id of road.edges.slice(0, upTo ?? last)) streets.add(id);
         exitDrafts[road.exit] = { point, joins };
@@ -1174,9 +1235,12 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       }
       for (const way of ways[corner] as Way[]) {
         const edge = edgeById(way.edge);
-        if (!isStreet(edge) && !(edge.kind === 'none' && edge.cells.every((id) => !usedSet.has(id)))) continue;
+        // Along streets and bridges; failing those, along a boundary that was closed between two blocks, and one
+        // between blocks that were built on only where nothing else will do: the lots there are drawn back from it.
+        const closed = edge.kind === 'none' && !edge.fixed;
+        if (!isStreet(edge) && !closed) continue;
         if (wallCorners.has(way.to) && !gates.has(way.to)) continue;
-        const next = so + distance(corners[corner] as Point, corners[way.to] as Point) * (edge.bridge ? 4 : 1);
+        const next = so + distance(corners[corner] as Point, corners[way.to] as Point) * (edge.bridge ? 4 : closed && edge.cells.some((id) => usedSet.has(id)) ? 8 : 1);
         if (next < (reached.get(way.to) ?? Infinity)) {
           reached.set(way.to, next);
           cameBy.set(way.to, [corner, way.edge]);
@@ -1238,7 +1302,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     const points: Point[] = court ? [corners[from] as Point, courtEnd(edge)] : [corners[edge.a] as Point, corners[edge.b] as Point];
     segmentPoints.set(edge.id, points);
     const route = edge.exit === undefined ? undefined : (brief.routes[edge.exit] as SettlementBrief['routes'][number]);
-    const kind: SegmentKind = edge.bridge ? 'bridge' : edge.kind === 'arterial' || edge.quay ? 'arterial' : edge.kind === 'street' ? 'street' : 'lane';
+    const kind: SegmentKind = edge.bridge ? 'bridge' : edge.kind === 'arterial' ? 'arterial' : edge.kind === 'street' ? 'street' : 'lane';
     return {
       id,
       fromJunctionId: cornerJunction(from),

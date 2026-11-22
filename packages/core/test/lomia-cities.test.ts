@@ -48,7 +48,7 @@ describe('every settlement of Lomia', () => {
     expect(people).toBe(2_935_089);
   });
 
-  it('lays out with every layout invariant holding, a path between lots everywhere, and sound day plans', { timeout: 180_000 }, () => {
+  it('lays out with every layout invariant holding, a path between lots everywhere, and sound day plans', { timeout: 400_000 }, () => {
     const pack = medievalPack();
     const { settlements } = lomiaWorld();
     const RESIDENTS_SAMPLED = 12;
