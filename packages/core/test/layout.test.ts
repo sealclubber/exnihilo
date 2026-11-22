@@ -354,7 +354,7 @@ describe('determinism and isolation', () => {
   it('leaves the city generator at version 2', () => {
     expect(GENERATOR_VERSION).toBe(4);
     expect(badanos.city.summary.generatorVersion).toBe(4);
-    expect(LAYOUT_VERSION).toBe(3);
+    expect(LAYOUT_VERSION).toBe(4);
   });
 
   it('gives a different layout for a different seed, which still passes every invariant', () => {
@@ -424,7 +424,7 @@ describe('footprints', () => {
     const { summary, ...rest } = without.layout;
     const text = JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) });
     expect(createHash('sha256').update(text).digest('hex')).toBe(baseline.badanos);
-    expect(summary.layoutVersion).toBe(3);
+    expect(summary.layoutVersion).toBe(4);
     expect(without.layout.lots).toHaveLength(1772);
   });
 
@@ -494,7 +494,9 @@ describe('the path function', () => {
     const path = shortestPath(badanos.layout, lot.id, lot.id);
     expect(path.length).toBe(0);
     expect(path.segmentIds).toEqual([lot.entrance.segmentId]);
-    expect(path.points).toEqual([lot.entrance.point]);
+    // The one point of the path is the entrance, to within the rounding of projecting it onto its segment.
+    expect(path.points).toHaveLength(1);
+    expect(geometry.distance(path.points[0]!, lot.entrance.point)).toBeLessThan(1e-9);
     expect(LayoutPathSchema.safeParse(path).success).toBe(true);
   });
 

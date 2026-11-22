@@ -60,6 +60,9 @@ export interface LayoutOptions {
   arrange?: boolean;
 }
 
+/** How many blocks a district may grow to find a street that has none of a spread civic type yet. */
+const APART_BLOCKS = 3;
+
 /** Thrown inside an attempt when the grid of candidate blocks proved too small; the attempt is repeated on a larger one. */
 class GridTooSmall extends Error {}
 
@@ -219,6 +222,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
   const buildingsOf: Building[][] = city.districts.map(() => []);
   for (const building of city.buildings) (buildingsOf[districtIndex.get(building.districtId) as number] as Building[]).push(building);
   const atExits = new Set(settings.atExits ?? []);
+  /** Civic buildings the pack spreads across the districts: within a district they are kept to streets of their own. */
+  const spreadCivic = new Set(pack.landmarks.filter((landmark) => landmark.spread).map((landmark) => landmark.id));
   const exitVectors = brief.routes.map((route) => bearingVector(route.bearing));
   /** Buildings that belong toward an exit take the exits in turn. */
   const exitOf = new Map<string, number>();
@@ -335,14 +340,46 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       tryBlock(grow(), building, frontage, depth);
     };
 
+    /**
+     * Places a civic building that the pack spreads, such as a well, apart from the others of its type: on a
+     * frontage whose street has none yet, the newest block first, so that they follow the district as it grows.
+     * Where every frontage with room has one already, the district grows a block for it.
+     */
+    const ofTypeOn = new Map<string, number>();
+    const streetOf = (block: Block, north: boolean) => `${cellI(block.cell)},${cellJ(block.cell) + (north ? 0 : 1)}`;
+    const placeApart = (building: Building) => {
+      const { frontage, depth } = lotSizeOf(building.type, pack);
+      // A lot that runs from street to street has no frontage of its own to choose.
+      if (depth > blockDepth / 2) return place(building);
+      const countOn = (block: Block, north: boolean) => ofTypeOn.get(`${building.type}|${streetOf(block, north)}`) ?? 0;
+      const fits = (block: Block, north: boolean) => (north ? block.north : block.south) + frontage <= length + EPSILON;
+      let chosen: { block: Block; north: boolean; count: number } | undefined;
+      const consider = (block: Block) => {
+        for (const north of [true, false]) {
+          if (!fits(block, north)) continue;
+          const count = countOn(block, north);
+          if (!chosen || count < chosen.count) chosen = { block, north, count };
+        }
+      };
+      for (let at = blocks.length - 1; at >= 0 && chosen?.count !== 0; at--) consider(blocks[at] as Block);
+      for (let grown = 0; grown < APART_BLOCKS && chosen?.count !== 0; grown++) consider(grow());
+      const { block, north } = chosen ?? { block: grow(), north: true };
+      placed.push({ building, cell: block.cell, north, start: north ? block.north : block.south, frontage, depth });
+      if (north) block.north += frontage;
+      else block.south += frontage;
+      const key = `${building.type}|${streetOf(block, north)}`;
+      ofTypeOn.set(key, (ofTypeOn.get(key) ?? 0) + 1);
+    };
+
     // Landmarks take their larger lots first; buildings that belong toward an exit go last, on that side.
     const area = (building: Building) => {
       const size = lotSizeOf(building.type, pack);
       return size.frontage * size.depth;
     };
     const towardExit = buildings.filter((building) => exitOf.has(building.id));
+    const apart = buildings.filter((building) => spreadCivic.has(building.type) && !exitOf.has(building.id));
     const landmarks = buildings
-      .filter((building) => building.kind === 'landmark' && !exitOf.has(building.id))
+      .filter((building) => building.kind === 'landmark' && !exitOf.has(building.id) && !spreadCivic.has(building.type))
       .sort((a, b) => area(b) - area(a) || (a.id < b.id ? -1 : 1));
     const others = buildings.filter((building) => building.kind !== 'landmark' && !exitOf.has(building.id));
     for (let index = others.length - 1; index > 0; index--) {
@@ -350,7 +387,15 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       [others[index], others[other]] = [others[other] as Building, others[index] as Building];
     }
     addBlock(seedCell, 0);
-    for (const building of [...landmarks, ...others]) place(building);
+    // The civic buildings that are spread take their turns at even steps among the rest, so that the district has
+    // grown to a new street by the time the next one of a type is placed.
+    const rest = [...landmarks, ...others];
+    let next = 0;
+    rest.forEach((building, turn) => {
+      while (next < apart.length && Math.floor(((next + 0.5) * rest.length) / apart.length) <= turn) placeApart(apart[next++] as Building);
+      place(building);
+    });
+    while (next < apart.length) placeApart(apart[next++] as Building);
     const exitBlocks = new Map<number, Block>();
     for (const building of towardExit) {
       const exit = exitOf.get(building.id) as number;

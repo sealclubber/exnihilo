@@ -114,7 +114,7 @@ describe('the medieval pack\'s districts', () => {
     expect(Object.keys(tierLists).sort()).toEqual(pack.pack.statusTiers.map((tier) => tier.id).sort());
     expect(pack.districts.housingNearWork).toMatchObject({ share: 0.35, kinds: { upper: 0 } });
     expect(pack.pack.homeAndWorkLabel).toBe('{workplace} and home');
-    expect([GENERATOR_VERSION, LAYOUT_VERSION, LIFE_VERSION]).toEqual([4, 3, 4]);
+    expect([GENERATOR_VERSION, LAYOUT_VERSION, LIFE_VERSION]).toEqual([4, 4, 4]);
   });
 });
 
@@ -355,10 +355,10 @@ describe('every settlement of Lomia', () => {
     // not are chapels, whose lots are of a size no other building has, so that a district's chapels can only change
     // places with each other, and the odd butcher or tavern in a district with hardly any like lots.
     expect(besideEachOther / spreadBuildings).toBeLessThan(0.015);
-    // Wells do not: the layout generator gives landmarks their lots first, so a district's wells stand in a row,
-    // and only a well has a lot of a well's size. Moving them apart would move lots, which this patch may not do.
-    // It is reported in the README as a thing for the next layout generator.
-    expect(wellsInARow / wells).toBeGreaterThan(0.5);
+    // Wells stood in a row until layout version 4 (phase 6C), because landmarks took their lots first and only a
+    // well has a lot of a well's size. They are now placed at even steps as the district grows, each on a street
+    // that has none yet: outsiders.test.ts holds that rule for every settlement.
+    expect(wellsInARow).toBe(0);
   });
 });
 

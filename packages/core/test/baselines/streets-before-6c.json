@@ -1,0 +1,544 @@
+{
+  "note": "Recorded before phase 6C, from GENERATOR_VERSION 4, LAYOUT_VERSION 3, LIFE_VERSION 4 and pack 0.9.0 with default seeds, by scripts/measure-streets.ts: for Badanos, Pombal and Vereceldo, the people on the streets on each hour of day 1 (walking, stopped at a point on a street, and outside at a building), and phase 6B's target figures measured as rounds.test.ts measures them. \"briefs\" is a fingerprint of every settlement brief of Lomia as the importer made them before briefs said where each route leads.",
+  "versions": {
+    "generator": 4,
+    "layout": 3,
+    "life": 4,
+    "pack": "0.9.0"
+  },
+  "outsiders": false,
+  "briefs": "b952acd4f11327e635e87b9bf22a4326a6b064e52ea6cdb7f5a3dea5ecbef064",
+  "towns": {
+    "Badanos": {
+      "settlementId": "settlement-641",
+      "residents": 9607,
+      "buildings": 1829,
+      "onTheStreetsByHour": [
+        {
+          "hour": 0,
+          "walking": 11,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 1,
+          "walking": 9,
+          "onAStreet": 3,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 2,
+          "walking": 8,
+          "onAStreet": 4,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 3,
+          "walking": 6,
+          "onAStreet": 5,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 4,
+          "walking": 12,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 5,
+          "walking": 34,
+          "onAStreet": 3,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 6,
+          "walking": 26,
+          "onAStreet": 1,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 7,
+          "walking": 57,
+          "onAStreet": 10,
+          "outsideAtABuilding": 25
+        },
+        {
+          "hour": 8,
+          "walking": 948,
+          "onAStreet": 11,
+          "outsideAtABuilding": 439
+        },
+        {
+          "hour": 9,
+          "walking": 254,
+          "onAStreet": 63,
+          "outsideAtABuilding": 752
+        },
+        {
+          "hour": 10,
+          "walking": 219,
+          "onAStreet": 44,
+          "outsideAtABuilding": 1230
+        },
+        {
+          "hour": 11,
+          "walking": 221,
+          "onAStreet": 37,
+          "outsideAtABuilding": 1438
+        },
+        {
+          "hour": 12,
+          "walking": 208,
+          "onAStreet": 48,
+          "outsideAtABuilding": 957
+        },
+        {
+          "hour": 13,
+          "walking": 221,
+          "onAStreet": 38,
+          "outsideAtABuilding": 755
+        },
+        {
+          "hour": 14,
+          "walking": 206,
+          "onAStreet": 42,
+          "outsideAtABuilding": 753
+        },
+        {
+          "hour": 15,
+          "walking": 280,
+          "onAStreet": 41,
+          "outsideAtABuilding": 1201
+        },
+        {
+          "hour": 16,
+          "walking": 261,
+          "onAStreet": 45,
+          "outsideAtABuilding": 1592
+        },
+        {
+          "hour": 17,
+          "walking": 1026,
+          "onAStreet": 10,
+          "outsideAtABuilding": 781
+        },
+        {
+          "hour": 18,
+          "walking": 185,
+          "onAStreet": 36,
+          "outsideAtABuilding": 121
+        },
+        {
+          "hour": 19,
+          "walking": 238,
+          "onAStreet": 41,
+          "outsideAtABuilding": 176
+        },
+        {
+          "hour": 20,
+          "walking": 73,
+          "onAStreet": 8,
+          "outsideAtABuilding": 15
+        },
+        {
+          "hour": 21,
+          "walking": 56,
+          "onAStreet": 7,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 22,
+          "walking": 26,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 23,
+          "walking": 57,
+          "onAStreet": 5,
+          "outsideAtABuilding": 0
+        }
+      ],
+      "targets": {
+        "walkingAt1230": {
+          "meanOfSixWorkDays": 203.16666666666666,
+          "byDay": [
+            203,
+            196,
+            216,
+            202,
+            204,
+            198
+          ]
+        },
+        "walkingAt0750": 910,
+        "perceivedFrom100PointsAt1230": {
+          "shareSeeingSomeone": 0.49,
+          "mean": 2.0283333333333333,
+          "median": 0
+        },
+        "watchOnTheStreetsOnTheHour": {
+          "min": 11,
+          "max": 34,
+          "watchmen": 97
+        },
+        "tripsPerResident": 3.652128656188196,
+        "tripsBegun": 35086
+      }
+    },
+    "Pombal": {
+      "settlementId": "settlement-5",
+      "residents": 47603,
+      "buildings": 8627,
+      "onTheStreetsByHour": [
+        {
+          "hour": 0,
+          "walking": 131,
+          "onAStreet": 21,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 1,
+          "walking": 86,
+          "onAStreet": 16,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 2,
+          "walking": 83,
+          "onAStreet": 9,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 3,
+          "walking": 80,
+          "onAStreet": 17,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 4,
+          "walking": 111,
+          "onAStreet": 9,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 5,
+          "walking": 215,
+          "onAStreet": 11,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 6,
+          "walking": 327,
+          "onAStreet": 3,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 7,
+          "walking": 862,
+          "onAStreet": 64,
+          "outsideAtABuilding": 96
+        },
+        {
+          "hour": 8,
+          "walking": 6671,
+          "onAStreet": 76,
+          "outsideAtABuilding": 1966
+        },
+        {
+          "hour": 9,
+          "walking": 1822,
+          "onAStreet": 187,
+          "outsideAtABuilding": 3403
+        },
+        {
+          "hour": 10,
+          "walking": 1726,
+          "onAStreet": 157,
+          "outsideAtABuilding": 5697
+        },
+        {
+          "hour": 11,
+          "walking": 1638,
+          "onAStreet": 131,
+          "outsideAtABuilding": 6838
+        },
+        {
+          "hour": 12,
+          "walking": 1488,
+          "onAStreet": 150,
+          "outsideAtABuilding": 4595
+        },
+        {
+          "hour": 13,
+          "walking": 1348,
+          "onAStreet": 168,
+          "outsideAtABuilding": 3451
+        },
+        {
+          "hour": 14,
+          "walking": 1303,
+          "onAStreet": 117,
+          "outsideAtABuilding": 3432
+        },
+        {
+          "hour": 15,
+          "walking": 2025,
+          "onAStreet": 156,
+          "outsideAtABuilding": 5777
+        },
+        {
+          "hour": 16,
+          "walking": 1973,
+          "onAStreet": 165,
+          "outsideAtABuilding": 7743
+        },
+        {
+          "hour": 17,
+          "walking": 7201,
+          "onAStreet": 39,
+          "outsideAtABuilding": 3928
+        },
+        {
+          "hour": 18,
+          "walking": 1171,
+          "onAStreet": 70,
+          "outsideAtABuilding": 646
+        },
+        {
+          "hour": 19,
+          "walking": 2016,
+          "onAStreet": 65,
+          "outsideAtABuilding": 844
+        },
+        {
+          "hour": 20,
+          "walking": 888,
+          "onAStreet": 34,
+          "outsideAtABuilding": 90
+        },
+        {
+          "hour": 21,
+          "walking": 690,
+          "onAStreet": 19,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 22,
+          "walking": 404,
+          "onAStreet": 3,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 23,
+          "walking": 642,
+          "onAStreet": 54,
+          "outsideAtABuilding": 0
+        }
+      ],
+      "targets": {
+        "walkingAt1230": {
+          "meanOfSixWorkDays": 1417,
+          "byDay": [
+            1389,
+            1460,
+            1363,
+            1401,
+            1387,
+            1502
+          ]
+        },
+        "walkingAt0750": 8378,
+        "perceivedFrom100PointsAt1230": {
+          "shareSeeingSomeone": 0.5,
+          "mean": 2.0766666666666667,
+          "median": 1
+        },
+        "watchOnTheStreetsOnTheHour": {
+          "min": 92,
+          "max": 405,
+          "watchmen": 1012
+        },
+        "tripsPerResident": 3.123752704661471,
+        "tripsBegun": 148700
+      }
+    },
+    "Vereceldo": {
+      "settlementId": "settlement-455",
+      "residents": 253,
+      "buildings": 63,
+      "onTheStreetsByHour": [
+        {
+          "hour": 0,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 1,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 2,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 3,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 4,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 5,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 6,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 7,
+          "walking": 1,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 8,
+          "walking": 6,
+          "onAStreet": 1,
+          "outsideAtABuilding": 13
+        },
+        {
+          "hour": 9,
+          "walking": 2,
+          "onAStreet": 1,
+          "outsideAtABuilding": 21
+        },
+        {
+          "hour": 10,
+          "walking": 3,
+          "onAStreet": 1,
+          "outsideAtABuilding": 32
+        },
+        {
+          "hour": 11,
+          "walking": 1,
+          "onAStreet": 1,
+          "outsideAtABuilding": 39
+        },
+        {
+          "hour": 12,
+          "walking": 1,
+          "onAStreet": 0,
+          "outsideAtABuilding": 28
+        },
+        {
+          "hour": 13,
+          "walking": 2,
+          "onAStreet": 0,
+          "outsideAtABuilding": 18
+        },
+        {
+          "hour": 14,
+          "walking": 2,
+          "onAStreet": 0,
+          "outsideAtABuilding": 19
+        },
+        {
+          "hour": 15,
+          "walking": 2,
+          "onAStreet": 0,
+          "outsideAtABuilding": 28
+        },
+        {
+          "hour": 16,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 43
+        },
+        {
+          "hour": 17,
+          "walking": 2,
+          "onAStreet": 1,
+          "outsideAtABuilding": 15
+        },
+        {
+          "hour": 18,
+          "walking": 4,
+          "onAStreet": 0,
+          "outsideAtABuilding": 3
+        },
+        {
+          "hour": 19,
+          "walking": 1,
+          "onAStreet": 1,
+          "outsideAtABuilding": 5
+        },
+        {
+          "hour": 20,
+          "walking": 1,
+          "onAStreet": 1,
+          "outsideAtABuilding": 1
+        },
+        {
+          "hour": 21,
+          "walking": 2,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 22,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        },
+        {
+          "hour": 23,
+          "walking": 0,
+          "onAStreet": 0,
+          "outsideAtABuilding": 0
+        }
+      ],
+      "targets": {
+        "walkingAt1230": {
+          "meanOfSixWorkDays": 1.1666666666666667,
+          "byDay": [
+            2,
+            2,
+            1,
+            0,
+            2,
+            0
+          ]
+        },
+        "walkingAt0750": 5,
+        "perceivedFrom100PointsAt1230": {
+          "shareSeeingSomeone": 0.15833333333333333,
+          "mean": 0.29,
+          "median": 0
+        },
+        "watchOnTheStreetsOnTheHour": {
+          "min": 0,
+          "max": 1,
+          "watchmen": 2
+        },
+        "tripsPerResident": 4.047430830039525,
+        "tripsBegun": 1024
+      }
+    }
+  }
+}

@@ -21,8 +21,11 @@ import { z } from 'zod';
 import { BuildingIdSchema, DistrictIdSchema } from '../city/records.ts';
 import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementIdSchema } from '../schema.ts';
 
-/** Raised whenever a layout for the same inputs would change. */
-export const LAYOUT_VERSION = 3;
+/**
+ * Raised whenever a layout for the same inputs would change. Version 4 places the civic buildings a pack spreads,
+ * such as wells, on streets of their own within a district instead of side by side.
+ */
+export const LAYOUT_VERSION = 4;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
