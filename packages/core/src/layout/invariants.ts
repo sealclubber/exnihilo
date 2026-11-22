@@ -26,6 +26,8 @@ import {
   pointInPolygon,
   polygonArea,
   polygonWithin,
+  polylineLength,
+  slicePolyline,
   polygonsOverlap,
   sharedBoundaryLength,
   strictlyInside,
@@ -36,6 +38,10 @@ import { type Layout, type Lot, type Segment, type Water, LAYOUT_VERSION } from 
 export const BEARING_TOLERANCE = 20;
 
 const MOST_PROBLEMS_LISTED = 20;
+/** The clear ground a layout may leave between a roadway and the lots along it, in metres. */
+const VERGE = 1;
+/** A segment that ends at a gate is on the wall's line there; it is looked at from this far along, in metres. */
+const GATE_REACH = 0.01;
 const ORIGIN: Point = [0, 0];
 
 /** The distance from a polygon to a body of water. Zero when they meet. */
@@ -49,7 +55,7 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
   const problem = (text: string) => {
     if (problems.length < MOST_PROBLEMS_LISTED) problems.push(text);
   };
-  const { junctions, segments, exits, waters, lots, districtAreas, summary } = layout;
+  const { junctions, segments, exits, waters, lots, districtAreas, walls, places, summary } = layout;
 
   // IDs are unique and every list is in ID order.
   const index = <T>(what: string, list: T[], idOf: (record: T) => string): Map<string, T> => {
@@ -164,8 +170,8 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     if (distanceToPolyline(lot.entrance.point, segment.points) > EPSILON) {
       problem(`${lot.id} has an entrance point that is not on ${segment.id}`);
     }
-    // Bordering: nothing wider than half the widest street lies between the lot and its entrance.
-    if (!pointInPolygon(lot.entrance.point, lot.polygon) && distanceToPolygonEdge(lot.entrance.point, lot.polygon) > widest / 2 + EPSILON) {
+    // Bordering: nothing wider than half the widest street, and a verge, lies between the lot and its entrance.
+    if (!pointInPolygon(lot.entrance.point, lot.polygon) && distanceToPolygonEdge(lot.entrance.point, lot.polygon) > widest / 2 + VERGE + EPSILON) {
       problem(`${lot.id} does not border ${segment.id}: its entrance is ${distanceToPolygonEdge(lot.entrance.point, lot.polygon).toFixed(2)} m from the lot`);
     }
   }
@@ -204,6 +210,53 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     for (const water of waters) {
       const wet = water.kind === 'sea' ? polygonsOverlap(lot.polygon, water.polygon) : distancePolygonToPolyline(lot.polygon, water.centreLine) < water.width / 2 - EPSILON;
       if (wet) problem(`${lot.id} overlaps ${water.id}, the ${water.kind}`);
+    }
+  }
+
+  // Walls and places. A lot overlaps neither, but for the lot of a place's own building, which is the place; and a
+  // gatehouse may stand apart from its district, at its gate.
+  index('wall', walls, (record) => record.id);
+  index('place', places, (record) => record.id);
+  const gateJunctions = new Set<string>();
+  const gatehouses = new Set<string>();
+  for (const wall of walls) {
+    const line = wall.closed ? [...wall.line, wall.line[0] as Point] : wall.line;
+    for (const gate of wall.gates) {
+      const junction = junctionById.get(gate.junctionId);
+      if (!junction) problem(`${wall.id} has a gate at ${gate.junctionId}, which does not exist`);
+      else {
+        if (junction.kind !== 'gate') problem(`${wall.id} has a gate at ${junction.id}, which is not marked as a gate`);
+        if (distanceToPolyline(junction.position, line) > EPSILON) problem(`${wall.id} has a gate at ${junction.id}, which is not on the wall's line`);
+      }
+      if (gateJunctions.has(gate.junctionId)) problem(`${gate.junctionId} is a gate more than once`);
+      gateJunctions.add(gate.junctionId);
+      if (!buildingById.has(gate.buildingId)) problem(`${wall.id} has a gate kept by ${gate.buildingId}, which does not exist`);
+      if (gatehouses.has(gate.buildingId)) problem(`${gate.buildingId} keeps more than one gate`);
+      gatehouses.add(gate.buildingId);
+    }
+    // Streets cross a wall only at its gates: a segment may meet the line at an end that is one of its gates, and nowhere else.
+    const ownGates = new Set(wall.gates.map((gate) => gate.junctionId));
+    for (const segment of segments) {
+      const length = polylineLength(segment.points);
+      const from = ownGates.has(segment.fromJunctionId) ? Math.min(GATE_REACH, length / 2) : 0;
+      const to = length - (ownGates.has(segment.toJunctionId) ? Math.min(GATE_REACH, length / 2) : 0);
+      const points = from === 0 && to === length ? segment.points : slicePolyline(segment.points, from, to);
+      if (points.some((point, at) => at > 0 && crossingsOfPolyline(points[at - 1] as Point, point, line) > 0)) problem(`${segment.id} crosses ${wall.id} where there is no gate`);
+    }
+    for (const lot of lots) {
+      if (distancePolygonToPolyline(lot.polygon, line) < wall.width / 2 - EPSILON) problem(`${lot.id} overlaps ${wall.id}`);
+    }
+  }
+  for (const junction of junctions) {
+    if (junction.kind === 'gate' && !gateJunctions.has(junction.id)) problem(`${junction.id} is marked as a gate but no wall has it`);
+  }
+  for (const place of places) {
+    if (!buildingById.has(place.buildingId)) problem(`${place.id} belongs to ${place.buildingId}, which does not exist`);
+    for (const lot of lots) {
+      if (lot.buildingId !== place.buildingId && polygonsOverlap(lot.polygon, place.polygon)) problem(`${lot.id} overlaps ${place.id}`);
+    }
+    for (const segment of segments) {
+      if (distancePolygonToPolyline(place.polygon, segment.points) < segment.width / 2 - EPSILON) problem(`${place.id} overlaps the roadway of ${segment.id}`);
     }
   }
 
@@ -274,6 +327,8 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       continue;
     }
     for (const lot of districtLots) {
+      // A gatehouse stands at its gate, wherever its district lies.
+      if (gatehouses.has(lot.buildingId)) continue;
       if (!area.polygons.some((polygon) => polygonWithin(lot.polygon, polygon))) problem(`${lot.id} lies outside the area of ${districtId}`);
     }
   }
@@ -328,12 +383,16 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
   }
 
   // The summary agrees with the records, and the density is plausible.
-  const counts = { junctions, segments, exits, waters, lots, districtAreas };
+  const counts = { junctions, segments, exits, waters, lots, districtAreas, walls, places };
   for (const [name, list] of Object.entries(counts)) {
     if (summary.counts[name as keyof typeof counts] !== list.length) {
       problem(`the summary counts ${summary.counts[name as keyof typeof counts]} ${name} but there are ${list.length}`);
     }
   }
+  if (summary.counts.gates !== gateJunctions.size) problem(`the summary counts ${summary.counts.gates} gates but there are ${gateJunctions.size}`);
+  // A wall and a plaza exactly where the brief flags them, when the generator makes them at all.
+  if (walls.length > 0 && !brief.flags.walls) problem('the layout has a wall but the brief is not flagged for walls');
+  if (places.length > 0 && !brief.flags.plaza) problem('the layout has a plaza but the brief is not flagged for one');
   if (Math.abs(summary.builtArea - builtArea) > EPSILON * Math.max(builtArea, 1)) {
     problem(`the summary gives a built area of ${summary.builtArea} but the lots cover ${builtArea}`);
   }

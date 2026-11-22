@@ -133,8 +133,9 @@ interface Stretch {
 }
 
 /**
- * Which of the pack's kinds of sleeping place a street position is: on a lane, by the end of a bridge (within
- * `reach` of it, on a segment that is not the bridge), or on a street built on one side only, as at the town's edge.
+ * Which of the pack's kinds of sleeping place a street position is: on a lane, by the end of a bridge or by a gate
+ * (within `reach` of it, on a segment that is not a bridge), or on a street built on one side only, as at the
+ * town's edge.
  */
 export function sleepingPlacesAt(layout: Layout, position: StreetPosition, reach: number): SleepingPlace[] {
   return sleepingPlaces(layout).at(position, reach);
@@ -163,16 +164,17 @@ function sleepingPlaces(layout: Layout) {
     if (side !== 0) sides.set(segment.id, (sides.get(segment.id) ?? new Set()).add(side));
   }
   const isEdge = (segment: Segment) => segment.kind !== 'lane' && segment.kind !== 'bridge' && sides.get(segment.id)?.size === 1;
-  const bridgeEnds = (segment: Segment) =>
-    segment.kind === 'bridge' ? [] : [segment.fromJunctionId, segment.toJunctionId].flatMap((id) => (junctions.get(id)?.kind === 'bridge-end' ? [junctions.get(id)!.position] : []));
+  const endsOfKind = (segment: Segment, kind: 'bridge-end' | 'gate') =>
+    segment.kind === 'bridge' ? [] : [segment.fromJunctionId, segment.toJunctionId].flatMap((id) => (junctions.get(id)?.kind === kind ? [junctions.get(id)!.position] : []));
   return {
     at(position: StreetPosition, reach: number): SleepingPlace[] {
       const segment = segments.get(position.segmentId);
       if (!segment) return [];
       const kinds: SleepingPlace[] = [];
       if (segment.kind === 'lane') kinds.push('lane');
-      if (bridgeEnds(segment).some((end) => distance(end, position.point) <= reach + 1e-6)) kinds.push('bridge-end');
+      if (endsOfKind(segment, 'bridge-end').some((end) => distance(end, position.point) <= reach + 1e-6)) kinds.push('bridge-end');
       if (isEdge(segment)) kinds.push('edge');
+      if (endsOfKind(segment, 'gate').some((end) => distance(end, position.point) <= reach + 1e-6)) kinds.push('gate');
       return kinds;
     },
     /** Every stretch of street of the kinds allowed. */
@@ -181,9 +183,11 @@ function sleepingPlaces(layout: Layout) {
       for (const segment of layout.segments) {
         const length = polylineLength(segment.points);
         if ((allowed.includes('lane') && segment.kind === 'lane') || (allowed.includes('edge') && isEdge(segment))) found.push({ segment, from: 0, to: length });
-        else if (allowed.includes('bridge-end') && segment.kind !== 'bridge') {
-          if (junctions.get(segment.fromJunctionId)?.kind === 'bridge-end') found.push({ segment, from: 0, to: Math.min(reach, length) });
-          if (junctions.get(segment.toJunctionId)?.kind === 'bridge-end') found.push({ segment, from: Math.max(0, length - reach), to: length });
+        else if (segment.kind !== 'bridge') {
+          // By the end of a bridge, or by a gate: the stretch of the street within reach of that junction.
+          const by = (id: string) => (junctions.get(id)?.kind === 'bridge-end' && allowed.includes('bridge-end')) || (junctions.get(id)?.kind === 'gate' && allowed.includes('gate'));
+          if (by(segment.fromJunctionId)) found.push({ segment, from: 0, to: Math.min(reach, length) });
+          if (by(segment.toJunctionId)) found.push({ segment, from: Math.max(0, length - reach), to: length });
         }
       }
       return found;

@@ -4,7 +4,7 @@
  */
 import { PackError } from '@worldsim/core';
 import { buildApp } from './app.ts';
-import { AvatarKeeper } from './avatar.ts';
+import { AvatarKeeper, fromStore, toStore } from './avatar.ts';
 import { WorldClock } from './clock.ts';
 import { packPathFromEnv, storePathFromEnv } from './config.ts';
 import { loadPack } from './pack-loader.ts';
@@ -31,7 +31,7 @@ try {
   });
 
   // The avatar is written to the store whenever it changes, and restored here.
-  const avatar = new AvatarKeeper({ stored: store.loadAvatar(), save: (state) => store.saveAvatar(state) });
+  const avatar = new AvatarKeeper({ stored: fromStore(store.loadAvatar(), pack), save: (state) => store.saveAvatar(toStore(state, pack)) });
 
   const app = buildApp(world, report, pack, { clock, avatar });
   await app.listen({ host, port });

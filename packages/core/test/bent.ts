@@ -5,7 +5,7 @@
  * and body of water is first cut into short pieces and then moved point by point, so that a segment that was
  * one straight line becomes a polyline of many pieces, and a lot's sides bend with its street. A warp of the
  * whole plane keeps what touched touching and what was apart apart, so the result is a sound layout by every
- * rule of the format. A lot's entrance is put back on its segment's line, from which cutting a curve into
+ * rule of the format but the distance from a lot to its street, which a warp stretches. A lot's entrance is put back on its segment's line, from which cutting a curve into
  * straight pieces moves it a little.
  */
 import { type Layout, type Point, geometry } from '../src/index.ts';
@@ -32,6 +32,12 @@ function bendLine(points: readonly Point[], closed: boolean): Point[] {
   return bent;
 }
 
+/** A polygon drawn in toward its middle by a small share. */
+function shrink(polygon: readonly Point[], by: number, about: readonly Point[] = polygon): Point[] {
+  const [cx, cy] = geometry.polygonCentroid(about);
+  return polygon.map(([x, y]): Point => [cx + (x - cx) * (1 - by), cy + (y - cy) * (1 - by)]);
+}
+
 /** The same town with every street bent. IDs, and which lot opens onto which segment, are as they were. */
 export function bend(layout: Layout): Layout {
   const everyPoint: Point[] = [];
@@ -39,18 +45,23 @@ export function bend(layout: Layout): Layout {
     everyPoint.push(...points);
     return points;
   };
-  const segments = layout.segments.map((segment) => ({ ...segment, points: keep(bendLine(segment.points, false)) }));
+  // The warp squeezes as well as stretches, by up to a third: roadways and the river are narrowed to match.
+  const segments = layout.segments.map((segment) => ({ ...segment, points: keep(bendLine(segment.points, false)), width: segment.width * 0.6 }));
   const lines = new Map(segments.map((segment) => [segment.id, segment.points]));
   const bent: Layout = {
     ...layout,
     junctions: layout.junctions.map((junction) => ({ ...junction, position: warp(junction.position) })),
     segments,
-    waters: layout.waters.map((water) => (water.kind === 'river' ? { ...water, centreLine: bendLine(water.centreLine, false) } : { ...water, polygon: bendLine(water.polygon, true) })),
+    waters: layout.waters.map((water) => (water.kind === 'river' ? { ...water, centreLine: bendLine(water.centreLine, false), width: water.width * 0.6 } : { ...water, polygon: bendLine(water.polygon, true) })),
     lots: layout.lots.map((lot) => ({
       ...lot,
-      polygon: keep(bendLine(lot.polygon, true)),
+      // Lots that shared a side, or touched a roadway, are cut into pieces at different places from their neighbour:
+      // each is drawn in a little, so that the pieces cannot graze.
+      polygon: keep(bendLine(shrink(lot.polygon, 0.03), true)),
       entrance: { ...lot.entrance, point: geometry.projectOnPolyline(lines.get(lot.entrance.segmentId) as Point[], warp(lot.entrance.point)).point },
-      footprints: lot.footprints.map((footprint) => bendLine(footprint, true)),
+      // A footprint shares sides with its lot, and the two are cut into pieces at different places; drawn in
+      // toward the middle of the lot by more than the lot is, it stays inside the bent lot.
+      footprints: lot.footprints.map((footprint) => bendLine(shrink(footprint, 0.08, lot.polygon), true)),
     })),
     districtAreas: layout.districtAreas.map((area) => ({ ...area, polygons: area.polygons.map((polygon) => bendLine(polygon, true)), labelPoint: warp(area.labelPoint) })),
   };

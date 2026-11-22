@@ -50,8 +50,9 @@
 # vagrants  people with no household and no dwelling
 #   minPopulation  a settlement with fewer residents has none
 #   share          how many, as a share of the residents
-#   sleepsAt       where one may sleep: `lane`, `bridge-end`, or `edge`, a
-#                  street built on one side only, as at the town's edge
+#   sleepsAt       where one may sleep: `lane`, `bridge-end`, `edge`, a
+#                  street built on one side only, as at the town's edge, or
+#                  `gate`, by a gate in the town's wall
 #   haunts         how many sleeping places each has
 #   spotDays       {min, max}: for how many days running one is kept
 #   visits         as for a kind of traveller. Everything a vagrant does is
@@ -259,7 +260,7 @@ vagrants:
   share: 0.003
   ages: {min: 14, max: 70}
   maleShare: 0.65
-  sleepsAt: [lane, bridge-end, edge]
+  sleepsAt: [lane, bridge-end, edge, gate]
   haunts: 3
   spotDays: {min: 3, max: 10}
   visits:

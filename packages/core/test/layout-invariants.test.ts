@@ -56,9 +56,12 @@ function fixture(): { layout: Layout; city: City; brief: SettlementBrief } {
       { id: 'lot-1-000002', buildingId: 'building-1-000002', polygon: [[-30, 5], [-20, 5], [-18, 25], [-30, 25]], districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [-25, 0] }, footprints: [] },
     ],
     districtAreas: [{ districtId: 'district-1-001', polygons: [[[-50, 0], [0, 0], [0, 30], [-50, 30]]], labelPoint: [-25, 15] }],
+    walls: [],
+    places: [],
     summary: {
       settlementId: 'settlement-1',
-      counts: { junctions: 3, segments: 2, exits: 1, waters: 0, lots: 2, districtAreas: 1 },
+      counts: { junctions: 3, segments: 2, exits: 1, waters: 0, lots: 2, districtAreas: 1, walls: 0, gates: 0, places: 0 },
+      outlineArea: 1500,
       bounds: { minX: -50, minY: -4, maxX: 60, maxY: 28 },
       builtArea: 0,
       residentsPerHectare: 0,
@@ -83,6 +86,9 @@ function summarise(layout: Layout, city: City): Layout {
     waters: layout.waters.length,
     lots: layout.lots.length,
     districtAreas: layout.districtAreas.length,
+    walls: layout.walls.length,
+    gates: layout.walls.reduce((sum, wall) => sum + wall.gates.length, 0),
+    places: layout.places.length,
   };
   return layout;
 }

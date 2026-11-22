@@ -36,7 +36,7 @@ import { type Rng, apportion, shuffle, stepRng, weightedPicker } from './random.
 import type { Building, City, CitySummary, District, Household, HouseholdRole, Person } from './records.ts';
 
 /** Raised whenever the generator's output for the same inputs would change. */
-export const GENERATOR_VERSION = 5;
+export const GENERATOR_VERSION = 6;
 
 /** A person has at most this many parents; it bounds how many elders one adult can be the child of. */
 const PARENTS_PER_PERSON = 2;
@@ -381,7 +381,8 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   for (const landmark of pack.landmarks) {
     if (landmark.when !== undefined && !conditions[landmark.when]) continue;
     if ((landmark.minPopulation ?? 0) > population) continue;
-    landmarkPlan.push({ landmark, buildings: resolveCount(landmark.count, population, travellers) });
+    // A landmark that stands at the ways out of town has at least so many for each route exit of the brief.
+    landmarkPlan.push({ landmark, buildings: Math.max(resolveCount(landmark.count, population, travellers), (landmark.perExit ?? 0) * brief.routes.length) });
     for (const post of landmark.posts) {
       const index = occupationIndex.get(post.occupation) as number;
       const category = (occupations[index] as Occupation).category;

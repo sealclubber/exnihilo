@@ -107,6 +107,7 @@ export function medievalPackBefore6B(): SettingPack {
  * they worked by weight. A city made from the result is the one generator version 4 made. Safe to call twice.
  */
 export function stripPhase6C(raw: any): void {
+  stripPhase6D(raw);
   delete raw.travellers;
   for (const id of ['inn', 'gaming-house']) {
     const landmark = raw.landmarks.find((entry: any) => entry.id === id);
@@ -139,5 +140,36 @@ export function medievalPackBefore6C(): SettingPack {
 export function rawMedievalPackBefore6C(): any {
   const raw = rawMedievalPack();
   stripPhase6C(raw);
+  return raw;
+}
+
+/**
+ * Takes out of a raw pack what phase 6D added: the choice of layout generator and the grown generator's numbers, a
+ * gatehouse for every route exit, and the gate as a place where a vagrant may sleep. A city made from the result
+ * is the one generator version 5 made, and its layout is the grid's. Safe to call twice.
+ */
+export function stripPhase6D(raw: any): void {
+  delete raw.layout.generator;
+  delete raw.layout.grown;
+  for (const landmark of raw.landmarks) delete landmark.perExit;
+  const vagrants = raw.travellers?.vagrants;
+  if (vagrants) vagrants.sleepsAt = vagrants.sleepsAt.filter((place: string) => place !== 'gate');
+}
+
+let before6D: SettingPack | undefined;
+/** The medieval pack with what phase 6D added taken out. Shared, so do not change it. */
+export function medievalPackBefore6D(): SettingPack {
+  if (!before6D) {
+    const raw = rawMedievalPack();
+    stripPhase6D(raw);
+    before6D = parsePack(raw);
+  }
+  return before6D;
+}
+
+/** A fresh, unchecked copy of the medieval pack's files with what phase 6D added taken out. */
+export function rawMedievalPackBefore6D(): any {
+  const raw = rawMedievalPack();
+  stripPhase6D(raw);
   return raw;
 }

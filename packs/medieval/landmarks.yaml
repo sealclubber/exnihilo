@@ -14,6 +14,9 @@
 #             {perTravellers: n, min: a, max: b} is one for every n travellers
 #             expected to arrive in a day by the rules in travellers.yaml; a
 #             settlement that expects none has none, whatever `min` says.
+#   perExit   optional: at least this many for each route exit of the brief,
+#             whatever `count` comes to. A walled town has a gate for each of
+#             its gatehouses, and every road out needs one.
 #   posts     may be empty, for a building nobody staffs
 #   posts     jobs that exist because the landmark does. Each takes a slot from
 #             its occupation's category, and is shared out among the buildings.
@@ -40,6 +43,7 @@
   when: walls
   district: outskirts
   count: {perThousand: 0.25, min: 2, max: 8}
+  perExit: 1
   posts:
     - {occupation: gate-guard, count: {perThousand: 1.5, min: 4}}
 

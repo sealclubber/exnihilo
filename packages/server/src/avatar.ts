@@ -4,7 +4,7 @@
  * imported. Nothing here moves the avatar: its position at any game time is
  * worked out from the state by `core`.
  */
-import { type AvatarState, AvatarStateSchema } from '@worldsim/core';
+import { type AvatarState, type SettingPack, AvatarStateSchema, LAYOUT_VERSION } from '@worldsim/core';
 
 export interface AvatarKeeperOptions {
   /** What was stored earlier, as it was read back. Anything that is not a sound state is ignored. */
@@ -42,4 +42,29 @@ export class AvatarKeeper {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
+}
+
+/**
+ * What the avatar's state is stored with: the layout it stands in. A stored position names a segment or a
+ * building of one layout, and means nothing in another, so an avatar stored under another layout version or
+ * another generator is not restored: there is none until it is spawned again.
+ */
+export interface StoredAvatar {
+  layoutVersion: number;
+  generator: string;
+  state: AvatarState;
+}
+
+const generatorOf = (pack: SettingPack) => pack.layout.generator ?? 'grid';
+
+/** The avatar's state as it is written to the store. */
+export function toStore(state: AvatarState, pack: SettingPack): StoredAvatar {
+  return { layoutVersion: LAYOUT_VERSION, generator: generatorOf(pack), state };
+}
+
+/** The state to restore from what the store held: nothing if it was stored under another layout, or without one. */
+export function fromStore(stored: unknown, pack: SettingPack): unknown {
+  if (typeof stored !== 'object' || stored === null) return undefined;
+  const { layoutVersion, generator, state } = stored as Partial<StoredAvatar>;
+  return layoutVersion === LAYOUT_VERSION && generator === generatorOf(pack) ? state : undefined;
 }

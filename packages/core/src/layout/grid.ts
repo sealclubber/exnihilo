@@ -24,7 +24,7 @@
 import type { Building, City, District } from '../city/records.ts';
 import { stepRng } from '../city/random.ts';
 import { idNumber } from '../ids.ts';
-import { type SettingPack, footprintCoverageOf, lotSizeOf } from '../pack/schema.ts';
+import { type LayoutGenerator, type SettingPack, footprintCoverageOf, lotSizeOf } from '../pack/schema.ts';
 import type { Point, SettlementBrief } from '../schema.ts';
 import {
   EPSILON,
@@ -53,6 +53,8 @@ export class LayoutGenerationError extends Error {
 export interface LayoutOptions {
   /** Replaces the brief's own seed. */
   seed?: number;
+  /** Which generator makes the layout. Left out, the one the pack names, or the grid if it names none. */
+  generator?: LayoutGenerator;
   /**
    * false leaves each building on the lot it was first given, as layout version 2 did, instead of gathering
    * trades along streets. The lots themselves are the same either way; this is for comparing the two.
@@ -69,7 +71,7 @@ class GridTooSmall extends Error {}
 const pad = (value: number, digits: number) => String(value).padStart(digits, '0');
 const dot = (a: Point, b: Point) => a[0] * b[0] + a[1] * b[1];
 
-export function generateLayout(city: City, brief: SettlementBrief, pack: SettingPack, options: LayoutOptions = {}): Layout {
+export function generateGridLayout(city: City, brief: SettlementBrief, pack: SettingPack, options: LayoutOptions = {}): Layout {
   const seed = options.seed ?? brief.seed;
   const settings = pack.layout;
   const totalLotArea = city.buildings.reduce((sum, building) => {
@@ -835,6 +837,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
     waters,
     lots,
     districtAreas,
+    // The grid knows nothing of walls or plazas.
+    walls: [],
+    places: [],
     summary: {
       settlementId: brief.id,
       counts: {
@@ -844,7 +849,11 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
         waters: waters.length,
         lots: lots.length,
         districtAreas: districtAreas.length,
+        walls: 0,
+        gates: 0,
+        places: 0,
       },
+      outlineArea: built.length * pitchX * pitchY,
       bounds: boxOf(everyPoint),
       builtArea,
       residentsPerHectare: builtArea === 0 ? 0 : city.people.length / (builtArea / 10_000),

@@ -41,7 +41,7 @@ describe('the medieval pack\'s civic buildings', () => {
       expect(pack.layout.lots[landmark.id], landmark.id).toBeDefined();
       for (const post of landmark.posts) expect(allOccupations(pack).find((occupation) => occupation.id === post.occupation)!.workplace).toBe(landmark.id);
     }
-    expect(GENERATOR_VERSION).toBe(5);
+    expect(GENERATOR_VERSION).toBe(6);
   });
 });
 
@@ -114,7 +114,8 @@ describe('civic buildings in every settlement of Lomia', () => {
     for (const brief of lomiaWorld().settlements) {
       const city = generateCity(brief, pack);
       const was = generateCity(brief, before);
-      const { summary: _summary, ...rest } = generateLayout(was, brief, before, BEFORE_6B5);
+      // Walls and places came to the format with layout version 5; the grid has none, and the fingerprint is of the rest.
+      const { summary: _summary, walls: _walls, places: _places, ...rest } = generateLayout(was, brief, before, BEFORE_6B5);
       versionOne.update(JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) }));
       const fail = (text: string) => failures.push(`${brief.id} (${brief.population}): ${text}`);
       // Unchanged by the civic buildings: who lives here, how many work, and in which categories.

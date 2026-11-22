@@ -133,7 +133,7 @@ describe('inns and the gaming house in Badanos', () => {
     // A guest comes and goes at any hour.
     expect(placeFlagsOf('inn', pack)).toEqual({ openAir: false, alwaysOpen: true });
     expect(quarter).toMatchObject({ id: 'visitors', types: ['inn', 'players-hall', 'gaming-house'] });
-    expect(GENERATOR_VERSION).toBe(5);
+    expect(GENERATOR_VERSION).toBe(6);
   });
 
   it('number two inns for the 20 travellers a day its rules expect, each kept by an innkeeper whose household lives in it', () => {

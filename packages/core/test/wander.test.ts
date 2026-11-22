@@ -365,6 +365,6 @@ describe('unchanged behaviour', () => {
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);
     }
     expect(LIFE_VERSION).toBe(5);
-    expect(GENERATOR_VERSION).toBe(5);
+    expect(GENERATOR_VERSION).toBe(6);
   });
 });

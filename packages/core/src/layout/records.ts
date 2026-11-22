@@ -23,9 +23,10 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
 
 /**
  * Raised whenever a layout for the same inputs would change. Version 4 places the civic buildings a pack spreads,
- * such as wells, on streets of their own within a district instead of side by side.
+ * such as wells, on streets of their own within a district instead of side by side. Version 5 adds walls with
+ * gates and open places to the format, and a second generator, `grown`.
  */
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 5;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -35,6 +36,8 @@ export const SegmentIdSchema = recordId('segment', 6);
 export const LotIdSchema = recordId('lot', 6);
 export const ExitIdSchema = recordId('exit', 3);
 export const WaterIdSchema = recordId('water', 3);
+export const WallIdSchema = recordId('wall', 3);
+export const PlaceIdSchema = recordId('place', 3);
 
 const text = z.string().min(1);
 const count = z.int().nonnegative();
@@ -42,7 +45,8 @@ const metres = z.number().positive();
 const polygon = z.array(PointSchema).min(3);
 const polyline = z.array(PointSchema).min(2);
 
-export const JunctionKindSchema = z.enum(['crossing', 'dead-end', 'bridge-end', 'exit']);
+/** A `gate` is a junction on a wall's line, where a street passes through it. Paths run through it as through any other. */
+export const JunctionKindSchema = z.enum(['crossing', 'dead-end', 'bridge-end', 'exit', 'gate']);
 export type JunctionKind = z.infer<typeof JunctionKindSchema>;
 
 export const JunctionSchema = z.strictObject({
@@ -94,6 +98,36 @@ export const WaterSchema = z.discriminatedUnion('kind', [
 ]);
 export type Water = z.infer<typeof WaterSchema>;
 
+/** A way through a wall: the junction where a street passes, the gatehouse that keeps it, and whether a main road uses it. */
+export const GateSchema = z.strictObject({
+  junctionId: JunctionIdSchema,
+  buildingId: BuildingIdSchema,
+  arterial: z.boolean(),
+});
+export type Gate = z.infer<typeof GateSchema>;
+
+/**
+ * A town wall: a line with a width. The line is closed where the wall runs all the way round, and open where it
+ * stops at water. Streets cross it only at its gates.
+ */
+export const WallSchema = z.strictObject({
+  id: WallIdSchema,
+  line: polyline,
+  closed: z.boolean(),
+  width: metres,
+  gates: z.array(GateSchema),
+});
+export type Wall = z.infer<typeof WallSchema>;
+
+/** An open place people can stand in, such as a plaza: a polygon, and the building it belongs to, whose lot it is. */
+export const PlaceSchema = z.strictObject({
+  id: PlaceIdSchema,
+  kind: z.literal('plaza'),
+  polygon,
+  buildingId: BuildingIdSchema,
+});
+export type Place = z.infer<typeof PlaceSchema>;
+
 export const LotSchema = z.strictObject({
   id: LotIdSchema,
   buildingId: BuildingIdSchema,
@@ -127,7 +161,12 @@ export const LayoutSummarySchema = z.strictObject({
     waters: count,
     lots: count,
     districtAreas: count,
+    walls: count,
+    gates: count,
+    places: count,
   }),
+  /** The ground the town covers, streets and open land between them included, in square metres. */
+  outlineArea: z.number().nonnegative(),
   /** The box around every lot and segment. */
   bounds: z.strictObject({ minX: z.number(), minY: z.number(), maxX: z.number(), maxY: z.number() }),
   /** The total area of the lots, in square metres. */
@@ -148,6 +187,9 @@ export const LayoutSchema = z.strictObject({
   waters: z.array(WaterSchema),
   lots: z.array(LotSchema),
   districtAreas: z.array(DistrictAreaSchema),
+  /** Empty for most towns. */
+  walls: z.array(WallSchema),
+  places: z.array(PlaceSchema),
   summary: LayoutSummarySchema,
 });
 export type Layout = z.infer<typeof LayoutSchema>;

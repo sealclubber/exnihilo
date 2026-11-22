@@ -106,7 +106,7 @@ describe('the medieval pack\'s outsiders', () => {
     for (const id of ['adventurer', 'mercenary']) expect(rules.kinds.find((kind) => kind.id === id)!.lodging).toEqual(['adventurers-guild', 'inn']);
     // People passing through may not lodge at all, and leave by another exit.
     expect(rules.kinds.find((kind) => kind.id === 'passing-through')).toMatchObject({ nights: { min: 0, max: 1 }, leaves: 'other' });
-    expect(rules.vagrants).toMatchObject({ sleepsAt: ['lane', 'bridge-end', 'edge'] });
+    expect(rules.vagrants).toMatchObject({ sleepsAt: ['lane', 'bridge-end', 'edge', 'gate'] });
     expect(LIFE_VERSION).toBe(5);
   });
 });

@@ -118,7 +118,7 @@ describe('the medieval pack\'s districts', () => {
     expect(Object.keys(tierLists).sort()).toEqual(pack.pack.statusTiers.map((tier) => tier.id).sort());
     expect(pack.districts.housingNearWork).toMatchObject({ share: 0.35, kinds: { upper: 0 } });
     expect(pack.pack.homeAndWorkLabel).toBe('{workplace} and home');
-    expect([GENERATOR_VERSION, LAYOUT_VERSION, LIFE_VERSION]).toEqual([5, 4, 5]);
+    expect([GENERATOR_VERSION, LAYOUT_VERSION, LIFE_VERSION]).toEqual([6, 5, 5]);
   });
 });
 
