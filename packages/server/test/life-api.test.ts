@@ -244,9 +244,9 @@ describe('buildings and households', () => {
       expect(occupant.kind).toBe('work');
       expect(occupant.person.id).toBe(occupant.personId);
       // The tannery's own people, or someone stopped there on a round, such as a carter.
-      if (occupant.person.workplaceId !== tannery.id) expect(expected.whereabouts(occupant.personId, at(2, 12))).toMatchObject({ round: true });
+      if (!('workplaceId' in occupant.person) || occupant.person.workplaceId !== tannery.id) expect(expected.whereabouts(occupant.personId, at(2, 12))).toMatchObject({ round: true });
     }
-    expect(body.occupants.some((occupant) => occupant.person.workplaceId === tannery.id)).toBe(true);
+    expect(body.occupants.some((occupant) => 'workplaceId' in occupant.person && occupant.person.workplaceId === tannery.id)).toBe(true);
     expect((await get<OccupantsNow>(`${LIFE}/buildings/${tannery.id}/occupants?time=${at(2, 3)}`)).body.occupants).toEqual([]);
     expect((await get(`${LIFE}/buildings/building-641-999999/occupants`)).status).toBe(404);
   });

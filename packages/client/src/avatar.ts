@@ -72,12 +72,22 @@ export function describeNearby(entry: Nearby, buildings: Record<string, string>,
   // At a stop on a street there is no building to name.
   const at = entry.buildingId === undefined ? 'in the street' : `outside the ${place(entry.buildingId, buildings, labels)}`;
   if (entry.round) return `On their round, stopped ${at}`;
-  return entry.activity === 'work' ? `At work ${at}` : `${labels.visits[entry.visitId ?? ''] ?? 'Visiting'}, ${at}`;
+  switch (entry.activity) {
+    case 'work':
+      return `At work ${at}`;
+    // Someone who lives on the streets, asleep or awake at the place where they sleep.
+    case 'sleep':
+      return `Asleep ${at}`;
+    case 'home':
+      return entry.buildingId === undefined ? 'In the street, at the place where they sleep' : `Resting ${at}`;
+    case 'visit':
+      return `${labels.visits[entry.visitId ?? ''] ?? 'Visiting'}, ${at}`;
+  }
 }
 
-/** What someone in the same building as the avatar is doing. */
+/** What someone in the same building as the avatar is doing. An outsider there is a traveller: awake, they are at their lodging and not at home. */
 export function describeOccupant(occupant: Occupant, labels: PackLabels): string {
-  const doing = occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind);
+  const doing = occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind, occupant.outsider === true);
   return `${doing}${occupant.outside ? ' (outside)' : ''}`;
 }
 

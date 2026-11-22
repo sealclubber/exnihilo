@@ -1,5 +1,5 @@
 {
-  "note": "",
+  "note": "Recorded at the end of phase 6C, from GENERATOR_VERSION 5, LAYOUT_VERSION 4, LIFE_VERSION 5 and pack 0.10.0 with default seeds, by scripts/measure-streets.ts --outsiders: the same measurements as streets-before-6c.json, with travellers and vagrants counted beside the residents. \"ofWhomOutsiders\" is how many of those to be seen on each hour are outsiders; \"travellersInTownOnWorkDays\" is the travellers in town at some time of each of days 1 to 6.",
   "versions": {
     "generator": 5,
     "layout": 4,

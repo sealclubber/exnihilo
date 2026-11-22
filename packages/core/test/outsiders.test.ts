@@ -732,6 +732,39 @@ describe('magnitudes', () => {
   });
 });
 
+describe('done when', () => {
+  it('has, in Badanos, a party that comes in from Pusztaszi, walks to an inn, spends a day in town and leaves toward Veszfetaros', () => {
+    const { outsiders, life, city } = badanos;
+    const typeOf = new Map(city.buildings.map((building) => [building.id, building.type]));
+    const such = arrivalsOver(outsiders, 1, 14).filter((party) => party.origin.settlement?.name === 'Pusztaszi' && party.destination.settlement?.name === 'Veszfetaros' && party.nights >= 1 && typeOf.get(party.lodgingId!) === 'inn');
+    expect(such.length).toBeGreaterThan(5);
+    expect(such.every((party) => party.origin.routeName === 'Pusztaszian trail')).toBe(true);
+    // One of them, from the trail to the inn and on the next day out again.
+    const party = such.find((entry) => life.plan(entry.memberIds[0]!, entry.arrivalDay).activities.some((activity) => activity.kind === 'visit'))!;
+    const id = party.memberIds[0]!;
+    const first = life.plan(id, party.arrivalDay).activities;
+    expect(first[0]).toMatchObject({ kind: 'travel', toBuildingId: party.lodgingId });
+    expect(first[1]).toMatchObject({ kind: 'home', buildingId: party.lodgingId });
+    expect(life.whereabouts(id, startOfDay(party.arrivalDay + 1) + 3 * 3600)).toMatchObject({ kind: 'sleep', buildingId: party.lodgingId });
+    const last = life.plan(id, party.arrivalDay + party.nights).activities.at(-1)!;
+    expect(last).toMatchObject({ kind: 'travel', fromBuildingId: party.lodgingId });
+  });
+
+  it('has, in Pombal, a visitors\' quarter that is busy every day', { timeout: SLOW }, () => {
+    const pombal = town(settlement('settlement-5'));
+    const quarter = pombal.city.districts.find((district) => district.kind === 'visitors')!;
+    expect(quarter.buildingIds.length).toBeGreaterThan(40);
+    for (const day of [8, 9, 10, 11, 12, 13, REST_DAY]) {
+      for (const hour of [3, 12, 20]) {
+        const there = quarter.buildingIds.flatMap((id) => pombal.life.occupants(id, at(day, hour)));
+        // Guests at its inns at every hour, and in the evening the players, the gaming house and those who came for them.
+        expect(there.filter((occupant) => occupant.outsider).length, `day ${day}, ${hour}:00`).toBeGreaterThan(80);
+        if (hour === 20) expect(there.length).toBeGreaterThan(400);
+      }
+    }
+  });
+});
+
 describe('pack behaviour', () => {
   const without = (kindId: string) =>
     edited((raw) => {

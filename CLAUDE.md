@@ -29,7 +29,7 @@ the server. Run `npm run check` before calling any task done.
 
 | Path | Holds | May depend on |
 | --- | --- | --- |
-| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator, daily life, the avatar | Nothing in this repository |
+| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator, daily life, outsiders, the avatar | Nothing in this repository |
 | `packages/server` | SQLite storage, pack loader, commands, world clock, the avatar's state, HTTP API | `core` |
 | `packages/client` | Browser viewer, city inspector and living town map | `core`, for types only |
 | `packs/medieval` | The first setting pack, as YAML | n/a |
@@ -139,6 +139,24 @@ enforce them. Do not weaken that test to make a change pass.
     which types are everyday buildings and how much housing stands near work
     are pack data: code must not know that the wealthy like the centre.
 
+30. **Outsiders are never residents.** Travellers and vagrants are not in
+    the city's people, households or counts, and a town holds exactly the
+    brief's population whatever else is in it. A resident's plan must never
+    read an outsider: plans are identical with outsiders computed and
+    without. Outsiders live in `packages/core/src/outsiders`; of that folder
+    the city generator may read only `draw.ts`, and the layout nothing.
+31. **A visit is derived from its arrival day.** Who arrives on a day, and
+    each party's whole visit, is a pure function of the settlement, the day
+    and a seed. No list of who is in town is kept anywhere: asking about day
+    40 must not need days 1 to 39. A traveller's ID says when they came. A
+    party walking in from an exit is a trip like any other, and its members
+    share one plan.
+32. **Only the importer learns where routes lead.** A brief says for each
+    route exit which settlement is next along it; the generators still read
+    nothing but the brief.
+33. **Vagrants are never indoors, and the watch leaves them alone.** Where
+    they may sleep, and everything they do, is pack data.
+
 ## The layout format
 
 A layout belongs to one settlement. Coordinates are metres, origin at the town
@@ -171,10 +189,14 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 4, 3 and 4.
+  inputs would change. Today they are 5, 4 and 5.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
-  fingerprints that prove it.
+  fingerprints that prove it. A whole pack file may be optional too
+  (`OPTIONAL_PACK_FILES`): without `travellers.yaml` a pack has no outsiders.
+  `packages/core/test/pack.ts` has a function per phase that takes out of
+  the pack what the phase added; tests that hold exact figures from an
+  earlier phase run on the pack as it was then.
 - **Invariants.** Every rule a generated city must satisfy goes in
   `packages/core/src/city/invariants.ts`, and every rule a layout must satisfy
   in `packages/core/src/layout/invariants.ts`. Each generator runs them on its
@@ -204,12 +226,15 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - **Setting content is the user's decision.** The pack describes a
   pre-modern fantasy world and may include harsh institutions. Do not remove,
   soften or ignore pack content on your own judgement; if something is unclear,
-  list it for review as `specialties.yaml` does for ignored tags.
+  list it for review as `specialties.yaml` does for ignored tags. The kinds
+  of traveller and the visitors' quarter ship with neutral placeholders that
+  the user will replace: do not add, name or omit entertainment types.
 - **Update the README** when commands, endpoints or pack files change.
 
 ## Later phases, for orientation
 
-Residents reacting to the avatar, encounters and conversation between residents, needs
+Residents reacting to the avatar or to outsiders, travel between settlements, goods and
+trade, lodging that fills up, encounters and conversation between residents, needs
 and state that carry from day to day, a layout generator that makes
 natural-looking towns, building footprints, history generated backward from
 the present, persistence of changes, and LLM conversations. Do not build ahead for

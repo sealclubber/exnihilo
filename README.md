@@ -22,13 +22,16 @@ The briefs for this work are [worldsim-phase1-gameplan.md](worldsim-phase1-gamep
 [worldsim-phase2_5-gameplan.md](worldsim-phase2_5-gameplan.md) (a patch that makes
 households, working ages and workplaces hang together),
 [worldsim-phase3-gameplan.md](worldsim-phase3-gameplan.md) and
-[worldsim-phase4-gameplan.md](worldsim-phase4-gameplan.md).
+[worldsim-phase4-gameplan.md](worldsim-phase4-gameplan.md). Later phases each
+have a gameplan of their own beside these; the latest is
+[worldsim-phase6c-gameplan.md](worldsim-phase6c-gameplan.md), which brings to
+town people who do not live there.
 
 ## Layout
 
 | Path | Holds |
 | --- | --- |
-| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, the layout format, generator and path function, daily life (calendar, day plans, whereabouts), and the avatar (its state and the pure functions on it). Pure code: no disk, network, clock or unseeded randomness. |
+| `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, the layout format, generator and path function, daily life (calendar, day plans, whereabouts), outsiders (a town's draw, travellers and vagrants), and the avatar (its state and the pure functions on it). Pure code: no disk, network, clock or unseeded randomness. |
 | `packages/server` | SQLite storage, the pack loader, the import, generate and day commands, the world clock, the avatar's state, and the HTTP API. |
 | `packages/client` | The browser viewer, city inspector and living town map. Uses `core` for types only. |
 | `packs/medieval` | The first setting pack: every occupation, building and number the generator uses. |
@@ -57,8 +60,9 @@ what was imported, any warnings, and the parts of the export that were not
 read. Importing again replaces the stored world. To store it elsewhere, add
 `--db path/to/world.sqlite` or set `WORLDSIM_DB`.
 
-A world imported before phase 2 must be imported again: briefs now carry their
-culture's name base. The server says so if it finds an old file.
+A world imported before phase 6C must be imported again: briefs now say where
+each of their routes leads, and travellers are told apart by where they came
+from. The server says so if it finds an old file.
 
 ## Start the server
 
@@ -76,7 +80,8 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET /api/world` | The world summary: name, year, era, map size, entity counts |
 | `GET /api/map` | The map geometry: cells, states, rivers, routes, settlement markers |
 | `GET /api/settlements` | The list of settlements |
-| `GET /api/settlements/settlement-641` | One settlement's brief |
+| `GET /api/settlements/settlement-641` | One settlement's brief, which says for each route exit the settlement it leads to |
+| `GET /api/settlements/settlement-641/draw` | The settlement's draw with its breakdown by term, the travellers its rules expect in a day, and whether it has a visitors' quarter |
 | `GET /api/pack` | Display names for the setting pack's occupations, buildings, districts and tiers |
 | `GET /api/settlements/settlement-641/city` | The generated city's summary |
 | `GET .../city/people` | Its people, in pages |
@@ -101,7 +106,9 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET .../life/trips?from=&to=` | Everyone who can be seen in a window of game time: the trips under way, and the stays out of doors with the part of each person's wander that falls in the window. Each comes with the person's name and the role that colours them. Optionally only those in a region (`minX`, `minY`, `maxX`, `maxY`) |
 | `GET .../life/people/<id>/plan?day=` | A person's plan for a day, by default the clock's day |
 | `GET .../life/people/<id>/now` | Where a person is and what they are doing |
-| `GET .../life/buildings/<id>/occupants` | Who is at a building, inside or outside on its lot, whether it is open, and its hours that day |
+| `GET .../life/buildings/<id>/occupants` | Who is at a building, inside or outside on its lot, whether it is open, and its hours that day; and its `guests`, the travellers who lodge there that day |
+| `GET .../life/outsiders?day=` | The outsiders in town on a day, by default the clock's: the travellers, with counts by kind, and the vagrants |
+| `GET .../life/outsiders/<id>` | One outsider: who they are, their party, where they are now, and the day's plan |
 | `GET .../life/households/<id>/now` | What each member of a household is doing |
 | `GET /api/avatar` | The avatar's state: standing on a street, in a building, or walking (a path, a departure time, a speed and a destination). `null` until it is spawned |
 | `POST /api/avatar/spawn` with `{"settlementId": "settlement-641", "point": [0, 0]}` | Places the avatar on the nearest street to a point of that town's map |
@@ -110,7 +117,11 @@ with Ctrl-C so the clock is stored on the way out.
 | `POST /api/avatar/stop`, `/leave` | Stops a walk where it is; leaves a building for its entrance |
 | `GET /api/avatar/perception` | Who the avatar perceives now, with who they are |
 | WebSocket `/api/avatar/stream` | The avatar's state on connecting, then again after every change |
-| `GET .../life/summary?day=` | A day hour by hour: people asleep, at home, at work, visiting, travelling, and out of doors |
+| `GET .../life/summary?day=` | A day hour by hour: people asleep, at home, at work, visiting, travelling, and out of doors; and the outsiders in town, counted apart |
+
+Every answer about daily life includes outsiders beside residents, each
+marked `outsider`; a person's plan and whereabouts can be asked for by an
+outsider's ID as by a resident's.
 
 "Now" is the clock's game time unless the request gives `time=`. The server
 sends trips, not positions: the viewer moves each dot along its trip's line by
@@ -216,7 +227,8 @@ npm run day -- settlement-641 --day 2
 
 This prints the day as text: for each hour the average number of people
 asleep, at home, at work, visiting, travelling and out of doors, the trips
-begun, and the busiest street segments. `--day` defaults to 1; `--db` and `--pack` choose the
+begun, and the busiest street segments; then the outsiders in town, by kind
+and hour by hour. `--day` defaults to 1; `--db` and `--pack` choose the
 world file and the pack. Nothing is stored.
 
 ## The setting pack
@@ -231,7 +243,8 @@ numbers.
 | `calendar.yaml` | The days of the week and which are rest days, the days in a year, sunrise and sunset |
 | `time.yaml` | The clock's rate presets and the default rate |
 | `avatar.yaml` | The avatar's walking speed and how far it perceives |
-| `display.yaml` | The colour each role is drawn in: one per workforce category, one each for keeping house and not working, and optionally single occupations |
+| `display.yaml` | The colour each role is drawn in: one per workforce category, one each for keeping house and not working, and optionally single occupations; and one for each kind of traveller and one for vagrants |
+| `travellers.yaml` | Optional. A settlement's draw (a weight per flag and status, a term for population, a term for specialties, a floor); what outsiders do in town (`visits`); the kinds of traveller (how many arrive and what that depends on, party size, nights, hours, lodging, how they leave, their visits); and vagrants (their share, where they sleep, what they do). Without the file a pack has no outsiders |
 | `rounds.yaml` | Rounds, for work done on foot: the share of a shift spent on them, how many stops and how long, how far they range, and whether a stop is a point on a street or a building of given types |
 | `shifts.yaml` | Named shifts: start, end, whether worked on rest days and, if so, the share on duty. One is the default. Shifts also decide when each building is open |
 | `visits.yaml` | Whether places keep opening hours (`openingHours`), and each kind of visit: who makes it, on which days and `weekdays`, how likely, when, for how long, to which building types or to `home`, and whether it is spent `outside` |
@@ -241,10 +254,10 @@ numbers.
 | `specialties.yaml` | How specialty tags fill the trade category, and which tags are ignored |
 | `workplaces.yaml` | Every workplace building type: capacity, whether the proprietor lives in, preferred district, and whether it is `openAir` or `alwaysOpen`, and whether it is `spread` across the districts as an everyday building |
 | `dwellings.yaml` | Housing types by status tier |
-| `landmarks.yaml` | The buildings and fixed posts that flags and status add, and the civic buildings a settlement has by its size (`minPopulation`, a count per so many residents, `spread` across the districts, posts or none), with the same `openAir` and `alwaysOpen` flags |
+| `landmarks.yaml` | The buildings and fixed posts that flags and status add, and the civic buildings a settlement has by its size (`minPopulation`, a count per so many residents, `spread` across the districts, posts or none), with the same `openAir` and `alwaysOpen` flags; inns, counted by the travellers expected in a day (`perTravellers`), whose keeper's household lives in (`proprietorLivesIn`) |
 | `species.yaml` | Per species: households, ages (including `parentMinAge`), whose parent an elder is, workforce, multipliers, occupations of its own, and how it lives its day (`life`: walking speed by age, usual sleep hours, the personal and daily variations, and under `outside` the pace and pauses of someone moving about a lot) |
 | `cultures.yaml` | Which species each culture belongs to |
-| `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside; where each status tier prefers to live (`tierDistricts`); and the share of housing that stands near work (`housingNearWork`) |
+| `districts.yaml` | District kinds, their size, naming patterns, and where the layout places each kind: centre, middle, edge or waterside; where each status tier prefers to live (`tierDistricts`); and the share of housing that stands near work (`housingNearWork`); a kind may be created by a settlement's draw (`whenDraw`) and lists the building `types` that belong to it |
 | `layout.yaml` | Every length behind a town's layout: street widths, block dimensions, lot sizes by building type, how much of a lot its building covers (`footprints`), the river's width, density limits |
 
 Each file starts with a comment describing its fields. All the numbers are
@@ -402,12 +415,16 @@ stalls have lot sizes of their own and stay scattered among other lots.
 Reaching the 70% that was hoped for needs the generator to hand out lots type
 by type, which moves lots.
 
-The same limit leaves one thing wrong that this patch could not mend: **a
-district's wells stand in a row.** The generator gives landmarks their lots
-first, so the wells of a district are packed side by side, and only a well
-has a lot of a well's size. Across Lomia 11,308 of 11,740 wells have another
-well beside them. Of the 79,597 taverns, bakeries, butcheries, shops, chapels,
-healers' houses and public ovens, 459 do.
+The same limit left one thing wrong, which `LAYOUT_VERSION` 4 (phase 6C)
+mended: **a district's wells stood in a row.** The generator gave landmarks
+their lots first, so the wells of a district were packed side by side, and
+only a well has a lot of a well's size: across Lomia 11,308 of 11,740 wells
+had another well beside them, and in Badanos four of Mill Row's six wells
+opened onto one stretch of street. Now the civic buildings a pack spreads
+(wells and public ovens) take their turns at even steps as a district grows,
+each on a frontage whose street has none of its type yet. This moves lots, so
+it is a new layout version. In all 682 settlements no district has two wells,
+or two ovens, opening onto one segment, and no well stands beside another.
 
 **The generator** (`layout/grid.ts`, named `grid` in a layout's summary) is
 deliberately regular: a street grid around the centre, a river bending beside
@@ -525,7 +542,8 @@ opening hours are in `life/hours.ts`.
   of the building (`where: street`) instead of on its lot. Children playing
   and elders sitting out are in front of their homes, where they can be seen.
 
-Daily life has its own `LIFE_VERSION`, now 4, in `life/records.ts`. Version 4
+Daily life has its own `LIFE_VERSION`, now 5, in `life/records.ts`. Version 5
+added outsiders to every answer and changed no resident's plan. Version 4
 added rounds, chains, repeats, strolls and stops on a street; a pack with none
 of those fields gives exactly the plans of version 3, which a fingerprint of
 Badanos's plans holds. Version 3
@@ -603,6 +621,218 @@ is paused, re-anchored or set and on shutdown, and restored paused.
 
 To use another pack, copy the folder, edit it, and point `WORLDSIM_PACK` or
 `--pack` at the copy.
+
+## Outsiders
+
+Phase 6C brings to town the first people who are not residents
+(`packages/core/src/outsiders`). **Travellers** arrive by the roads and the
+sea, find lodging, go about their business and leave; **vagrants** live on the
+streets. Neither is in the city's people, households or counts: a town still
+holds exactly the brief's population, and no resident's plan reads an
+outsider, which a test holds by comparing every resident's plan in Badanos
+over eight days with outsiders computed and without.
+
+**Outsiders obey the rule everyone obeys: nothing is stepped and nothing is
+remembered.**
+
+- The parties that arrive on a day are a function of the settlement, the day
+  and a seed. Each kind of traveller has a random stream of its own per day,
+  and each party one of its own.
+- A party's whole visit is derived from the day it arrives: who is in it,
+  where they came from, how long they stay, where they lodge, what they do,
+  and when and by which exit they leave. So the people in town on a day are
+  that day's arrivals and those of the few days before whose visit has not
+  ended; day 40 can be asked about without working out days 1 to 39.
+- A traveller's ID carries the settlement, the arrival day, the kind, the
+  party and the member (`traveller-641-000040-merchant-002-01`), so anyone can
+  be found again from their ID alone.
+- Vagrants are a fixed, seeded set, and where each sleeps on a night is a
+  function of the vagrant and the night.
+
+**Where routes lead.** The importer follows each route exit of a brief to the
+first settlement along it and records its ID, name, size group, population,
+culture, state and the distance along the route (`leadsTo`); a route that
+reaches no settlement leaves the field out. From Badanos the Pusztaszian
+trail leads to Pusztaszi at bearing 227 and to Veszfetaros at bearing 61.
+1,566 of Lomia's 1,794 exits lead to a settlement, and every one leads back
+by the same route. Nothing else in any brief changed. A sea route is followed
+the same way, to the next settlement on it: 22 of those are not flagged as
+ports in the export, and are named as they are.
+
+**A town's draw** is a number worked out from its brief by the pack's rules
+(`drawOf`): a weight for each flag and status, a term for sheer population, a
+term for specialties. It comes with its breakdown by term. Below the pack's
+floor (5) a settlement draws no tourists at all. 223 of Lomia's 682
+settlements reach the floor. The ten highest:
+
+| Settlement | Residents | Draw | Why | Travellers expected a day |
+| --- | --- | --- | --- | --- |
+| Pombal | 47,603 | 40.4 | capital 10, port 4, citadel 3, walls 1, plaza 2, temple 4, province seat 3, population 11.9, specialties 1.5 | 152 |
+| Celenaza | 31,131 | 36.3 | capital 10, port 4, citadel 3, walls 1, plaza 2, temple 4, province seat 3, population 7.8, specialties 1.5 | 109 |
+| Vasetbo | 28,083 | 35.5 | capital 10, port 4, citadel 3, walls 1, plaza 2, temple 4, province seat 3, population 7, specialties 1.5 | 96 |
+| Cevilefon | 20,032 | 33.5 | capital 10, port 4, citadel 3, walls 1, plaza 2, temple 4, province seat 3, population 5, specialties 1.5 | 93 |
+| Ruha | 35,699 | 33.4 | capital 10, port 4, citadel 3, walls 1, plaza 2, province seat 3, population 8.9, specialties 1.5 | 108 |
+| Karpeysk | 24,561 | 32.1 | capital 10, port 4, citadel 3, walls 1, temple 4, province seat 3, population 6.1, specialties 1 | 85 |
+| Guignesto | 24,042 | 30.5 | capital 10, citadel 3, walls 1, plaza 2, temple 4, province seat 3, population 6, specialties 1.5 | 88 |
+| Rabe | 21,404 | 29.9 | capital 10, port 4, citadel 3, walls 1, plaza 2, province seat 3, population 5.4, specialties 1.5 | 90 |
+| Sunde | 20,921 | 29.7 | capital 10, citadel 3, walls 1, plaza 2, temple 4, province seat 3, population 5.2, specialties 1.5 | 88 |
+| Klauka | 20,572 | 29.1 | capital 10, port 4, citadel 3, walls 1, plaza 2, province seat 3, population 5.1, specialties 1 | 99 |
+
+Badanos, a province seat of 9,607 with two specialties, has a draw of 6.4;
+Vereceldo, a walled village of 253, has 1.6.
+
+**Lodging and the visitors' quarter** (generator version 5). A settlement has
+an inn for every 12 travellers its rules expect to arrive in a day, and at
+least one wherever any are expected: 1,287 across Lomia, two in Badanos,
+thirteen in Pombal, one in Vereceldo. An inn is a landmark whose staff are
+fixed posts: an innkeeper, whose household lives in it, and in larger places
+inn servants and chambermaids. Innkeepers worked in taverns before; in
+Badanos thirteen did, and two keep the inns now. Posts take their slots from
+their own category, so population, workforce and the seven category counts
+did not move in any settlement, while occupation counts inside a category
+did: `badanos-counts-v5.json` lists what moved. A settlement whose draw
+reaches 22 has a **visitors' quarter**, a district of its own beside the
+centre: 22 settlements do, Pombal among them and Badanos not. The inns, the
+players' halls and a gaming house stand there; in a town without the quarter
+they stand in the centre.
+
+The quarter's types are placeholders: inns, the existing players' hall
+standing for a playhouse, and a gaming house. To add a type of your own,
+define it in `landmarks.yaml` or `workplaces.yaml`, give it a lot in
+`layout.yaml`, and list it under the `visitors` kind's `types` in
+`districts.yaml`. A test does exactly that with a made-up menagerie.
+
+**Travellers.** Each kind is a pack entry in `travellers.yaml`: how many
+parties arrive in a day and what that depends on (residents, the number and
+kind of route exits, the draw, the day of the week), party size, nights,
+hours of arrival and departure, where they lodge, what they do, and how they
+leave. The medieval pack has five placeholders: merchants, tourists (who
+depend on the draw alone), adventurers and mercenaries (who lodge at the
+adventurers' guild hall or an inn and keep to it and the taverns), and people
+passing through (about half of whom do not lodge, and who leave by a
+different exit where the town has more than one).
+
+- **A party moves together**: its members share one plan, and are in the same
+  place at every moment.
+- **A day in town is a plan like a resident's.** A party enters at an exit
+  junction, walks to its lodging, makes the visits the pack gives its kind,
+  sleeps at its lodging, and on its last day walks to an exit and is gone.
+  One that does not stay the night makes its visits one after another on the
+  way through. A trip from an exit is a trip like any other; opening hours
+  apply as to anyone; and every plan passes the rules a resident's passes,
+  for the time the traveller is in town (`outsiders/invariants.ts`).
+- **Origin** is the settlement the entry route leads from, where the brief
+  names one; otherwise the route itself.
+- **Names** are made from the town's own name base, because a brief carries
+  no other: a merchant from Pusztaszi is named as Badanos names its own.
+
+**Vagrants.** A settlement of at least 1,000 residents has 0.3% of its
+residents again as vagrants (29 in Badanos, 143 in Pombal, none in
+Vereceldo): 8,527 across Lomia. At night each sleeps at a point on a street,
+standing still: on a lane, by the end of a bridge, or on a street built on
+one side only, as at the town's edge. Each has three such places and keeps
+one for a run of three to ten nights. By day they wait about outside chapels
+and taverns, stand by wells and in the square, and wander the streets, all of
+it out on a street: a vagrant is never inside a building. They never lodge
+and never work, and the watch does nothing about them.
+
+**One population for every query.** `createLife({ city, layout, pack, brief })`
+works out the outsiders too and answers for them in `whereabouts`,
+`occupants`, `trips`, `outsideStays`, `nearby` and `daySummary`, each marked
+`outsider`; `life.outsiders` gives the records (`arrivals(day)`,
+`partiesInTown(day)`, `inTown(day)`, `vagrants()`, `outsider(id)`). A
+traveller asked about before arriving or after leaving is `away`. The avatar
+perceives outsiders exactly as it perceives residents. Without the brief, or
+with a pack that has no travellers file, there are no outsiders and every
+answer is what it was.
+
+**In the viewer.** Outsiders are drawn in colours of their own from
+`display.yaml`, one for each kind of traveller and one for vagrants, and the
+legend lists those in town that day. Hovering one shows their name, their
+kind and where they are from ("Merchant from Pusztaszi"). Clicking one opens
+their panel: kind, party (each companion opens their own panel), where they
+came from and by which route, when they arrived and when they leave and where
+that route leads, their lodging, what they are doing now, and today's plan as
+the timeline residents have. A collapsible **In town today** pane lists the
+day's outsiders by kind with counts and follows the clock's day. A building
+where travellers lodge lists its guests. The settlement panel beside the
+world map shows the draw with its breakdown, the travellers expected in a
+day, whether the town has a visitors' quarter, and where each route leads
+with the distance. The around-you panel lists perceived outsiders with their
+kind and origin. The members of a party are drawn on one point, since they
+are in the same place: the others are reached through the party list.
+
+**What phase 6C changed** (default seeds; work days 8 to 13 for the travellers
+in town, day 1 for the rest). The magnitudes are estimates to be reported,
+not quotas: every rate is a placeholder meant to be defensible for a town of
+that size on that road.
+
+| Settlement | Travellers in town on a work day | Of them | Vagrants |
+| --- | --- | --- | --- |
+| Badanos, 9,607 residents, one trail | 75 (0.78%; day by day 64 to 81) | 40 merchants, 14 adventurers, 12 tourists, 6 mercenaries, 2 passing through | 29 |
+| Pombal, 47,603 residents, capital and port | 409 (0.86%; 365 to 465) | 196 merchants, 114 tourists, 43 passing through, 37 adventurers, 20 mercenaries | 143 |
+| Vereceldo, 253 residents | 5 (4 to 6) | 3 merchants, 2 passing through, no tourists | 0 |
+
+People to be seen on the streets (walking, stopped on a street, or outside at
+a building) on each hour of day 1, before the phase and now with outsiders:
+
+| Hour | Badanos before | Badanos now | of whom outsiders | Pombal before | Pombal now | of whom outsiders | Vereceldo before | Vereceldo now | of whom outsiders |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 00:00 | 11 | 38 | 29 | 152 | 261 | 143 | 0 | 0 | 0 |
+| 01:00 | 12 | 41 | 29 | 102 | 233 | 143 | 0 | 0 | 0 |
+| 02:00 | 12 | 39 | 29 | 92 | 243 | 143 | 0 | 0 | 0 |
+| 03:00 | 11 | 40 | 29 | 97 | 257 | 143 | 0 | 0 | 0 |
+| 04:00 | 12 | 42 | 29 | 120 | 252 | 143 | 0 | 0 | 0 |
+| 05:00 | 37 | 60 | 29 | 226 | 379 | 143 | 0 | 0 | 0 |
+| 06:00 | 27 | 55 | 29 | 330 | 443 | 143 | 0 | 0 | 0 |
+| 07:00 | 92 | 112 | 29 | 1,022 | 903 | 151 | 1 | 1 | 0 |
+| 08:00 | 1,398 | 1,386 | 29 | 8,713 | 8,676 | 148 | 20 | 19 | 0 |
+| 09:00 | 1,069 | 1,106 | 34 | 5,412 | 5,429 | 153 | 24 | 25 | 0 |
+| 10:00 | 1,493 | 1,507 | 32 | 7,580 | 7,628 | 179 | 36 | 36 | 0 |
+| 11:00 | 1,696 | 1,738 | 32 | 8,607 | 8,711 | 180 | 41 | 42 | 0 |
+| 12:00 | 1,213 | 1,255 | 32 | 6,233 | 6,182 | 188 | 29 | 28 | 0 |
+| 13:00 | 1,014 | 1,049 | 37 | 4,967 | 5,048 | 201 | 20 | 23 | 0 |
+| 14:00 | 1,001 | 997 | 31 | 4,852 | 4,902 | 173 | 21 | 22 | 0 |
+| 15:00 | 1,522 | 1,555 | 32 | 7,958 | 7,965 | 176 | 30 | 34 | 0 |
+| 16:00 | 1,898 | 1,914 | 31 | 9,881 | 9,727 | 176 | 43 | 43 | 0 |
+| 17:00 | 1,817 | 1,785 | 32 | 11,168 | 11,005 | 174 | 18 | 20 | 0 |
+| 18:00 | 342 | 352 | 30 | 1,887 | 1,826 | 153 | 7 | 6 | 0 |
+| 19:00 | 455 | 458 | 32 | 2,925 | 2,766 | 153 | 7 | 8 | 0 |
+| 20:00 | 96 | 123 | 29 | 1,012 | 1,009 | 160 | 3 | 3 | 0 |
+| 21:00 | 63 | 97 | 29 | 709 | 787 | 150 | 2 | 1 | 0 |
+| 22:00 | 26 | 57 | 29 | 407 | 537 | 145 | 0 | 0 | 0 |
+| 23:00 | 62 | 97 | 29 | 696 | 836 | 143 | 0 | 2 | 0 |
+
+Most travellers at any moment are indoors, at their lodging or on a visit, so
+of Badanos's 60 to 80 only a few are on the streets at once; at night the
+people to be seen are the watch and the vagrants asleep.
+
+Phase 6B's target figures, before the phase, now for the residents alone, and
+now with outsiders counted. The residents' figures moved because the layout
+and the city did (wells apart, inns), not because outsiders exist:
+
+| Measure | Town | Before | Residents now | With outsiders |
+| --- | --- | --- | --- | --- |
+| Walking at 12:30, mean of six work days | Badanos | 203 (2.1%) | 197 (2.05%) | 200 |
+| | Pombal | 1,417 (3.0%) | 1,266 (2.7%) | 1,299 |
+| | Vereceldo | 1 | 2 | 2 |
+| Walking at 07:50 on day 1 | Badanos | 910 | 870 | 870 |
+| | Pombal | 8,378 | 7,891 | 7,897 |
+| Share of 100 seeded street points perceiving someone at 12:30, and the mean and median perceived | Badanos | 49%, 2.0, 0 | 54%, 2.5, 1 | 58%, 2.6, 1 |
+| | Pombal | 50%, 2.1, 1 | 58%, 2.5, 1 | 59%, 2.6, 1 |
+| | Vereceldo | 16%, 0.3, 0 | 14%, 0.3, 0 | 14%, 0.3, 0 |
+| Watchmen on the streets on the hour, least and most | Badanos | 11 to 34 | 9 to 36 | 9 to 36 |
+| | Pombal | 92 to 405 | 90 to 404 | 90 to 404 |
+| Trips per resident in a day | Badanos | 3.65 | 3.66 | 3.66 |
+| | Pombal | 3.12 | 3.25 | 3.25 |
+
+With a district's wells on streets of their own, the nearest well is nearer:
+walks to fetch water are shorter, so fewer people are walking at one instant
+(a tenth fewer in Pombal at midday), while the people who are out are spread
+over more streets, and the median street point in Badanos perceives one
+person again, where it perceived none. The full figures are in
+`baselines/streets-before-6c.json` and `baselines/streets-after-6c.json`,
+made by `scripts/measure-streets.ts`.
 
 ## The avatar
 
@@ -724,18 +954,37 @@ strolls, the targets, emergence and pack behaviour), `baseline.test.ts` with
 (moving about outside), `layout.test.ts` and `lomia-cities.test.ts`
 (footprints), `baselines/layout-v1.json` and `baselines/badanos-life-v2.json`
 (what must not have moved), and `packages/client/e2e/viewer.e2e.ts` (the
-viewer).
+viewer); phase 6C's are in `spacing.test.ts` (civic buildings apart, in
+every settlement), `routes.test.ts` (where routes lead), `visitors.test.ts`
+(the draw, inns and the visitors' quarter, in every settlement, with
+`baselines/badanos-counts-v5.json` and `baselines/city-v4.json`),
+`outsiders.test.ts` (arrivals, who is in town, travellers' visits, vagrants,
+residents untouched, the queries, the magnitudes and pack behaviour),
+`lomia-cities.test.ts` (every outsider's plan on day 1 in every settlement),
+`outsiders-api.test.ts` in the server, and `viewer.e2e.ts`. Tests that hold
+exact figures from before phase 6C (`baseline`, `civic`, `coherence` and
+`districts`) run on the pack with what the phase added taken out
+(`medievalPackBefore6C`), which the fingerprint in `baselines/city-v4.json`
+proves gives the cities generator version 4 gave.
 
 The whole-world run generates all 682 settlements of Lomia, 2,935,089 people,
-and checks every invariant on each. With generator version 3 it takes about 9
-seconds on one core of an Intel Core Ultra 7 265K; generation alone, which
-includes the generator's own check, is about 7.5 seconds, and Pombal, the
-largest settlement at 47,603 people, takes about 0.13 seconds.
+and checks every invariant on each. With generator version 5 it takes about
+10.5 seconds on one core of an Intel Core Ultra 7 265K, as part of the whole
+suite running in parallel; Pombal, the largest settlement at 47,603 people,
+takes about 0.13 seconds.
 
-Laying out all 682 settlements, now 541,392 lots with the civic buildings, takes about 5 seconds more,
-again including the generator's own check of every layout invariant, which
-now includes the footprints. No settlement takes longer than 0.1 seconds;
-Pombal's 8,413 lots take about that.
+Laying out all 682 settlements, now 540,793 lots, takes about 6 seconds more,
+again including the generator's own check of every layout invariant. No
+settlement takes longer than 0.15 seconds; Pombal's 8,632 lots take about
+that.
+
+Outsiders cost little beside residents. Planning day 1 for every resident of
+Lomia takes about 117 seconds now, and for all 43,122 outsiders in town that
+day about 4 seconds more. Working out every outsider's plan for
+three days of Pombal (about 500 in town a day) takes about 0.3 seconds, one
+yardstick, against a limit of 6. Across Lomia 43,122 outsiders are in town on
+day 1, 8,527 of them vagrants, and every one of their plans passes every
+rule and joins on to day 2.
 
 Planning one day for all 9,607 residents of Badanos takes about 0.5 seconds.
 It was 0.12 before phase 4.5 added some 4,800 visits a day and the

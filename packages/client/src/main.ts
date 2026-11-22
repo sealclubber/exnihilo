@@ -1,5 +1,5 @@
 import type { SettlementListItem, WorldInfo } from '@worldsim/core';
-import { fetchBrief, fetchMap, fetchWorld } from './api.ts';
+import { fetchBrief, fetchDraw, fetchMap, fetchWorld } from './api.ts';
 import { describeBrief } from './brief.ts';
 import { createInspector } from './inspector.ts';
 import { createFoldAll, createPane } from './pane.ts';
@@ -106,9 +106,10 @@ async function select(id: string): Promise<void> {
   if (!location.hash.startsWith(`#${id}`)) history.replaceState(null, '', `#${id}`);
   requestDraw();
   try {
-    const brief = await fetchBrief(id);
+    // The draw comes with the brief; if it cannot be had, the brief is shown without.
+    const [brief, draw] = await Promise.all([fetchBrief(id), fetchDraw(id).catch(() => undefined)]);
     if (selectedId === id) {
-      const text = describeBrief(brief, world);
+      const text = describeBrief(brief, world, draw);
       settlementPane.setSummary(text.title);
       showBrief(panel, text, () => {
         location.hash = `${id}${CITY_SUFFIX}`;

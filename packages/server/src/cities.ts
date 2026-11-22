@@ -25,12 +25,9 @@ import {
   type OutsidersToday,
   type Outsider,
   type Seen,
-  type SettlementDraw,
   type Traveller,
   VAGRANT_ROLE,
   dayOf,
-  drawOf,
-  expectedTravellers,
   isOutsiderId,
   travellerRole,
   type SettlementLife,
@@ -161,18 +158,6 @@ export class CityView {
       whereabouts,
       plan,
       buildings: this.buildingTypes([...named, outsider.group === 'traveller' ? outsider.lodgingId : undefined]),
-    };
-  }
-
-  /** The settlement's draw with its terms, the travellers its rules expect, and whether it has a visitors' quarter. */
-  get draw(): SettlementDraw {
-    const draw = drawOf(this.brief, this.pack);
-    const quarter = this.pack.districts.kinds.find((kind) => kind.whenDraw !== undefined);
-    return {
-      draw,
-      expectedTravellers: expectedTravellers(this.brief, this.pack),
-      ...(quarter?.whenDraw !== undefined && { quarterAt: quarter.whenDraw }),
-      hasQuarter: quarter !== undefined && this.city.districts.some((district) => district.kind === quarter.id),
     };
   }
 

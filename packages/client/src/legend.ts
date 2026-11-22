@@ -1,9 +1,12 @@
 /**
  * The legend of the town map: the colour of each role that has anyone in it
- * in this town, and what the shapes mean. Colours come from the pack; the
- * viewer knows categories and workforce states, not which one is red.
+ * in this town, the colour of each kind of outsider in town that day, and
+ * what the shapes mean. Colours come from the pack; the viewer knows
+ * categories and workforce states, not which one is red, and learns the kinds
+ * of traveller from the pack's labels.
  */
-import type { CitySummary, PackLabels } from '@worldsim/core';
+import type { CitySummary, OutsidersToday, PackLabels } from '@worldsim/core';
+import { outsiderGroups } from './outsider-format.ts';
 import { h } from './dom.ts';
 
 export interface LegendEntry {
@@ -30,6 +33,18 @@ export function legendEntries(summary: CitySummary, labels: PackLabels): LegendE
   add('keeping-house', 'Keeping house', summary.workforce.keepingHouse);
   add('not-working', 'Not working', summary.workforce.notWorking);
   return entries;
+}
+
+/** The key of an outsider's colour in the pack's role colours: one for each kind of traveller, and one for vagrants. */
+const outsiderRole = (kindId: string | undefined) => (kindId === undefined ? 'vagrant' : `traveller:${kindId}`);
+
+/** The outsiders' colours in use on a day: each kind of traveller in town, in the pack's order, then the vagrants if there are any. */
+export function outsiderLegendEntries(today: Pick<OutsidersToday, 'travellers' | 'byKind' | 'vagrants'>, labels: Pick<PackLabels, 'roleColours' | 'travellerKinds' | 'vagrantName'>): LegendEntry[] {
+  return outsiderGroups(today, labels).flatMap((group) => {
+    const role = outsiderRole(group.kindId);
+    const colour = labels.roleColours[role];
+    return colour === undefined ? [] : [{ role, name: group.name, colour }];
+  });
 }
 
 /** The legend's contents: a swatch and a name for each role, then the shapes. */

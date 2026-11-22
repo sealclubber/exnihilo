@@ -519,6 +519,7 @@ describe('trips and whereabouts', () => {
     const worker = onShift(city, 'day')[0]!;
     const where = life.whereabouts(worker.id, at(WORK_DAY, 12));
     expect(where).toMatchObject({ personId: worker.id, time: at(WORK_DAY, 12), kind: 'work', buildingId: worker.workplaceId });
+    if (where.kind === 'away') throw new Error('a resident is never away');
     expect(where.since).toBeLessThan(at(WORK_DAY, 9));
     expect(where.until).toBeGreaterThan(at(WORK_DAY, 16));
     expect(() => life.whereabouts('person-641-999999', 0)).toThrow(LifeError);
@@ -532,7 +533,7 @@ describe('trips and whereabouts', () => {
       let walking = 0;
       for (const person of city.people) {
         const where = life.whereabouts(person.id, time);
-        if (where.kind === 'travel' || where.kind === 'street') walking++;
+        if (where.kind === 'travel' || where.kind === 'street' || where.kind === 'away') walking++;
         else inside.set(where.buildingId, (inside.get(where.buildingId) ?? 0) + 1);
       }
       let counted = 0;

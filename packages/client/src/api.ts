@@ -7,6 +7,8 @@ import type {
   ClockState,
   HouseholdNow,
   OccupantsNow,
+  OutsiderDetail,
+  OutsidersToday,
   PersonNow,
   PersonPlan,
   Region,
@@ -20,6 +22,7 @@ import type {
   PackLabels,
   Page,
   SettlementBrief,
+  SettlementDraw,
   WorldSummary,
 } from '@worldsim/core';
 import { type HouseholdFilters, listQuery } from './city-format.ts';
@@ -53,6 +56,7 @@ const settlement = (id: string) => `/api/settlements/${encodeURIComponent(id)}`;
 export const fetchWorld = () => get<WorldSummary>('/api/world');
 export const fetchMap = () => get<MapGeometry>('/api/map');
 export const fetchBrief = (id: string) => get<SettlementBrief>(settlement(id));
+export const fetchDraw = (id: string) => get<SettlementDraw>(`${settlement(id)}/draw`);
 
 let labels: Promise<PackLabels> | undefined;
 /** The pack's display names. They change only when the server restarts, so they are fetched once. */
@@ -129,6 +133,12 @@ export const fetchOccupants = (id: string, buildingId: string, time: number) =>
   get<OccupantsNow>(`${settlement(id)}/life/buildings/${encodeURIComponent(buildingId)}/occupants?time=${time}`);
 export const fetchHouseholdNow = (id: string, householdId: string, time: number) =>
   get<HouseholdNow>(`${settlement(id)}/life/households/${encodeURIComponent(householdId)}/now?time=${time}`);
+
+// ---- Outsiders ---------------------------------------------------------------------
+
+export const fetchOutsiders = (id: string, day: number) => get<OutsidersToday>(`${settlement(id)}/life/outsiders?day=${day}`);
+export const fetchOutsider = (id: string, outsiderId: string, time: number) =>
+  get<OutsiderDetail>(`${settlement(id)}/life/outsiders/${encodeURIComponent(outsiderId)}?time=${time}`);
 
 // ---- The avatar ------------------------------------------------------------------
 

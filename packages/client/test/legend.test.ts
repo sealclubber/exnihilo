@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CitySummary, PackLabels } from '@worldsim/core';
-import { legendEntries } from '../src/legend.ts';
+import { legendEntries, outsiderLegendEntries } from '../src/legend.ts';
 import { foldAllLabel, foldedLine } from '../src/pane.ts';
 
 const labels = {
@@ -37,6 +37,28 @@ describe('the legend', () => {
     const entries = legendEntries(summary({}, { watchman: 2, tanner: 2 }), own);
     expect(entries.map((entry) => entry.role)).toEqual(['food', 'trade', 'watchman', 'tanner', 'keeping-house', 'not-working']);
     expect(entries.find((entry) => entry.role === 'watchman')).toEqual({ role: 'watchman', name: 'Watchman', colour: '#000001' });
+  });
+});
+
+describe('the legend\'s outsiders', () => {
+  const pack = {
+    travellerKinds: { merchant: 'Merchant', tourist: 'Tourist', mercenary: 'Mercenary' },
+    vagrantName: 'Vagrant',
+    roleColours: { 'traveller:merchant': '#a00001', 'traveller:tourist': '#a00002', vagrant: '#a00009' },
+  } as unknown as PackLabels;
+  const vagrants = [{ group: 'vagrant', id: 'vagrant-1-000001' }] as never;
+
+  it('lists the colour of each kind of traveller in town that day, in the pack\'s order, then the vagrants\'', () => {
+    expect(outsiderLegendEntries({ travellers: [], byKind: { tourist: 4, merchant: 2 }, vagrants }, pack)).toEqual([
+      { role: 'traveller:merchant', name: 'Merchant', colour: '#a00001' },
+      { role: 'traveller:tourist', name: 'Tourist', colour: '#a00002' },
+      { role: 'vagrant', name: 'Vagrant', colour: '#a00009' },
+    ]);
+  });
+
+  it('leaves out a kind with nobody in town, the vagrants when there are none, and a kind the pack gives no colour', () => {
+    expect(outsiderLegendEntries({ travellers: [], byKind: { tourist: 4, merchant: 0, mercenary: 3 }, vagrants: [] }, pack).map((entry) => entry.role)).toEqual(['traveller:tourist']);
+    expect(outsiderLegendEntries({ travellers: [], byKind: {}, vagrants: [] }, pack)).toEqual([]);
   });
 });
 

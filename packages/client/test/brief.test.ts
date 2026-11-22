@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { type SettlementBrief, type World, importAfmg } from '@worldsim/core';
+import { type SettlementBrief, type SettlementDraw, type World, importAfmg } from '@worldsim/core';
 import { loadLomia } from '../../core/test/fixture.ts';
 import { type BriefText, compassPoint, describeBrief, formatNumber } from '../src/brief.ts';
 import { markerScale, soften } from '../src/render.ts';
@@ -65,9 +65,11 @@ describe('describeBrief for Badanos', () => {
     });
     expect(text.sections.some((section) => section.heading === 'Routes (2 exits)')).toBe(true);
     expect(lines(text, 'Routes')).toEqual([
-      'Pusztaszian trail, a trail (route-34), toward the east-northeast (61°), cell-2029',
-      'Pusztaszian trail, a trail (route-34), toward the southwest (227°), cell-2236',
+      'Pusztaszian trail, a trail (route-34), toward the east-northeast (61°), cell-2029, leading to Veszfetaros (village, 93.6 mi)',
+      'Pusztaszian trail, a trail (route-34), toward the southwest (227°), cell-2236, leading to Pusztaszi (town, 28.9 mi)',
     ]);
+    // Without the world there is no unit to give the distance in.
+    expect(lines(describeBrief(brief('settlement-641')), 'Routes')[1]).toMatch(/leading to Pusztaszi \(town, 28\.9\)$/);
     expect(lines(text, 'Coast')).toEqual(['Not coastal']);
     expect(rows(text, 'Climate')).toEqual({
       Biome: 'Tropical seasonal forest',
@@ -96,6 +98,38 @@ describe('describeBrief for other settlements', () => {
     expect(rows(describeBrief(source), 'River').Arrives).toBe('Rises here');
     const mouth = world.settlements.find((entry) => entry.river && !entry.river.leavesToward)!;
     expect(rows(describeBrief(mouth), 'River').Leaves).toBe('Ends here');
+  });
+
+  it('says where every route leads, or that it leads to no settlement', () => {
+    const exits = world.settlements.flatMap((entry) => entry.routes.map((exit, index) => [exit, lines(describeBrief(entry, world.info), 'Routes')[index]!] as const));
+    expect(exits.length).toBeGreaterThan(100);
+    for (const [exit, line] of exits) {
+      if (exit.leadsTo) expect(line).toContain(`leading to ${exit.leadsTo.name} (${exit.leadsTo.sizeGroup}, `);
+      else expect(line.endsWith('leading to no settlement')).toBe(true);
+    }
+  });
+
+  it('shows the draw with what each term adds, only when the draw is given', () => {
+    const draw: SettlementDraw = {
+      draw: { total: 14.607, floor: 6, attracts: true, terms: [{ term: 'provinceSeat', value: 4 }, { term: 'walls', value: 1 }, { term: 'population', value: 9.607 }, { term: 'specialties', value: 2 }] },
+      expectedTravellers: 23.46,
+      quarterAt: 22,
+      hasQuarter: false,
+    };
+    const text = describeBrief(brief('settlement-641'), world.info, draw);
+    expect(text.sections.find((section) => section.heading === 'Draw')?.rows).toEqual([
+      ['Total', '14.61, at or above the floor of 6'],
+      ['Seat of the province', '+4'],
+      ['Walls', '+1'],
+      ['Population', '+9.61'],
+      ['Specialties', '+2'],
+      ['Travellers expected', '23.5 a day'],
+      ['Visitors\' quarter', 'No, at a draw of 22'],
+    ]);
+    // Below the floor, and from a pack with no visitors' quarter.
+    const quiet = describeBrief(brief('settlement-641'), world.info, { draw: { total: 1.2, floor: 6, attracts: false, terms: [{ term: 'population', value: 1.2 }] }, expectedTravellers: 0, hasQuarter: false });
+    expect(quiet.sections.find((section) => section.heading === 'Draw')?.rows).toEqual([['Total', '1.2, below the floor of 6'], ['Population', '+1.2'], ['Travellers expected', '0 a day']]);
+    expect(describeBrief(brief('settlement-641'), world.info).sections.some((section) => section.heading === 'Draw')).toBe(false);
   });
 
   it('describes unnamed routes and sea routes in words', () => {

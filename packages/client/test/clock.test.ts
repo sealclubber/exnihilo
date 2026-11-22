@@ -191,6 +191,58 @@ describe('daily life in words', () => {
   });
 });
 
+describe('an outsider\'s day, in words', () => {
+  const labels = { buildingTypes: { inn: 'Inn', market: 'Market' }, visits: { trading: 'Doing business', begging: 'Begging' } } as unknown as PackLabels;
+  const buildings = { 'building-1-000004': 'inn', 'building-1-000005': 'market' };
+  const inn = 'building-1-000004';
+  const wander = { times: [0, 60], points: [[1, 2], [1, 2]] as [number, number][] };
+  const path = { segmentIds: ['segment-1-000001'], walked: [300], length: 300, points: [[0, 0], [300, 0]] as [number, number][] };
+  const street = { segmentId: 'segment-1-000001', point: [300, 0] as [number, number] };
+
+  it('has a traveller asleep and awake at their lodging, not at home', () => {
+    expect(describeActivity({ kind: 'sleep', start: 0, end: 1, buildingId: inn }, buildings, labels, undefined, true)).toBe('Asleep at their lodging, the inn');
+    expect(describeActivity({ kind: 'home', start: 0, end: 1, buildingId: inn }, buildings, labels, undefined, true)).toBe('At their lodging, the inn');
+    expect(describeActivity({ kind: 'visit', start: 0, end: 1, buildingId: 'building-1-000005', visitId: 'trading' }, buildings, labels, undefined, true)).toBe('Doing business, at the market');
+    expect(describeActivity({ kind: 'travel', start: 0, end: 90, fromBuildingId: 'building-1-000005', toBuildingId: inn, departAt: 0, arriveAt: 90, path }, buildings, labels, undefined, true)).toBe('Walk to the inn (300 m)');
+    expect(describeActivity({ kind: 'travel', start: 0, end: 90, fromBuildingId: inn, toStreet: street, departAt: 0, arriveAt: 90, path }, buildings, labels, undefined, true)).toBe('Walk along the street (300 m)');
+    expect(activityWord('home', true)).toBe('At their lodging');
+    expect(activityWord('sleep', true)).toBe('Asleep');
+    expect(activityWord('home')).toBe('At home');
+  });
+
+  it('says where a traveller is now, and that one who is not in town is not', () => {
+    const at = (where: object) => describeWhereabouts({ personId: 'traveller-1-000009-merchant-002-01', outsider: true, time: 0, since: 0, until: 7 * 3600, ...where } as Whereabouts, buildings, labels, undefined, true);
+    expect(at({ kind: 'sleep', buildingId: inn })).toBe('Asleep at their lodging, the inn, until 07:00');
+    expect(at({ kind: 'home', buildingId: inn })).toBe('At their lodging, the inn, until 07:00');
+    expect(at({ kind: 'visit', buildingId: 'building-1-000005', visitId: 'trading', outside: true, point: [1, 2] })).toBe('Doing business, outside at the market, until 07:00');
+    expect(describeWhereabouts({ personId: 'traveller-1-000009-merchant-002-01', outsider: true, time: 0, kind: 'away' }, buildings, labels, undefined, true)).toBe('Not in town');
+    expect(activityWord('away')).toBe('Not in town');
+  });
+
+  it('has a vagrant asleep in the street, or awake at the place where they sleep', () => {
+    const stop = (purpose: 'sleep' | 'home' | 'visit', visitId?: string): Activity => ({ kind: 'street', start: 0, end: 60, segmentId: 'segment-1-000001', wander, purpose, ...(visitId !== undefined && { visitId }) });
+    expect(describeActivity(stop('sleep'), buildings, labels)).toBe('Asleep in the street');
+    expect(describeActivity(stop('home'), buildings, labels)).toBe('In the street, at the place where they sleep');
+    expect(describeActivity(stop('visit', 'begging'), buildings, labels)).toBe('Begging, pausing in the street');
+    const at = (purpose: string) => describeWhereabouts({ personId: 'vagrant-1-000003', outsider: true, time: 0, since: 0, until: 5 * 3600, kind: 'street', point: [0, 0], segmentId: 'segment-1-000001', purpose } as Whereabouts, buildings, labels);
+    expect(at('sleep')).toBe('Asleep in the street, until 05:00');
+    expect(at('home')).toBe('In the street, at the place where they sleep, until 05:00');
+  });
+
+  it('ends the timeline of someone who leaves town when they leave, not at midnight', () => {
+    const DAY = 86_400;
+    const leaving: Activity[] = [
+      { kind: 'sleep', start: DAY, end: DAY + 7 * 3600, buildingId: inn },
+      { kind: 'travel', start: DAY + 7 * 3600, end: DAY + 7 * 3600 + 600, fromBuildingId: inn, toStreet: street, departAt: DAY + 7 * 3600, arriveAt: DAY + 7 * 3600 + 600, path },
+    ];
+    expect(timeline(leaving, buildings, labels, DAY + 3600, undefined, true).map((row) => [row.time, row.text, row.current])).toEqual([
+      ['00:00 – 07:00', 'Asleep at their lodging, the inn', true],
+      ['07:00 – 07:10', 'Walk along the street (300 m)', false],
+    ]);
+    expect(timeline([], buildings, labels)).toEqual([]);
+  });
+});
+
 describe('moving about outside', () => {
   const wander = { times: [100, 160, 180, 240], points: [[0, 0], [0, 0], [10, 0], [10, 0]] as [number, number][] };
 

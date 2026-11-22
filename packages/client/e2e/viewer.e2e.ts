@@ -1,7 +1,7 @@
 /**
  * The viewer, in a headless browser, against a server of its own: panes,
  * the hover marker, colour by role, the legend, people moving about outside,
- * and how fast the town map draws.
+ * outsiders, and how fast the town map draws.
  *
  * Run with `npm run test:viewer`. It needs a browser: `npx playwright install chromium`.
  */
@@ -18,11 +18,15 @@ import {
   type BuildingTypes,
   type CitySummary,
   type Layout,
+  type OccupantsNow,
+  type OutsiderDetail,
+  type OutsidersToday,
   type PackLabels,
   type PersonNow,
   type SettingPack,
   type TripsWindow,
   geometry,
+  isOutsiderId,
   parsePack,
   startOfDay,
 } from '@worldsim/core';
@@ -39,6 +43,7 @@ const BADANOS = 'settlement-641';
 const POMBAL = 'settlement-5';
 const OTHER_MILITARY = '#00aa55';
 const OWN_COLOUR = '#3a2f6b';
+const OTHER_MERCHANT = '#b000b5';
 const at = (day: number, hours: number, minutes = 0) => startOfDay(day) + hours * 3600 + minutes * 60;
 
 /** A server on a port of its own, with a clock the test sets. */
@@ -75,8 +80,21 @@ const canvasBox = async (on: Page = page) => (await on.locator('#inspector .town
 async function open(server: Served, settlementId: string, on: Page = page): Promise<void> {
   await on.goto(`${viewer}/?api=${encodeURIComponent(server.url)}#${settlementId}/city`);
   await on.waitForFunction(() => /walking/.test(document.querySelector('#inspector .street-count')?.textContent ?? ''), null, { timeout: 90_000 });
+  // The day's outsiders arrive after the town does, and bring their colours to the legend.
+  await on.waitForFunction(() => document.querySelector('#inspector .in-town[data-day]') !== null, null, { timeout: 90_000 });
   await settled(on);
 }
+/** The outsiders in a town on a day, as the server lists them. */
+const inTown = (server: Served, settlementId: string, day: number) => server.get<OutsidersToday>(`/api/settlements/${settlementId}/life/outsiders?day=${day}`);
+/** The legend's entries for outsiders that a day calls for: each kind of traveller in town, in the pack's order, then the vagrants. */
+function outsiderColours(today: OutsidersToday, labels: PackLabels): Array<[role: string, colour: string, name: string]> {
+  return [
+    ...Object.entries(labels.travellerKinds).filter(([kindId]) => (today.byKind[kindId] ?? 0) > 0).map(([kindId, name]): [string, string, string] => [`traveller:${kindId}`, labels.roleColours[`traveller:${kindId}`]!, name]),
+    ...(today.vagrants.length > 0 ? [['vagrant', labels.roleColours.vagrant!, labels.vagrantName!] as [string, string, string]] : []),
+  ];
+}
+/** The legend's colours as the page shows them: role, colour and name. */
+const legendRows = () => pane('legend').locator('li[data-role]').evaluateAll((items) => items.map((item) => [item.getAttribute('data-role'), item.getAttribute('data-colour'), item.textContent?.trim()]));
 /** Waits until the map has drawn the present moment. */
 async function settled(on: Page = page): Promise<void> {
   await on.waitForTimeout(250);
@@ -112,6 +130,8 @@ beforeAll(async () => {
   main = await serve(storePath, medievalPack());
   const raw = rawMedievalPack();
   raw.display.categories.military = OTHER_MILITARY;
+  // And another colour for one kind of traveller.
+  raw.display.travellers = { ...raw.display.travellers, merchant: OTHER_MERCHANT };
   // And two occupations with colours of their own: one Badanos has, and one it has not.
   raw.display.occupations = { tanner: OWN_COLOUR, harbourmaster: '#123456' };
   recoloured = await serve(storePath, parsePack(raw));
@@ -137,17 +157,28 @@ afterAll(async () => {
 });
 
 describe('collapsible panes', () => {
+  // The legend's nine colours for residents were all it had before phase 6C; it now has those of the day's outsiders
+  // as well, and the day's outsiders have a pane of their own. Both figures are worked out from what the server says.
   const INSPECTOR_PANES: Array<[id: string, title: string, summary: RegExp]> = [
     ['summary', 'Summary', /Badanos, 9,607 residents/],
     ['households', 'Households', /2,390/],
     ['detail', 'Details', /nothing chosen/],
-    ['legend', 'Legend', /9 colours/],
+    ['legend', 'Legend', /colours/],
+    ['in-town', 'In town today', /\d+/],
     ['around', 'Around you', /not in the world/],
     ['clock', 'Clock', /Moonday 12:30/],
   ];
 
   it('each fold to one line with a summary, unfold again, and keep their state after a reload', async () => {
-    for (const [id, title, summary] of INSPECTOR_PANES) {
+    const today = await inTown(main, BADANOS, 1);
+    const outsiders = today.travellers.length + today.vagrants.length;
+    expect(outsiders).toBeGreaterThan(29);
+    const exact: Record<string, RegExp> = {
+      legend: new RegExp(`: ${9 + outsiderColours(today, await main.get<PackLabels>('/api/pack')).length} colours$`),
+      'in-town': new RegExp(`: ${outsiders}$`),
+    };
+    for (const [id, title, loose] of INSPECTOR_PANES) {
+      const summary = exact[id] ?? loose;
       const body = pane(id).locator('> .pane-body');
       const head = pane(id).locator('> .pane-head');
       expect(await body.isVisible(), id).toBe(true);
@@ -182,7 +213,7 @@ describe('collapsible panes', () => {
     const control = page.locator('#inspector .fold-all');
     expect(await control.innerText()).toBe('Fold all');
     await control.click();
-    for (const id of ['summary', 'households', 'detail', 'legend', 'around', 'clock', 'settlement']) expect(await pane(id).getAttribute('class'), id).toContain('collapsed');
+    for (const id of ['summary', 'households', 'detail', 'legend', 'in-town', 'around', 'clock', 'settlement']) expect(await pane(id).getAttribute('class'), id).toContain('collapsed');
     expect(await control.innerText()).toBe('Unfold all');
     const window = page.viewportSize()!.width;
     const folded = await width();
@@ -193,7 +224,7 @@ describe('collapsible panes', () => {
     await settled();
     expect((await drawn()).size.width).toBeCloseTo(folded, -1);
     await control.click();
-    for (const id of ['summary', 'households', 'detail', 'legend', 'around', 'clock']) expect(await pane(id).getAttribute('class'), id).not.toContain('collapsed');
+    for (const id of ['summary', 'households', 'detail', 'legend', 'in-town', 'around', 'clock']) expect(await pane(id).getAttribute('class'), id).not.toContain('collapsed');
     expect(await width()).toBeCloseTo(before, 0);
   });
 
@@ -244,15 +275,18 @@ describe('colour by role and the legend', () => {
     await open(main, BADANOS);
     const labels = await main.get<PackLabels>('/api/pack');
     const summary = await main.get<CitySummary>(`/api/settlements/${BADANOS}/city`);
-    const listed = await pane('legend').locator('li[data-role]').evaluateAll((items) => items.map((item) => [item.getAttribute('data-role'), item.getAttribute('data-colour'), item.textContent?.trim()]));
+    const listed = await legendRows();
     // In use: each category that has workers, and the two states of those not at work, if anyone is in them.
-    const inUse = [
+    const residents = [
       ...labels.categories.filter((category) => summary.categories[category.id] > 0).map((category) => [category.id, labels.roleColours[category.id], category.name]),
       ...(summary.workforce.keepingHouse > 0 ? [['keeping-house', labels.roleColours['keeping-house'], 'Keeping house']] : []),
       ...(summary.workforce.notWorking > 0 ? [['not-working', labels.roleColours['not-working'], 'Not working']] : []),
     ];
-    expect(listed).toEqual(inUse);
-    expect(listed).toHaveLength(9);
+    // Since phase 6C outsiders are on the map too, so the colours in use include those of the day's outsiders: the
+    // residents' nine come first and are what they were.
+    const outsiders = outsiderColours(await inTown(main, BADANOS, 1), labels);
+    expect(residents).toHaveLength(9);
+    expect(listed).toEqual([...residents, ...outsiders]);
     // Everyone drawn is in one of the legend's colours, and the swatches show those colours.
     const colours = new Set(listed.map((entry) => entry[1]));
     const people = (await drawn()).people;
@@ -264,8 +298,9 @@ describe('colour by role and the legend', () => {
     // A pack that gives an occupation its own colour: it is listed if the town has any, and not otherwise.
     recoloured.clock.setTime(at(1, 12, 30));
     await open(recoloured, BADANOS);
-    const own = await pane('legend').locator('li[data-role]').evaluateAll((items) => items.map((item) => [item.getAttribute('data-role'), item.getAttribute('data-colour'), item.textContent?.trim()]));
-    expect(own).toHaveLength(10);
+    const own = await legendRows();
+    // The nine and the tanners' own colour, and the outsiders' as before.
+    expect(own).toHaveLength(10 + outsiders.length);
     expect(own).toContainEqual(['tanner', OWN_COLOUR, 'Tanner']);
     expect(own.map((entry) => entry[0])).not.toContain('harbourmaster');
     expect(own).toContainEqual(['military', OTHER_MILITARY, 'Military']);
@@ -287,8 +322,8 @@ describe('colour by role and the legend', () => {
 
 describe('the hover marker', () => {
   /** Someone drawn with nobody else near them, clear of the panes that lie over the map. */
-  const alone = (people: Drawn['people'], size: Drawn['size']) => {
-    const found = people.find((person) => inTheClear(person.x, person.y, size) && people.every((other) => other === person || Math.hypot(other.x - person.x, other.y - person.y) > 26));
+  const alone = (people: Drawn['people'], size: Drawn['size'], wanted: (person: Drawn['people'][number]) => boolean = () => true) => {
+    const found = people.find((person) => wanted(person) && inTheClear(person.x, person.y, size) && people.every((other) => other === person || Math.hypot(other.x - person.x, other.y - person.y) > 26));
     if (!found) throw new Error('nobody drawn stands alone');
     return found;
   };
@@ -298,7 +333,8 @@ describe('the hover marker', () => {
     await open(main, BADANOS);
     const before = await drawn();
     expect(before.hover).toBeUndefined();
-    const target = alone(before.people, before.size);
+    // A resident: outsiders are on the map as well since phase 6C, and have a test of their own below.
+    const target = alone(before.people, before.size, (person) => !isOutsiderId(person.personId));
     const box = await canvasBox();
     // A generous target: a few pixels off the dot is near enough.
     await page.mouse.move(box.x + target.x + 4, box.y + target.y - 3);
@@ -307,6 +343,7 @@ describe('the hover marker', () => {
     const who = (await main.get<PersonNow>(`/api/settlements/${BADANOS}/life/people/${target.personId}/now`)).person;
     expect(during.hover).toMatchObject({ kind: 'person', id: target.personId });
     expect(during.hover!.label).toContain(`${who.givenName} ${who.familyName}`);
+    if ('group' in who) throw new Error(`${who.id} is not a resident`);
     if (who.occupationId) {
       const labels = await main.get<PackLabels>('/api/pack');
       expect(during.hover!.label.toLowerCase()).toContain(labels.occupations[who.occupationId]!.name.toLowerCase());
@@ -354,12 +391,19 @@ describe('the hover marker', () => {
     const state = await drawn();
     const box = await canvasBox();
     expect(labels.homeAndWorkLabel).toBe('{workplace} and home');
-    /** A lot of a kind of building, with nobody on it, away from the panes. */
-    const lotOf = (kind: string) =>
-      layout.lots.find((entry) => {
+    /**
+     * A lot of a kind of building, with nobody on it, away from the panes. Nobody is within 16 pixels of its middle,
+     * which is beyond the 12 from which the marker takes to a person. It was 30 until phase 6C, whose busier midday
+     * streets leave no plain workplace in view that far from everyone.
+     */
+    const lotOf = (kind: string) => {
+      const found = layout.lots.find((entry) => {
         const [sx, sy] = toScreen(geometry.polygonCentroid(entry.polygon), state);
-        return types[entry.buildingId]!.kind === kind && inTheClear(sx, sy, state.size) && state.people.every((person) => Math.hypot(person.x - sx, person.y - sy) > 30);
-      })!;
+        return types[entry.buildingId]!.kind === kind && inTheClear(sx, sy, state.size) && state.people.every((person) => Math.hypot(person.x - sx, person.y - sy) > 16);
+      });
+      if (!found) throw new Error(`no ${kind} in view has nobody near it`);
+      return found;
+    };
     const hoverOn = async (lot: Layout['lots'][number]) => {
       const [sx, sy] = toScreen(geometry.polygonCentroid(lot.polygon), state);
       await page.mouse.move(box.x + sx, box.y + sy);
@@ -434,7 +478,8 @@ describe('the hover marker', () => {
     const { people } = await drawn();
     for (const candidate of people.slice(0, 80)) {
       const { person } = await main.get<PersonNow>(`/api/settlements/${BADANOS}/life/people/${candidate.personId}/now`);
-      if (person.role !== 'head') continue;
+      // An outsider has no household.
+      if ('group' in person || person.role !== 'head') continue;
       await page.locator('#inspector input[type="search"]').fill(person.familyName);
       // Wait for the search to have narrowed the list, or the row would move from under the cursor when it does.
       await page.waitForFunction(
@@ -533,6 +578,231 @@ describe('people outside', () => {
     expect(shouldMove).toBeGreaterThan(50);
     expect(moved).toBeGreaterThan(50);
     expect(moved).toBeLessThan(before.length);
+  });
+});
+
+describe('outsiders', () => {
+  const DAY = 2;
+  const detailTitle = () => page.locator('#inspector .detail h2').innerText();
+  const field = (name: string) => page.locator(`#inspector .detail dd[data-field="${name}"]`).innerText();
+  /** Waits for the detail pane to show the outsider with an ID. */
+  const shows = (outsiderId: string) => page.waitForFunction((id) => document.querySelector('#inspector .detail [data-outsider]')?.getAttribute('data-outsider') === id, outsiderId, { timeout: 10_000 });
+  it('show their kind and where they are from on hover, and have a panel', async () => {
+    await setTime(main, at(DAY, 11));
+    await open(main, BADANOS);
+    const labels = await main.get<PackLabels>('/api/pack');
+    const partyOf = new Map((await inTown(main, BADANOS, DAY)).travellers.map((traveller) => [traveller.id, traveller.partyId]));
+    // Few travellers are out of doors at any one moment, and they go where others are: the first half hour of the
+    // day at which one is drawn with nobody else within a few pixels, so that with the cursor on them they are the
+    // nearest by far. A party keeps together, on the very same spot, so their companions may be there with them.
+    let time = 0;
+    let found: { spot: Drawn['people'][number]; seen: Map<string, TripsWindow['trips'][number] | TripsWindow['outside'][number]> } | undefined;
+    for (let half = 16; half <= 40 && !found; half++) {
+      time = at(DAY, 0, half * 30);
+      await setTime(main, time);
+      const window = await main.get<TripsWindow>(`/api/settlements/${BADANOS}/life/trips?from=${time}&to=${time + 1}`);
+      const seen = new Map([...window.trips, ...window.outside].filter((entry) => entry.outsider && entry.kindId !== undefined).map((entry) => [entry.personId, entry]));
+      const state = await drawn();
+      const apart = (person: Drawn['people'][number], other: Drawn['people'][number]) => Math.hypot(other.x - person.x, other.y - person.y);
+      const spot = state.people.find(
+        (person) =>
+          seen.has(person.personId) &&
+          inTheClear(person.x, person.y, state.size) &&
+          state.people.every((other) => other === person || apart(person, other) > 7 || (apart(person, other) < 0.5 && partyOf.get(other.personId) === partyOf.get(person.personId))),
+      );
+      if (spot) found = { spot, seen };
+    }
+    if (!found) throw new Error('no traveller is drawn clear of everyone else at any half hour of the day');
+    const { spot, seen } = found;
+    const before = await page.locator('#inspector .detail').innerText();
+    const box = await canvasBox();
+    await page.mouse.move(box.x + spot.x, box.y + spot.y);
+    await settled();
+    // The marker is on them, or on a companion standing on the same spot. Its label: their name, the kind of
+    // traveller they are, and where they came from.
+    const hovered = (await drawn()).hover!;
+    expect(hovered.kind).toBe('person');
+    expect(partyOf.get(hovered.id)).toBe(partyOf.get(spot.personId));
+    const target = (await drawn()).people.find((person) => person.personId === hovered.id)!;
+    const who = seen.get(target.personId)!;
+    const kind = labels.travellerKinds[who.kindId!]!;
+    expect(who.origin).toBeTruthy();
+    expect(hovered.label).toBe(`${who.name} · ${kind} from ${who.origin}`);
+    // They are drawn in their kind's colour, from the pack.
+    expect(target.colour).toBe(labels.roleColours[`traveller:${who.kindId}`]);
+    // Hovering changed nothing.
+    expect(await page.locator('#inspector .detail').innerText()).toBe(before);
+    // Clicking opens the panel of the one the marker named.
+    await page.mouse.click(box.x + spot.x, box.y + spot.y);
+    await shows(target.personId);
+    const detail = await main.get<OutsiderDetail>(`/api/settlements/${BADANOS}/life/outsiders/${target.personId}?time=${time}`);
+    if (detail.outsider.group !== 'traveller') throw new Error('expected a traveller');
+    expect(await detailTitle()).toBe(who.name);
+    expect(await page.locator('#inspector .detail .subtitle').innerText()).toContain(`${kind} from ${who.origin}`);
+    expect((await pane('detail').locator('> .pane-head').innerText()).replace(/\s+/g, ' ').toLowerCase()).toContain(kind.toLowerCase());
+    expect(await field('origin')).toContain(who.origin!);
+    /** A game time as the time of its day; a traveller may have come before day 1, at a time below zero. */
+    const clock = (moment: number) => {
+      const minutes = Math.floor((((moment % 86_400) + 86_400) % 86_400) / 60);
+      return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+    };
+    // When they came and when they leave: how many days from today, the day's name and the time, and by which route.
+    const dayNames = labels.calendar.week.map((weekday) => weekday.name).join('|');
+    const apart = (moment: number) => Math.floor(moment / 86_400) - Math.floor(time / 86_400);
+    const { arrival, departure } = detail.outsider;
+    expect(apart(arrival.time)).toBeLessThanOrEqual(0);
+    expect(apart(departure.time)).toBeGreaterThanOrEqual(0);
+    expect(await field('arrival')).toMatch(new RegExp(`^${apart(arrival.time) === 0 ? 'Today' : apart(arrival.time) === -1 ? 'Yesterday' : `${-apart(arrival.time)} days ago`}, (${dayNames}) ${clock(arrival.time)}, by `));
+    expect(await field('departure')).toMatch(new RegExp(`^${apart(departure.time) === 0 ? 'Today' : apart(departure.time) === 1 ? 'Tomorrow' : `In ${apart(departure.time)} days`}, (${dayNames}) ${clock(departure.time)}, by `));
+    expect(await field('destination')).toContain(detail.outsider.destination.settlement?.name ?? detail.outsider.destination.routeName ?? '');
+    // Today's plan, as the timeline a resident has, with what they are doing now marked.
+    expect(await page.locator('#inspector .detail table.timeline tr').count()).toBe(detail.plan.activities.length);
+    expect(await page.locator('#inspector .detail table.timeline tr.current').count()).toBe(1);
+    expect(await page.locator('#inspector .detail .whereabouts').innerText()).not.toMatch(/at home|undefined/i);
+    // And they can be followed on the map, as a resident can.
+    await page.locator('#follow-person').check();
+    await settled();
+    const followed = (await drawn()).people.find((person) => person.personId === target.personId)!;
+    const size = (await drawn()).size;
+    expect(Math.abs(followed.x - size.width / 2)).toBeLessThan(3);
+    expect(Math.abs(followed.y - size.height / 2)).toBeLessThan(3);
+    await page.locator('#follow-person').uncheck();
+  });
+
+  it('have a panel that leads to their companions and their lodging, and an inn\'s panel lists its guests', async () => {
+    const time = at(DAY, 15);
+    await setTime(main, time);
+    const labels = await main.get<PackLabels>('/api/pack');
+    const today = await inTown(main, BADANOS, DAY);
+    // Someone who travels with another and stays the night.
+    const guest = today.travellers.find((traveller) => traveller.lodgingId !== undefined && today.travellers.some((other) => other.partyId === traveller.partyId && other.id !== traveller.id))!;
+    expect(guest).toBeDefined();
+    const detail = await main.get<OutsiderDetail>(`/api/settlements/${BADANOS}/life/outsiders/${guest.id}?time=${time}`);
+    const others = detail.companions!.filter((companion) => companion.id !== guest.id);
+    await pane('in-town').locator(`li[data-person="${guest.id}"] button`).click();
+    await shows(guest.id);
+    // The party: every companion by name, and not themselves.
+    expect(await page.locator('#inspector .detail ul.party li').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-person')))).toEqual(others.map((companion) => companion.id));
+    expect(await page.locator('#inspector .detail ul.party li button').first().innerText()).toBe(`${others[0]!.givenName} ${others[0]!.familyName}`);
+    // The lodging is a link that selects the building, whose panel lists its guests.
+    const lodging = labels.buildingTypes[today.buildings[guest.lodgingId!]!]!;
+    expect(await field('lodging')).toBe(lodging);
+    await page.locator('#inspector .detail dd[data-field="lodging"] button').click();
+    await page.waitForFunction((wanted) => document.querySelector('#inspector .detail h2')?.textContent === wanted, lodging, { timeout: 10_000 });
+    const occupants = await main.get<OccupantsNow>(`/api/settlements/${BADANOS}/life/buildings/${guest.lodgingId}/occupants?time=${time}`);
+    expect(occupants.guests.map((entry) => entry.id)).toContain(guest.id);
+    expect(await page.locator('#inspector .detail h3').allInnerTexts()).toContain(`Guests lodging here today (${occupants.guests.length})`.toUpperCase());
+    expect(await page.locator('#inspector .detail ul.guests li').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-person')))).toEqual(occupants.guests.map((entry) => entry.id));
+    expect(await page.locator(`#inspector .detail ul.guests li[data-person="${guest.id}"]`).innerText()).toContain(`${labels.travellerKinds[guest.kindId]} from `);
+    // A guest's name opens their panel; a companion's name, theirs.
+    await page.locator(`#inspector .detail ul.guests li[data-person="${guest.id}"] button`).click();
+    await shows(guest.id);
+    await page.locator('#inspector .detail ul.party li button').first().click();
+    await shows(others[0]!.id);
+    expect(await detailTitle()).toBe(`${others[0]!.givenName} ${others[0]!.familyName}`);
+    expect(await page.locator('#inspector .detail ul.party li').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-person')))).toContain(guest.id);
+  });
+
+  it('are listed by kind in the In town today pane, which follows the day and collapses like the others', async () => {
+    const labels = await main.get<PackLabels>('/api/pack');
+    /** The pane's groups as the page shows them: heading, and the IDs listed. */
+    const groups = () =>
+      pane('in-town').locator('section').evaluateAll((sections) => sections.map((section) => [section.getAttribute('data-kind') ?? section.getAttribute('data-group'), section.querySelector('h4')?.textContent, [...section.querySelectorAll('li[data-person]')].map((row) => row.getAttribute('data-person'))]));
+    const expected = (today: OutsidersToday) => [
+      ...Object.entries(labels.travellerKinds)
+        .filter(([kindId]) => (today.byKind[kindId] ?? 0) > 0)
+        .map(([kindId, name]) => [kindId, `${name} (${today.byKind[kindId]})`, today.travellers.filter((traveller) => traveller.kindId === kindId).map((traveller) => traveller.id)]),
+      ['vagrant', `${labels.vagrantName} (${today.vagrants.length})`, today.vagrants.map((vagrant) => vagrant.id)],
+    ];
+    const today = await inTown(main, BADANOS, DAY);
+    expect(today.vagrants).toHaveLength(29);
+    expect(today.travellers.length).toBeGreaterThan(40);
+    expect(Object.keys(today.byKind).length).toBeGreaterThan(2);
+    expect(await pane('in-town').locator('.in-town').getAttribute('data-day')).toBe(String(DAY));
+    expect(await groups()).toEqual(expected(today));
+    // Each name is there to be read, with where a traveller is from.
+    const first = today.travellers[0]!;
+    expect(await pane('in-town').locator(`li[data-person="${first.id}"]`).innerText()).toBe(`${first.givenName} ${first.familyName} from ${first.origin.settlement?.name ?? first.origin.routeName ?? first.origin.routeId}`);
+    // A name opens that outsider's panel: a vagrant's has no party and no visit.
+    const vagrant = today.vagrants[3]!;
+    await pane('in-town').locator(`li[data-person="${vagrant.id}"] button`).click();
+    await shows(vagrant.id);
+    expect(await detailTitle()).toBe(`${vagrant.givenName} ${vagrant.familyName}`);
+    expect(await page.locator('#inspector .detail .subtitle').innerText()).toContain(` · ${labels.vagrantName} · `);
+    expect(await page.locator('#inspector .detail .party, #inspector .detail dl.visit').count()).toBe(0);
+    expect(await page.locator('#inspector .detail table.timeline tr').count()).toBeGreaterThan(0);
+    // It folds to one line, its title and how many there are, and unfolds again, like the other panes.
+    const head = pane('in-town').locator('> .pane-head');
+    const body = pane('in-town').locator('> .pane-body');
+    expect(await body.isVisible()).toBe(true);
+    await head.click();
+    expect(await pane('in-town').getAttribute('class')).toContain('collapsed');
+    expect(await body.isVisible()).toBe(false);
+    expect((await head.innerText()).replace(/\s+/g, ' ').trim().replace(' :', ':')).toMatch(new RegExp(`^. ?in town today: ${today.travellers.length + today.vagrants.length}$`, 'i'));
+    expect(await head.getAttribute('aria-expanded')).toBe('false');
+    await head.click();
+    expect(await body.isVisible()).toBe(true);
+    expect(await head.getAttribute('aria-expanded')).toBe('true');
+    // When the clock's day changes, the list is the new day's.
+    await setTime(main, at(DAY + 1, 9));
+    await page.waitForFunction((day) => document.querySelector('#inspector .in-town')?.getAttribute('data-day') === day, String(DAY + 1), { timeout: 20_000 });
+    const tomorrow = await inTown(main, BADANOS, DAY + 1);
+    expect(tomorrow.travellers.map((traveller) => traveller.id)).not.toEqual(today.travellers.map((traveller) => traveller.id));
+    expect(await groups()).toEqual(expected(tomorrow));
+  });
+
+  it('have their colours in the legend when they are in town, each kind\'s from the pack', async () => {
+    // At three in the morning the travellers are indoors: the outsiders to be seen are the vagrants, asleep on the streets.
+    const night = at(DAY, 3);
+    await setTime(main, night);
+    await open(main, BADANOS);
+    const labels = await main.get<PackLabels>('/api/pack');
+    const today = await inTown(main, BADANOS, DAY);
+    const wanted = outsiderColours(today, labels);
+    expect(wanted.length).toBeGreaterThan(3);
+    expect(wanted[wanted.length - 1]).toEqual(['vagrant', labels.roleColours.vagrant, 'Vagrant']);
+    const outsidersListed = async () => (await legendRows()).filter(([role]) => role === 'vagrant' || role!.startsWith('traveller:'));
+    expect(await outsidersListed()).toEqual(wanted);
+    // No two of them share a colour, or there would be nothing to tell them apart by.
+    expect(new Set(wanted.map((entry) => entry[1])).size).toBe(wanted.length);
+    const asleep = (await drawn()).people.filter((person) => isOutsiderId(person.personId));
+    expect(asleep).toHaveLength(today.vagrants.length);
+    expect(new Set(asleep.map((person) => person.personId))).toEqual(new Set(today.vagrants.map((vagrant) => vagrant.id)));
+    expect(asleep.every((person) => person.colour === labels.roleColours.vagrant && person.shape === 'square')).toBe(true);
+    // A vagrant under the cursor is named as the pack names vagrants, and their panel says they are asleep in the street.
+    const state = await drawn();
+    const sleeper = state.people.find((person) => isOutsiderId(person.personId) && inTheClear(person.x, person.y, state.size) && state.people.every((other) => other === person || Math.hypot(other.x - person.x, other.y - person.y) > 26))!;
+    const box = await canvasBox();
+    await page.mouse.move(box.x + sleeper.x, box.y + sleeper.y);
+    await settled();
+    const who = today.vagrants.find((vagrant) => vagrant.id === sleeper.personId)!;
+    expect((await drawn()).hover).toEqual({ kind: 'person', id: who.id, label: `${who.givenName} ${who.familyName} · ${labels.vagrantName}` });
+    await page.mouse.click(box.x + sleeper.x, box.y + sleeper.y);
+    await shows(who.id);
+    expect(await page.locator('#inspector .detail .whereabouts').innerText()).toMatch(/^Asleep in the street, until \d\d:\d\d$/);
+    // Late in the morning, every outsider drawn is in the colour the legend gives their kind, and several kinds are about.
+    const time = at(DAY, 11);
+    await setTime(main, time);
+    const window = await main.get<TripsWindow>(`/api/settlements/${BADANOS}/life/trips?from=${time}&to=${time + 1}`);
+    const roles = new Map([...window.trips, ...window.outside].filter((entry) => entry.outsider).map((entry) => [entry.personId, entry.role]));
+    const colourOf = new Map(wanted.map(([role, colour]) => [role, colour]));
+    const about = (await drawn()).people.filter((person) => isOutsiderId(person.personId));
+    expect(about.length).toBeGreaterThan(20);
+    for (const person of about) expect(person.colour, person.personId).toBe(colourOf.get(roles.get(person.personId)!));
+    expect(new Set(about.map((person) => person.colour)).size).toBeGreaterThan(2);
+    // The swatches show those colours.
+    const swatches = await pane('legend').locator('li[data-role="vagrant"] .swatch, li[data-role^="traveller:"] .swatch').evaluateAll((items) => items.map((item) => getComputedStyle(item).backgroundColor));
+    const rgb = (hex: string) => `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
+    expect(swatches).toEqual(wanted.map((entry) => rgb(entry[1])));
+    // A copy of the pack that gives merchants another colour: the legend and the map follow it.
+    expect(labels.roleColours['traveller:merchant']).not.toBe(OTHER_MERCHANT);
+    await setTime(recoloured, time);
+    await open(recoloured, BADANOS);
+    expect(await outsidersListed()).toContainEqual(['traveller:merchant', OTHER_MERCHANT, labels.travellerKinds.merchant]);
+    const merchants = new Set([...roles].filter(([, role]) => role === 'traveller:merchant').map(([personId]) => personId));
+    const drawnMerchants = (await drawn()).people.filter((person) => merchants.has(person.personId));
+    expect(drawnMerchants.length).toBeGreaterThan(0);
+    expect(drawnMerchants.every((person) => person.colour === OTHER_MERCHANT)).toBe(true);
   });
 });
 

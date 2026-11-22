@@ -2,7 +2,7 @@
  * Daily life in words: what someone is doing, and their day as a timeline.
  * Pure, so the wording can be tested without a browser.
  */
-import type { Activity, OpenSpan, PackLabels, Whereabouts } from '@worldsim/core';
+import type { Activity, OpenSpan, PackLabels, StreetStop, Whereabouts } from '@worldsim/core';
 import { buildingTypeName } from './city-format.ts';
 import { formatClock } from './clock.ts';
 import { formatMetres } from './town-format.ts';
@@ -16,9 +16,26 @@ const place = (buildingId: string, buildings: Buildings, labels: PackLabels) => 
   return type === undefined ? buildingId : buildingTypeName(type, labels).toLowerCase();
 };
 
-/** A short word for what someone is doing, for a table cell. */
-export function activityWord(kind: Activity['kind']): string {
-  return { sleep: 'Asleep', home: 'At home', work: 'At work', visit: 'Visiting', travel: 'On the street', street: 'On the street' }[kind];
+/** A short word for what someone is doing, for a table cell. A lodger, a traveller, is awake at their lodging and not at a home. */
+export function activityWord(kind: Whereabouts['kind'], lodger = false): string {
+  return { sleep: 'Asleep', home: lodger ? 'At their lodging' : 'At home', work: 'At work', visit: 'Visiting', travel: 'On the street', street: 'On the street', away: 'Not in town' }[kind];
+}
+
+/**
+ * Being at a point on a street, as a phrase. Someone who lives on the streets may be asleep there, or awake at
+ * the place where they sleep; anyone else is at a stop on a round or pausing on a walk.
+ */
+function onTheStreet(stop: { purpose: StreetStop['purpose']; visitId?: string | undefined }, labels: PackLabels, round: string): string {
+  switch (stop.purpose) {
+    case 'work':
+      return round;
+    case 'sleep':
+      return 'Asleep in the street';
+    case 'home':
+      return 'In the street, at the place where they sleep';
+    case 'visit':
+      return `${labels.visits[stop.visitId ?? ''] ?? 'A walk'}, pausing in the street`;
+  }
 }
 
 /** Where a walk is going, as the end of a phrase: "home", "to the tannery", or "along the street" when it ends at a point on one. */
@@ -49,13 +66,16 @@ export function describeHours(open: boolean, hours: OpenSpan[]): string {
   return `${now} · today ${hours.map((span) => `${formatClock(span.from)} – ${end(span)}`).join(', ')}`;
 }
 
-/** What an activity is, in a phrase: "Work at the tannery". */
-export function describeActivity(activity: Activity, buildings: Buildings, labels: PackLabels, home?: string): string {
+/**
+ * What an activity is, in a phrase: "Work at the tannery". For a lodger, a traveller, `sleep` and `home` are spent
+ * at their lodging: "Asleep at their lodging, the inn".
+ */
+export function describeActivity(activity: Activity, buildings: Buildings, labels: PackLabels, home?: string, lodger = false): string {
   switch (activity.kind) {
     case 'sleep':
-      return 'Asleep at home';
+      return lodger ? `Asleep at their lodging, the ${place(activity.buildingId, buildings, labels)}` : 'Asleep at home';
     case 'home':
-      return 'At home';
+      return lodger ? `At their lodging, the ${place(activity.buildingId, buildings, labels)}` : 'At home';
     case 'work':
       // A stop on a round is work done away from the workplace.
       if (activity.round) return `On their round: a stop ${whereAt(activity, buildings, labels, home)}`;
@@ -66,18 +86,19 @@ export function describeActivity(activity: Activity, buildings: Buildings, label
     case 'travel':
       return `${activity.round ? 'On their round: walk' : 'Walk'} ${walkTo(activity.toBuildingId, buildings, labels, home)} (${formatMetres(activity.path.length)})`;
     case 'street':
-      return activity.purpose === 'work' ? 'On their round: a stop in the street' : `${labels.visits[activity.visitId ?? ''] ?? 'A walk'}, pausing in the street`;
+      return onTheStreet(activity, labels, 'On their round: a stop in the street');
   }
 }
 
-/** What someone is doing at a moment, and until when. */
-export function describeWhereabouts(where: Whereabouts, buildings: Buildings, labels: PackLabels, home?: string): string {
+/** What someone is doing at a moment, and until when. A lodger's `sleep` and `home` are at their lodging; a traveller who has not come yet, or has gone, is not in town. */
+export function describeWhereabouts(where: Whereabouts, buildings: Buildings, labels: PackLabels, home?: string, lodger = false): string {
+  if (where.kind === 'away') return 'Not in town';
   const until = `until ${formatClock(where.until)}`;
   switch (where.kind) {
     case 'sleep':
-      return `Asleep at home, ${until}`;
+      return lodger ? `Asleep at their lodging, the ${place(where.buildingId, buildings, labels)}, ${until}` : `Asleep at home, ${until}`;
     case 'home':
-      return `At home, ${until}`;
+      return lodger ? `At their lodging, the ${place(where.buildingId, buildings, labels)}, ${until}` : `At home, ${until}`;
     case 'work':
       if (where.round) return `On their round, stopped ${whereAt(where, buildings, labels, home)}, ${until}`;
       if (where.outside) return `At work, ${whereAt(where, buildings, labels, home)}, ${until}`;
@@ -87,7 +108,7 @@ export function describeWhereabouts(where: Whereabouts, buildings: Buildings, la
     case 'travel':
       return `${where.round ? 'On their round, walking' : 'Walking'} ${walkTo(where.toBuildingId, buildings, labels, home)}, arriving at ${formatClock(where.until)}`;
     case 'street':
-      return where.purpose === 'work' ? `On their round, stopped in the street, ${until}` : `${labels.visits[where.visitId ?? ''] ?? 'A walk'}, pausing in the street, ${until}`;
+      return `${onTheStreet(where, labels, 'On their round, stopped in the street')}, ${until}`;
   }
 }
 
@@ -101,10 +122,11 @@ export interface TimelineRow {
 }
 
 /** A day plan as rows for a timeline, marking the activity under way at a game time. */
-export function timeline(activities: Activity[], buildings: Buildings, labels: PackLabels, now?: number, home?: string): TimelineRow[] {
+export function timeline(activities: Activity[], buildings: Buildings, labels: PackLabels, now?: number, home?: string, lodger = false): TimelineRow[] {
   return activities.map((activity, index) => ({
-    time: `${formatClock(activity.start)} – ${index === activities.length - 1 ? '24:00' : formatClock(activity.end)}`,
-    text: describeActivity(activity, buildings, labels, home),
+    // The last activity of a whole day ends at 24:00, not at the next day's 00:00.
+    time: `${formatClock(activity.start)} – ${index === activities.length - 1 && activity.end % SECONDS_PER_DAY === 0 ? '24:00' : formatClock(activity.end)}`,
+    text: describeActivity(activity, buildings, labels, home, lodger),
     kind: activity.kind,
     current: now !== undefined && now >= activity.start && now < activity.end,
   }));

@@ -1,8 +1,9 @@
 /**
  * The city inspector: a generated city's summary, its districts, a searchable
- * list of households, and views of one household or one building.
+ * list of households, views of one household, one building, one resident or
+ * one outsider, and the outsiders in town that day.
  */
-import type { AvatarPerception, AvatarState, BuildingDetail, BuildingTypes, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, PackLabels, PersonNow, PersonPlan } from '@worldsim/core';
+import type { Activity, AvatarPerception, AvatarState, BuildingDetail, BuildingTypes, CitySummary, District, HouseholdDetail, HouseholdListItem, HouseholdNow, OccupantsNow, OutsiderDetail, OutsidersToday, PackLabels, PersonNow, PersonPlan, Whereabouts } from '@worldsim/core';
 import {
   fetchBuilding,
   fetchBuildingTypes,
@@ -15,6 +16,8 @@ import {
   fetchLayout,
   fetchAvatar,
   fetchOccupants,
+  fetchOutsider,
+  fetchOutsiders,
   fetchPerception,
   postAvatar,
   watchAvatar,
@@ -46,7 +49,8 @@ import { ClockSync, clockFace } from './clock.ts';
 import { createClockBar } from './clock-bar.ts';
 import { h, link } from './dom.ts';
 import { createAroundYou } from './around-you.ts';
-import { legendEntries, renderLegend } from './legend.ts';
+import { legendEntries, outsiderLegendEntries, renderLegend } from './legend.ts';
+import { byRoute, describeOutsider, describeRouteEnd, isOutsider, kindName, outsiderGroups, relativeDay, routeEndName, seenLabel } from './outsider-format.ts';
 import { createFoldAll, createPane } from './pane.ts';
 import { activityWord, describeHours, describeWhereabouts, timeline } from './life-format.ts';
 import { createTownMap } from './town-map.ts';
@@ -88,6 +92,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const listPane = createPane('households', 'Households', listBody, 'column');
   const detailPane = createPane('detail', 'Details', detailBox, 'column');
   const legendPane = createPane('legend', 'Legend', legendBody, 'over-map legend-pane');
+  const inTownBody = h('div', { class: 'in-town' });
+  const inTownPane = createPane('in-town', 'In town today', inTownBody, 'over-map in-town-pane');
   /** What the detail pane is showing, for its title and its one line when folded. */
   const detailShows = (kind: string, what: string) => {
     detailPane.setTitle(kind);
@@ -96,13 +102,22 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
 
   // The world clock: kept in step with the server's over a socket, and shown with its controls.
   const sync = new ClockSync(() => performance.now());
-  const clockBar = createClockBar(sync, { change: postClock, changed: () => townMap.clockChanged(), shown: (face) => clockPane.setSummary(face) });
+  const clockBar = createClockBar(sync, {
+    change: postClock,
+    changed: () => townMap.clockChanged(),
+    shown: (face) => {
+      clockPane.setSummary(face);
+      // The face changes when the day does, among other times.
+      loadInTown();
+    },
+  });
   const clockPane = createPane('clock', 'Clock', clockBar.element, 'inline');
   const heard = (state: Parameters<ClockSync['apply']>[0]) => {
     sync.apply(state);
     clockBar.refresh();
     townMap.clockChanged();
     perceive();
+    loadInTown();
   };
   watchClock(heard);
   void fetchClock().then(heard, () => undefined);
@@ -139,13 +154,13 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     rate: () => sync.current?.rate ?? 1,
     isLight: (time) => (labels ? clockFace(time, labels.calendar).isLight : true),
     loadTrips: (from, to, region) => fetchTrips(settlementId, from, to, region),
-    onPersonClick: (personId) => void showPerson(personId),
+    onPersonClick: (personId, outsider) => void showAnyone(personId, outsider),
     onSpawn: (point) => act('spawn', { settlementId, point }),
     onWalkToPoint: (point) => act('walk-to-point', { point }),
     onWalkToBuilding: (buildingId) => act('walk-to-building', { buildingId }),
     onUnfollowAvatar: () => aroundYou.unfollow(),
     roleColour: (role) => labels?.roleColours[role],
-    personLabel: (person) => (person.occupationId !== undefined && labels ? `${person.name} · ${workName(person, labels)}` : person.name),
+    personLabel: (person) => (labels ? seenLabel(person, labels) : person.name),
     lotLabel: (lot) => {
       const building = buildingTypes[lot.buildingId];
       return building === undefined || !labels ? lot.buildingId : buildingName(building, labels);
@@ -171,7 +186,7 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     onStop: () => act('stop'),
     onLeave: () => act('leave'),
     onFollow: (on) => townMap.followAvatar(on),
-    onPerson: (personId) => void showPerson(personId),
+    onPerson: (personId, outsider) => void showAnyone(personId, outsider),
     onBuilding: (buildingId) => void showBuilding(buildingId),
     onHover: (personId) => townMap.mark(personId),
   });
@@ -213,7 +228,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   watchAvatar((report) => heardAvatar(report.avatar ?? undefined));
   void fetchAvatar().then((report) => heardAvatar(report.avatar ?? undefined), () => undefined);
   setInterval(perceive, PERCEIVE_EVERY);
-  mapBox.append(legendPane.element, aroundPane.element);
+  // The legend and the day's outsiders stand one above the other at the map's left; who is around, at its right.
+  mapBox.append(h('div', { class: 'over-map-stack' }, legendPane.element, inTownPane.element), aroundPane.element);
   /** A moment in words, for saying when an answer was true. */
   const asOf = (time: number) => {
     const shown = clockFace(time, labels.calendar);
@@ -222,9 +238,9 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
   const districtName = (id: string) => districts.find((district) => district.id === id)?.name ?? id;
   const tierName = (id: string) => labels.statusTiers.find((tier) => tier.id === id)?.name ?? id;
 
-  /** A list row for a household, by the member it shows: hovering it marks that person on the map, if they can be seen. */
-  const hoverable = (personId: string, child: HTMLElement) => {
-    const row = h('li', { attrs: { 'data-person': personId } }, child);
+  /** A list row for one person, such as the member a household's row shows: hovering it marks that person on the map, if they can be seen. */
+  const hoverable = (personId: string, ...children: Array<HTMLElement | string>) => {
+    const row = h('li', { attrs: { 'data-person': personId } }, ...children);
     row.addEventListener('mouseenter', () => townMap.mark(personId));
     row.addEventListener('mouseleave', () => townMap.mark(undefined));
     return row;
@@ -419,12 +435,26 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
                       {},
                       h('td', {}, `${occupant.person.givenName} ${occupant.person.familyName}`),
                       h('td', { class: 'number' }, String(occupant.person.age)),
-                      h('td', {}, `${occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind)}${occupant.outside ? ' (outside)' : ''}`),
-                      h('td', {}, link('Open', () => void showPerson(occupant.personId), 'Show this person\'s day')),
+                      // A traveller awake at an inn is at their lodging, not at home.
+                      h('td', {}, `${occupant.kind === 'visit' ? (labels.visits[occupant.visitId ?? ''] ?? 'Visiting') : activityWord(occupant.kind, isOutsider(occupant.person))}${occupant.outside ? ' (outside)' : ''}`),
+                      h('td', {}, link('Open', () => void showAnyone(occupant.personId, isOutsider(occupant.person)), 'Show this person\'s day')),
                     ),
                   ),
                 ),
               ),
+          // An inn, or anywhere else travellers lodge, lists its guests of the day, in or out.
+          ...(now.guests.length > 0
+            ? [
+                h('h3', {}, `Guests lodging here today (${now.guests.length})`),
+                h(
+                  'ul',
+                  { class: 'guests' },
+                  ...now.guests.map((guest) =>
+                    hoverable(guest.id, link(`${guest.givenName} ${guest.familyName}`, () => void showOutsider(guest.id), 'Show this guest\'s day'), ` · ${guest.age} · ${describeOutsider(guest, labels)}`),
+                  ),
+                ),
+              ]
+            : []),
         ]
       : [];
     const workersSection = [
@@ -491,49 +521,81 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     );
   }
 
-  /** A person: who they are, what they are doing now, and their day as a timeline. */
-  function renderPerson(now: PersonNow, plan: PersonPlan): void {
-    const { person, whereabouts, time } = now;
-    detailShows('Person', `${person.givenName} ${person.familyName}`);
-    const buildings = { ...plan.buildings, ...now.buildings };
-    const home = plan.plan.activities.find((activity) => activity.kind === 'sleep' || activity.kind === 'home');
-    const homeId = home && home.kind !== 'travel' && home.kind !== 'street' ? home.buildingId : undefined;
+  /** The building someone is at, if they are at one and not on a street or out of town. */
+  const buildingOf = (where: Whereabouts) => (where.kind === 'travel' || where.kind === 'street' || where.kind === 'away' ? undefined : where.buildingId);
+
+  /**
+   * What someone is doing now, with the ways to follow them and to walk the avatar to them: the part of a panel a
+   * resident and an outsider share. `lodger` is whether they are a traveller, whose rest is at a lodging.
+   */
+  function nowSection(personId: string, whereabouts: Whereabouts, time: number, buildings: Record<string, string>, homeId: string | undefined, lodger: boolean, walks: Array<HTMLElement | string> = []): HTMLElement[] {
+    const where = buildingOf(whereabouts);
     const follow = h('input', { attrs: { type: 'checkbox', id: 'follow-person' } });
     follow.addEventListener('change', () => {
-      townMap.follow(follow.checked ? { personId: person.id, ...(whereabouts.kind !== 'travel' && whereabouts.kind !== 'street' && { buildingId: whereabouts.buildingId }) } : undefined);
+      townMap.follow(follow.checked ? { personId, ...(where !== undefined && { buildingId: where }) } : undefined);
     });
-    const where = whereabouts.kind === 'travel' || whereabouts.kind === 'street' ? undefined : whereabouts.buildingId;
     townMap.highlight(where);
-    detailBox.replaceChildren(
-      h('h2', {}, `${person.givenName} ${person.familyName}`),
-      h('p', { class: 'subtitle' }, `${person.age} · ${person.sex === 'female' ? 'Female' : 'Male'}${person.occupationId ? ` · ${workName(person, labels)}` : ''} · ${person.id}`),
-      h('p', {}, link('Their household', () => void showHousehold(person.householdId)), person.workplaceId ? ' · ' : '', person.workplaceId ? link('Their workplace', () => void showBuilding(person.workplaceId as string)) : ''),
+    const walkToThem = () => {
+      if (whereabouts.kind === 'travel' || whereabouts.kind === 'street') act('walk-to-point', { point: whereabouts.point });
+      else if (whereabouts.kind !== 'away') act('walk-to-building', { buildingId: whereabouts.buildingId });
+    };
+    return [
       h('h3', {}, `Now, ${asOf(time)}`),
-      h('p', {}, describeWhereabouts(whereabouts, buildings, labels, homeId), where ? ' · ' : '', where ? link('Show the building', () => void showBuilding(where)) : ''),
+      h('p', { class: 'whereabouts' }, describeWhereabouts(whereabouts, buildings, labels, homeId, lodger), where ? ' · ' : '', where ? link('Show the building', () => void showBuilding(where)) : ''),
       h('p', {}, h('label', { attrs: { for: 'follow-person' } }, follow, ' Follow on the map')),
       ...(avatarHere()
         ? [
             h(
               'p',
               { class: 'avatar-actions' },
-              h('button', { attrs: { type: 'button' }, title: 'Walk your avatar to where this person is now', onClick: () => (whereabouts.kind === 'travel' || whereabouts.kind === 'street' ? act('walk-to-point', { point: whereabouts.point }) : act('walk-to-building', { buildingId: whereabouts.buildingId })) }, 'Walk to them'),
-              homeId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: homeId }) }, 'Walk to their home') : '',
-              person.workplaceId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: person.workplaceId as string }) }, 'Walk to their workplace') : '',
+              // Nobody can be walked to who is not in town.
+              whereabouts.kind !== 'away' ? h('button', { attrs: { type: 'button' }, title: 'Walk your avatar to where this person is now', onClick: walkToThem }, 'Walk to them') : '',
+              ...walks,
             ),
           ]
         : []),
+    ];
+  }
+
+  /** A day's plan as a timeline, marking what is under way; a traveller's plan is empty on a day they are not in town. */
+  function planSection(activities: Activity[], time: number, buildings: Record<string, string>, homeId: string | undefined, lodger: boolean): HTMLElement[] {
+    return [
       h('h3', {}, 'Today\'s plan'),
-      h(
-        'table',
-        { class: 'timeline' },
-        h(
-          'tbody',
-          {},
-          ...timeline(plan.plan.activities, buildings, labels, time, homeId).map((row) =>
-            h('tr', { class: row.current ? `current ${row.kind}` : row.kind }, h('td', { class: 'number' }, row.time), h('td', {}, row.text)),
+      activities.length === 0
+        ? hint('Not in town today.')
+        : h(
+            'table',
+            { class: 'timeline' },
+            h(
+              'tbody',
+              {},
+              ...timeline(activities, buildings, labels, time, homeId, lodger).map((row) =>
+                h('tr', { class: row.current ? `current ${row.kind}` : row.kind }, h('td', { class: 'number' }, row.time), h('td', {}, row.text)),
+              ),
+            ),
           ),
-        ),
-      ),
+    ];
+  }
+
+  /** A resident: who they are, what they are doing now, and their day as a timeline. */
+  function renderPerson(now: PersonNow, plan: PersonPlan): void {
+    const { person, whereabouts, time } = now;
+    // An outsider has a panel of their own; this one is for someone with a household.
+    if (isOutsider(person)) return void showOutsider(person.id);
+    detailShows('Person', `${person.givenName} ${person.familyName}`);
+    const buildings = { ...plan.buildings, ...now.buildings };
+    const home = plan.plan.activities.find((activity) => activity.kind === 'sleep' || activity.kind === 'home');
+    const homeId = home && home.kind !== 'travel' && home.kind !== 'street' ? home.buildingId : undefined;
+    const workplaceId = person.workplaceId;
+    detailBox.replaceChildren(
+      h('h2', {}, `${person.givenName} ${person.familyName}`),
+      h('p', { class: 'subtitle' }, `${person.age} · ${person.sex === 'female' ? 'Female' : 'Male'}${person.occupationId ? ` · ${workName(person, labels)}` : ''} · ${person.id}`),
+      h('p', {}, link('Their household', () => void showHousehold(person.householdId)), workplaceId ? ' · ' : '', workplaceId ? link('Their workplace', () => void showBuilding(workplaceId)) : ''),
+      ...nowSection(person.id, whereabouts, time, buildings, homeId, false, [
+        homeId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: homeId }) }, 'Walk to their home') : '',
+        workplaceId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: workplaceId }) }, 'Walk to their workplace') : '',
+      ]),
+      ...planSection(plan.plan.activities, time, buildings, homeId, false),
     );
     detailBox.scrollTop = 0;
   }
@@ -543,6 +605,136 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
     const time = gameNow();
     const day = Math.floor(time / 86_400) + 1;
     await showDetail(async () => [await fetchPersonNow(settlementId, id, time), await fetchPersonPlan(settlementId, id, day)] as const, ([now, plan]) => renderPerson(now, plan));
+  }
+
+  /**
+   * An outsider: their kind, their party, where they came from and go on to, when they arrived and when they
+   * leave, where they lodge, what they are doing now, and their day as the timeline a resident has.
+   */
+  function renderOutsider(detail: OutsiderDetail): void {
+    const { outsider, companions = [], whereabouts, plan, buildings, time } = detail;
+    const name = `${outsider.givenName} ${outsider.familyName}`;
+    detailShows(kindName(outsider.group === 'traveller' ? outsider.kindId : undefined, labels), name);
+    const others = companions.filter((companion) => companion.id !== outsider.id);
+    /** A moment that may be on another day: how far that day is from this one, its name and the time. */
+    const when = (moment: number) => `${relativeDay(Math.floor(moment / 86_400), Math.floor(time / 86_400))}, ${asOf(moment)}`;
+    const lodgingId = outsider.group === 'traveller' ? outsider.lodgingId : undefined;
+    const lodgingType = lodgingId === undefined ? undefined : buildings[lodgingId];
+    const visit =
+      outsider.group === 'traveller'
+        ? [
+            h('h3', {}, others.length === 0 ? 'Party' : `Party (${companions.length})`),
+            others.length === 0
+              ? h('p', { class: 'party' }, 'Travelling alone.')
+              : h('ul', { class: 'party' }, ...others.map((companion) => hoverable(companion.id, link(`${companion.givenName} ${companion.familyName}`, () => void showOutsider(companion.id), 'Show this companion\'s day'), ` · ${companion.age}`))),
+            h('h3', {}, 'Visit'),
+            h(
+              'dl',
+              { class: 'visit' },
+              h('dt', {}, 'From'),
+              h('dd', { attrs: { 'data-field': 'origin' } }, describeRouteEnd(outsider.origin)),
+              h('dt', {}, 'Arrived'),
+              h('dd', { attrs: { 'data-field': 'arrival' } }, `${when(outsider.arrival.time)}, ${byRoute(outsider.origin)}`),
+              h('dt', {}, 'Leaves'),
+              h('dd', { attrs: { 'data-field': 'departure' } }, `${when(outsider.departure.time)}, ${byRoute(outsider.destination)}`),
+              h('dt', {}, 'Going on to'),
+              h('dd', { attrs: { 'data-field': 'destination' } }, describeRouteEnd(outsider.destination)),
+              h('dt', {}, 'Lodging'),
+              h(
+                'dd',
+                { attrs: { 'data-field': 'lodging' } },
+                lodgingId === undefined ? 'None: they do not stay the night' : link(lodgingType === undefined ? lodgingId : (labels.buildingTypes[lodgingType] ?? lodgingType), () => void showBuilding(lodgingId), 'Show where they lodge'),
+              ),
+            ),
+          ]
+        : [];
+    detailBox.replaceChildren(
+      h('h2', {}, name),
+      h('p', { class: 'subtitle', attrs: { 'data-outsider': outsider.id } }, `${outsider.age} · ${outsider.sex === 'female' ? 'Female' : 'Male'} · ${describeOutsider(outsider, labels)} · ${outsider.id}`),
+      ...visit,
+      ...nowSection(outsider.id, whereabouts, time, buildings, undefined, outsider.group === 'traveller', [
+        lodgingId !== undefined ? h('button', { attrs: { type: 'button' }, onClick: () => act('walk-to-building', { buildingId: lodgingId }) }, 'Walk to their lodging') : '',
+      ]),
+      ...planSection(plan.activities, time, buildings, undefined, outsider.group === 'traveller'),
+    );
+    detailBox.scrollTop = 0;
+  }
+
+  async function showOutsider(id: string): Promise<void> {
+    townMap.follow(undefined);
+    await showDetail(() => fetchOutsider(settlementId, id, gameNow()), renderOutsider);
+  }
+
+  /** Shows whoever was chosen where it is known which they are: a resident or an outsider. */
+  const showAnyone = (id: string, outsider: boolean) => (outsider ? showOutsider(id) : showPerson(id));
+
+  // ---- In town today ------------------------------------------------------------------
+  // The server says who the day's outsiders are. The viewer asks again when the day or the town changes, lists
+  // them by kind, and adds their colours to the legend.
+  let outsidersToday: OutsidersToday | undefined;
+  /** The town and day the list was last asked for, so that it is asked for once. */
+  let inTownAsked = '';
+
+  /** The legend: the residents' colours in use, then those of the outsiders in town today. */
+  function showLegend(): void {
+    const colours = [...legendEntries(summary, labels), ...(outsidersToday ? outsiderLegendEntries(outsidersToday, labels) : [])];
+    renderLegend(legendBody, colours);
+    legendPane.setSummary(`${colours.length} colours`);
+  }
+
+  function renderInTown(): void {
+    if (!outsidersToday) return;
+    const groups = outsiderGroups(outsidersToday, labels);
+    inTownPane.setSummary(formatNumber(groups.reduce((sum, group) => sum + group.count, 0)));
+    inTownBody.setAttribute('data-day', String(outsidersToday.day));
+    inTownBody.replaceChildren(
+      ...(groups.length === 0 ? [hint('Nobody from elsewhere is in town.')] : []),
+      ...groups.map((group) =>
+        h(
+          'section',
+          { attrs: group.kindId === undefined ? { 'data-group': 'vagrant' } : { 'data-group': 'traveller', 'data-kind': group.kindId } },
+          h('h4', {}, `${group.name} (${formatNumber(group.count)})`),
+          h(
+            'ul',
+            {},
+            ...group.people.map((person) =>
+              hoverable(
+                person.id,
+                link(`${person.givenName} ${person.familyName}`, () => void showOutsider(person.id), 'Show this person\'s day'),
+                person.group === 'traveller' ? h('span', { class: 'who' }, ` from ${routeEndName(person.origin)}`) : '',
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /** Asks who is in town on the clock's day, if that has not been asked for this town and day already. */
+  function loadInTown(): void {
+    const now = sync.now();
+    if (root.hidden || settlementId === '' || !labels || !summary || summary.settlementId !== settlementId || now === undefined) return;
+    const id = settlementId;
+    const day = Math.floor(now / 86_400) + 1;
+    const asked = `${id} ${day}`;
+    if (asked === inTownAsked) return;
+    inTownAsked = asked;
+    fetchOutsiders(id, day).then(
+      (today) => {
+        if (asked !== inTownAsked) return;
+        outsidersToday = today;
+        renderInTown();
+        showLegend();
+      },
+      (error: Error) => {
+        if (asked !== inTownAsked) return;
+        outsidersToday = undefined;
+        inTownPane.setSummary('unknown');
+        inTownBody.removeAttribute('data-day');
+        inTownBody.replaceChildren(hint(error.message, 'error'));
+        showLegend();
+      },
+    );
   }
 
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -579,6 +771,11 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
       buildingTypes = {};
       townMap.markHomesWithWork(new Set());
       legendBody.replaceChildren();
+      outsidersToday = undefined;
+      inTownAsked = '';
+      inTownBody.removeAttribute('data-day');
+      inTownBody.replaceChildren();
+      inTownPane.setSummary('');
       townMap.message('');
       try {
         const [packLabels, citySummary, districtPage] = await Promise.all([fetchPackLabels(), fetchCitySummary(id), fetchDistricts(id)]);
@@ -590,9 +787,8 @@ export function createInspector(root: HTMLElement, onClose: () => void): Inspect
         subtitle.textContent = `${formatNumber(summary.population)} residents in ${formatNumber(summary.households)} households`;
         renderSummary();
         summaryPane.setSummary(`${summary.settlementName}, ${formatNumber(summary.population)} residents`);
-        const colours = legendEntries(summary, labels);
-        renderLegend(legendBody, colours);
-        legendPane.setSummary(`${colours.length} colours`);
+        showLegend();
+        loadInTown();
         void fetchBuildingTypes(id).then(
           (types) => {
             if (settlementId !== id) return;

@@ -264,7 +264,7 @@ describe('residents outside', () => {
         for (let step = 0; step < 12; step++) {
           const time = stay.start + ((stay.end - stay.start - 1) * step) / 11;
           const where = life.whereabouts(plan.personId, time);
-          if (where.kind === 'travel' || where.kind === 'street' || !where.outside) throw new Error(`${plan.personId} is not outside at ${time}`);
+          if (where.kind === 'travel' || where.kind === 'street' || where.kind === 'away' || !where.outside) throw new Error(`${plan.personId} is not outside at ${time}`);
           if (!onGround(ground, where.point!)) throw new Error(`${plan.personId} at ${time} is at ${where.point} on ${ground.id}, which is not open ground`);
           expect(where.point).toEqual(positionOnWander(stay.wander!, time));
           sampled++;

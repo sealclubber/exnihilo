@@ -914,8 +914,34 @@ body > header .fold-all {
   width: 250px;
 }
 
-#inspector .legend-pane {
+/* The panes at the map's left stand one above the other; the map shows, and takes the pointer, between and beside them. */
+#inspector .over-map-stack {
+  position: absolute;
+  top: 50px;
   left: 10px;
+  max-height: calc(100% - 100px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+#inspector .over-map-stack > .pane.over-map {
+  position: static;
+  max-height: none;
+  pointer-events: auto;
+}
+
+#inspector .legend-pane {
+  flex: none;
+  width: 180px;
+}
+
+/* The list of outsiders gives way when the two do not fit, and scrolls. */
+#inspector .in-town-pane {
+  flex: 0 1 auto;
+  min-height: 0;
   width: 180px;
 }
 
@@ -971,6 +997,43 @@ body > header .fold-all {
 #inspector .legend .swatch.built {
   border: 1px solid rgba(35, 39, 46, 0.3);
   background: #a8a8a0;
+}
+
+/* ---- In town today, and an outsider's panel ---- */
+
+#inspector .in-town {
+  font-size: 13px;
+}
+
+#inspector .in-town h4 {
+  margin: 6px 0 2px;
+  font-size: 13px;
+}
+
+#inspector .in-town ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#inspector .in-town .who {
+  color: var(--muted);
+}
+
+#inspector .detail dl.visit {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+#inspector .detail dl.visit dt {
+  color: var(--muted);
+}
+
+#inspector .detail dl.visit dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* ---- Hovering ---- */

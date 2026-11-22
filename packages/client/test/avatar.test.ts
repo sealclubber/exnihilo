@@ -73,6 +73,16 @@ describe('the avatar in words', () => {
     expect(describeOccupant(occupant({ outside: true }), labels)).toBe('At work (outside)');
     expect(describeOccupant(occupant({ kind: 'visit', visitId: 'market' }), labels)).toBe('Going to market');
     expect(describeOccupant(occupant({ kind: 'sleep' }), labels)).toBe('Asleep');
+    expect(describeOccupant(occupant({ kind: 'home' }), labels)).toBe('At home');
+    // A traveller awake at an inn is at their lodging.
+    expect(describeOccupant(occupant({ personId: 'traveller-1-000009-merchant-002-01', outsider: true, kind: 'home' }), labels)).toBe('At their lodging');
+    expect(describeOccupant(occupant({ personId: 'traveller-1-000009-merchant-002-01', outsider: true, kind: 'sleep' }), labels)).toBe('Asleep');
+  });
+
+  it('says when someone nearby lives on the street: asleep there, or awake at the place where they sleep', () => {
+    const vagrant = { personId: 'vagrant-1-000003', outsider: true as const, distance: 4, point: [0, 0] as [number, number], kind: 'outside' as const, segmentId: 'segment-1-000001' };
+    expect(describeNearby({ ...vagrant, activity: 'sleep' }, {}, labels)).toBe('Asleep in the street');
+    expect(describeNearby({ ...vagrant, activity: 'home' }, {}, labels)).toBe('In the street, at the place where they sleep');
   });
 });
 

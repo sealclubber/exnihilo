@@ -74,7 +74,7 @@ export interface TownMap {
   clockChanged(): void;
   /** The avatar to draw, as the server sent it, and how far it perceives; nothing if it is not in this town. */
   setAvatar(avatar: { state: AvatarState; radius: number } | undefined): void;
-  /** The residents the avatar perceives, to be ringed on the map. */
+  /** The people the avatar perceives, to be ringed on the map. */
   setPerceived(personIds: ReadonlySet<string>): void;
   /** Keeps the map centred on the avatar, at a zoom where a street fills the view. */
   followAvatar(on: boolean): void;
@@ -128,13 +128,14 @@ export interface TownMapHandlers {
   loadTrips(from: number, to: number, region: Region): Promise<{ trips: Array<Trip & Seen>; outside: Array<OutsideStay & Seen> }>;
   /** The colour of a role, from the pack; nothing for a role the pack does not know. */
   roleColour(role: string): string | undefined;
-  /** The label for a person under the cursor: their name and occupation. */
-  personLabel(person: Seen): string;
+  /** The label for a person under the cursor: their name and occupation, or for an outsider their kind and where they are from. */
+  personLabel(person: Seen & { outsider?: true | undefined }): string;
   /** The label for a lot under the cursor: its building's name. */
   lotLabel(lot: Lot): string;
   /** Told who the cursor is on, or that it is on nobody. Hovering changes nothing else. */
   onHover(personId: string | undefined): void;
-  onPersonClick(personId: string): void;
+  /** Told that someone was clicked: a resident, or an outsider. */
+  onPersonClick(personId: string, outsider: boolean): void;
   /** Asked to place the avatar on the street nearest a point of the map. */
   onSpawn(point: Point): void;
   /** Asked to walk the avatar to the street nearest a point, or into a building. */
@@ -154,7 +155,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   const menu = h('div', { class: 'map-menu' });
   menu.hidden = true;
   const pathStatus = h('span', { class: 'path-status' });
-  const streetCount = h('span', { class: 'street-count', title: 'Residents who can be seen at this moment: walking somewhere, or out of doors at a place' });
+  const streetCount = h('span', { class: 'street-count', title: 'Residents and outsiders who can be seen at this moment: walking somewhere, or out of doors at a place' });
   root.replaceChildren(canvas, note, h('div', { class: 'map-tools' }, fitButton, pathButton, spawnButton, pathStatus), streetCount, menu);
   const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
   /** Everything that does not move is drawn here once per change of view, then copied each frame under the dots. */
@@ -201,7 +202,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   let asked = 0;
   let notBefore = 0;
   /** The dots drawn in the last frame, for finding the one under a click. */
-  let dots: Array<DrawnPerson & { reach: number; who: Seen }> = [];
+  let dots: Array<DrawnPerson & { reach: number; who: Seen & { outsider?: true | undefined } }> = [];
   /** Where the cursor is over the map, when it is; and who or what the hover marker is on. */
   let cursor: { x: number; y: number } | undefined;
   let hover: Drawn['hover'];
@@ -733,14 +734,15 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       setSpawning(false);
       return handlers.onSpawn(point);
     }
-    // A person on the street is picked before the lot behind them.
+    // A person on the street is picked before the lot behind them. Of several on the very same spot, as a party of
+    // travellers is, the one the hover marker names is picked: the last of them drawn.
     if (!picking) {
-      let nearest: { personId: string; away: number } | undefined;
+      let nearest: { personId: string; outsider: boolean; away: number } | undefined;
       for (const dot of dots) {
         const away = Math.hypot(dot.x - event.offsetX, dot.y - event.offsetY);
-        if (away <= dot.reach && (!nearest || away < nearest.away)) nearest = { personId: dot.personId, away };
+        if (away <= dot.reach && (!nearest || away <= nearest.away)) nearest = { personId: dot.personId, outsider: dot.who.outsider === true, away };
       }
-      if (nearest) return handlers.onPersonClick(nearest.personId);
+      if (nearest) return handlers.onPersonClick(nearest.personId, nearest.outsider);
     }
     const lot = lotAt(layout.lots, point);
     if (picking) {

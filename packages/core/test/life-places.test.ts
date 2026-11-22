@@ -332,7 +332,7 @@ describe('being outside', () => {
     for (const occupant of there) {
       const where = life.whereabouts(occupant.personId, time);
       expect(WhereaboutsSchema.safeParse(where).success).toBe(true);
-      if (where.kind === 'travel' || where.kind === 'street') throw new Error('an occupant is walking');
+      if (where.kind === 'travel' || where.kind === 'street' || where.kind === 'away') throw new Error('an occupant is walking');
       expect(where.outside).toBe(true);
       expect(geometry.strictlyInside(where.point!, lots.get(stall.id)!)).toBe(true);
       // On the lot for the whole stay, and asked again, in the same place at the same moment.
@@ -439,7 +439,7 @@ describe('being outside', () => {
     const time = at(WORK_DAY, 12, 30);
     const where = city.people.map((person) => life.whereabouts(person.id, time));
     const walking = where.filter((entry) => entry.kind === 'travel').length;
-    const outside = where.filter((entry) => entry.kind === 'street' || (entry.kind !== 'travel' && entry.outside)).length;
+    const outside = where.filter((entry) => entry.kind === 'street' || (entry.kind !== 'travel' && entry.kind !== 'away' && entry.outside)).length;
     console.log(`Badanos at 12:30 on a work day: ${walking} walking and ${outside} outside, ${walking + outside} to be seen`);
     expect(walking + outside).toBeGreaterThanOrEqual(300);
   });
@@ -453,7 +453,7 @@ describe('being outside', () => {
     for (const time of [from, at(WORK_DAY, 12, 30), to - 1]) {
       const expected = city.people
         .map((person) => life.whereabouts(person.id, time))
-        .filter((where) => where.kind === 'street' || (where.kind !== 'travel' && where.outside))
+        .filter((where) => where.kind === 'street' || (where.kind !== 'travel' && where.kind !== 'away' && where.outside))
         .map((where) => ({ personId: where.personId, point: (where as { point: [number, number] }).point }))
         .sort((a, b) => (a.personId < b.personId ? -1 : 1));
       // Each stay's wander, followed to the moment, puts the person where their whereabouts say.
@@ -529,7 +529,7 @@ describe('being outside', () => {
     const samples = Array.from({ length: 60 }, (_, minute) => at(WORK_DAY, 15, minute) + 30);
     const out = (personId: string, time: number) => {
       const where = life.whereabouts(personId, time);
-      return where.kind === 'street' || (where.kind !== 'travel' && where.outside === true);
+      return where.kind === 'street' || (where.kind !== 'travel' && where.kind !== 'away' && where.outside === true);
     };
     const sampled = samples.reduce((sum, time) => sum + city.people.filter((person) => out(person.id, time)).length, 0) / samples.length;
     expect(Math.abs(hours[15]!.outside - sampled)).toBeLessThan(5);

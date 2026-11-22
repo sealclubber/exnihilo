@@ -2,7 +2,7 @@
  * Turns a settlement brief into readable text. Pure, so the wording can be
  * tested without a browser.
  */
-import type { NeighbourLink, SettlementBrief, WorldInfo } from '@worldsim/core';
+import type { DrawTerm, NeighbourLink, RouteLead, SettlementBrief, SettlementDraw, WorldInfo } from '@worldsim/core';
 
 export interface BriefSection {
   heading: string;
@@ -68,7 +68,39 @@ const FLAG_LABELS: Array<[keyof SettlementBrief['flags'], string]> = [
   ['shantyTown', 'Shanty town'],
 ];
 
-export function describeBrief(brief: SettlementBrief, world?: WorldInfo): BriefText {
+/** What each part of a settlement's draw is for: one of the brief's flags, being a province seat, its size, or its specialties. */
+const TERM_LABELS: Record<DrawTerm['term'], string> = {
+  ...(Object.fromEntries(FLAG_LABELS) as Record<keyof SettlementBrief['flags'], string>),
+  provinceSeat: 'Seat of the province',
+  population: 'Population',
+  specialties: 'Specialties',
+};
+
+/** A draw, or a part of one: at most two decimal places. */
+const formatDraw = (value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+/** Where a route leads: "leading to Pusztaszi (town, 34 mi)". The distance is in the world's unit, when the world is known. */
+function leading(lead: RouteLead | undefined, world?: WorldInfo): string {
+  if (!lead) return 'leading to no settlement';
+  const distance = lead.distance.toLocaleString('en-US', { maximumFractionDigits: 1 });
+  return `leading to ${lead.name} (${lead.sizeGroup}, ${distance}${world ? ` ${world.distanceScale.unit}` : ''})`;
+}
+
+/** The draw of a settlement as a section: the total, what each term adds, and what the pack's rules make of it. */
+function drawSection({ draw, expectedTravellers, quarterAt, hasQuarter }: SettlementDraw): BriefSection {
+  return {
+    heading: 'Draw',
+    rows: [
+      ['Total', `${formatDraw(draw.total)}, ${draw.attracts ? 'at or above' : 'below'} the floor of ${formatDraw(draw.floor)}`],
+      ...draw.terms.map((term): [string, string] => [TERM_LABELS[term.term] ?? term.term, `+${formatDraw(term.value)}`]),
+      ['Travellers expected', `${expectedTravellers.toLocaleString('en-US', { maximumFractionDigits: 1 })} a day`],
+      ...(quarterAt !== undefined ? [['Visitors\' quarter', `${hasQuarter ? 'Yes' : 'No'}, at a draw of ${formatDraw(quarterAt)}`] as [string, string]] : []),
+    ],
+  };
+}
+
+/** A brief as text. With the settlement's draw, as the server worked it out, the text has a section for it. */
+export function describeBrief(brief: SettlementBrief, world?: WorldInfo, draw?: SettlementDraw): BriefText {
   const stateName = brief.state.fullName ?? brief.state.name;
   const sections: BriefSection[] = [];
 
@@ -120,10 +152,12 @@ export function describeBrief(brief: SettlementBrief, world?: WorldInfo): BriefT
         ? brief.routes.map((exit) => {
             const kind = exit.kind.replace('-', ' ');
             const name = exit.name ? `${exit.name}, a ${kind}` : `Unnamed ${kind}`;
-            return `${name} (${exit.routeId}), toward the ${direction(exit.bearing)}, ${exit.towardCellId}`;
+            return `${name} (${exit.routeId}), toward the ${direction(exit.bearing)}, ${exit.towardCellId}, ${leading(exit.leadsTo, world)}`;
           })
         : ['None'],
   });
+
+  if (draw) sections.push(drawSection(draw));
 
   sections.push({
     heading: 'Coast',

@@ -1,12 +1,14 @@
 /**
  * The "around you" panel: what the avatar is doing, the controls that go with
  * it, and who it perceives, nearest first. On a street that is the residents
- * walking or out of doors nearby; in a building, everyone at that building.
+ * and outsiders walking or out of doors nearby; in a building, everyone at
+ * that building.
  */
-import type { AvatarPerception, AvatarState, PackLabels, Person } from '@worldsim/core';
+import type { Anyone, AvatarPerception, AvatarState, PackLabels } from '@worldsim/core';
 import { describeAvatar, describeDistance, describeNearby, describeOccupant } from './avatar.ts';
 import { buildingTypeName, workName } from './city-format.ts';
 import { h, link } from './dom.ts';
+import { describeOutsider, isOutsider } from './outsider-format.ts';
 
 export interface AroundYou {
   element: HTMLElement;
@@ -24,7 +26,8 @@ export interface AroundYouHandlers {
   onStop(): void;
   onLeave(): void;
   onFollow(on: boolean): void;
-  onPerson(personId: string): void;
+  /** Asked to show someone: a resident, or an outsider. */
+  onPerson(personId: string, outsider: boolean): void;
   onBuilding(buildingId: string): void;
   /** Told that the cursor is on an entry, or has left it. */
   onHover(personId: string | undefined): void;
@@ -48,7 +51,11 @@ export function createAroundYou(handlers: AroundYouHandlers): AroundYou {
     row.addEventListener('mouseleave', () => handlers.onHover(undefined));
     return row;
   };
-  const who = (person: Person, labels: PackLabels) => `${person.age}${person.occupationId ? ` · ${workName(person, labels)}` : ''}`;
+  /** Someone's age and what they are: a resident's occupation, or an outsider's kind and where they are from. */
+  const who = (person: Anyone, labels: PackLabels) => {
+    if (isOutsider(person)) return `${person.age} · ${describeOutsider(person, labels)}`;
+    return `${person.age}${person.occupationId ? ` · ${workName(person, labels)}` : ''}`;
+  };
   message.hidden = true;
 
   return {
@@ -93,7 +100,7 @@ export function createAroundYou(handlers: AroundYouHandlers): AroundYou {
         ...rows.map(({ person, doing, away }) =>
           hoverable(
             person.id,
-            h('div', {}, link(`${person.givenName} ${person.familyName}`, () => handlers.onPerson(person.id), 'Show this person'), h('span', { class: 'who' }, ` ${who(person, labels)}`)),
+            h('div', {}, link(`${person.givenName} ${person.familyName}`, () => handlers.onPerson(person.id, isOutsider(person)), 'Show this person'), h('span', { class: 'who' }, ` ${who(person, labels)}`)),
             h('div', { class: 'doing' }, doing, away ? h('span', { class: 'away' }, ` · ${away}`) : ''),
           ),
         ),
