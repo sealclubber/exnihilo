@@ -369,13 +369,15 @@ centre, x east and y south.
 
 | Record | Holds |
 | --- | --- |
-| Junction | A position and a kind: crossing, dead end, bridge end or exit |
+| Junction | A position and a kind: crossing, dead end, bridge end, exit or gate |
 | Segment | The two junctions it joins, a polyline, a kind (arterial, street, lane or bridge), a width, and the route it carries if any |
 | Exit | The junction where one of the brief's routes leaves town, with the route's ID, name, kind and bearing |
-| Water | A river as a centre line with a width, or the sea as a polygon |
+| Water | A river as a centre line with its mean width and, where the width varies, one width for each point of the line; or the sea as a polygon |
 | Lot | Its building, a polygon, its district, an entrance (a segment and a point on it), and its footprints: the outlines of the buildings on it |
 | District area | The polygons that enclose a district's lots, and a label point |
-| Summary | Counts, the bounding box, built area, residents per hectare, the layout version, the generator's name, the pack and the seed |
+| Wall | A line, closed or open, with a width, and its gates: each a junction on the line and the gatehouse that keeps it |
+| Place | Open ground with a kind (today only `plaza`), a polygon, and the building whose lot it is |
+| Summary | Counts, the bounding box, the outline's area, built area, residents per hectare, `ringShare`, the roads out of the centre, the layout version, the generator's name, the pack and the seed |
 
 Its rules are checked by `layout/invariants.ts` on every layout: one lot per
 building; no lot overlapping another, a roadway or water; every entrance on a
@@ -426,11 +428,98 @@ each on a frontage whose street has none of its type yet. This moves lots, so
 it is a new layout version. In all 682 settlements no district has two wells,
 or two ovens, opening onto one segment, and no well stands beside another.
 
-**The generator** (`layout/grid.ts`, named `grid` in a layout's summary) is
-deliberately regular: a street grid around the centre, a river bending beside
-it, districts grown block by block from the centre outward, an arterial from
-the centre to each exit, and bridges where streets meet the river. A later
-generator can replace it without touching anything that reads a layout.
+**Walls, gates and the plaza.** A settlement flagged `walls` has a wall, and
+one flagged `plaza` a plaza; no other has either. No segment crosses a wall
+except at a gate, every gate has a gatehouse within 30 m, and the city
+generator makes at least one gatehouse for each of the brief's route exits.
+A plaza is the open lot of its building, with a street all the way round.
+
+**Two generators** make layouts in this format, and a layout's summary names
+the one that made it. The pack's `layout.yaml` chooses with `generator`; a
+pack that says nothing gets the grid. `generateLayout(city, brief, pack,
+{ generator })` asks for either.
+
+- **`grid`** (`layout/grid.ts`) is deliberately regular: a street grid around
+  the centre, a river bending beside it, districts grown block by block from
+  the centre outward, an arterial from the centre to each exit, and bridges
+  where streets meet the river. It has no walls and no plaza, and its water
+  has straight edges.
+- **`grown`** (`layout/grown.ts`), the medieval pack's choice since phase
+  6D.1, scatters the blocks and lets the streets be the gaps between them.
+  Nothing in it takes a street's direction from the centre.
+
+**How a town is grown.** Each step draws on a random stream of its own, and
+every number is in the `grown` block of `layout.yaml`.
+
+1. **Water** (`layout/water.ts`), before anything else. A river arrives and
+   leaves on the brief's bearings and passes beside the centre; in between it
+   meanders, eleven widths to a meander, wider on the outside of its bends.
+   A coast has broad bays and headlands with a smaller wobble on top, and a
+   port stands in a bay of its own. Both run on well beyond the town.
+2. **Seeds** (`layout/fabric.ts`). Points are scattered over the ground so
+   that none is nearer another than the spacing there, 45 m in the middle and
+   75 m at the edge. Pairs of points are set first either side of each bank,
+   the shore and the wall's line, so that a boundary follows each of them,
+   and a ring of points round the centre makes room for a plaza.
+3. **Cells.** Each point gets the ground nearer it than any other (a Voronoi
+   diagram, from `d3-delaunay`), evened out once. Every boundary between two
+   cells is a candidate street and every corner a candidate junction. A cell
+   that water reaches into is left unbuilt.
+4. **Roads.** A main road is the cheapest way along the boundaries from the
+   centre toward each exit, a stretch counting for more the further it leads
+   aside; its corners are then eased toward the line between their
+   neighbours. Where the brief has fewer than five exits, local streets are
+   added in the widest gaps, and a town with a river in reach and no road
+   over it gets a street that crosses. A road passes the wall at a gate.
+5. **What each boundary is.** The one along a bank or shore is a street. Of
+   the rest, some are closed so that two cells make one block, some of those
+   keep a dead-end court, and some are lanes; none is closed where that
+   would leave a street with nowhere to go on to.
+6. **Districts and lots** (`layout/blocks.ts`). Districts take blocks one at
+   a time, cheapest first: ground costs its distance from the centre, less
+   beside a road or the water, which is what gives the town its ragged
+   outline. A block is its cell drawn in by half the width of each street
+   along it. Each street side owns the ground nearer it than any other, and
+   lots are cut from it one after another: frontage drawn within 30% of the
+   type's, depth whatever the block allows, the frontage then set to give
+   the lot its area, and the cuts between lots leaning a few degrees.
+7. **Exits, bridges and the join.** Each exit stands at the brief's bearing
+   beyond its road's last junction. A town of 5,000 or more built on both
+   banks gets a second bridge. Anything left apart is joined to the rest.
+
+The grown generator checks every invariant on what it made and fails, naming
+the settlement and the rule, if one is broken. All 682 settlements of Lomia
+lay out; `packages/core/test/grown.test.ts` holds the rules a grown town must
+keep, and `scripts/measure-layout.ts` prints the figures that are estimates
+of what a natural town measures.
+
+| | Badanos | Pombal | Cevilefon | Vereceldo | Flupines |
+| --- | --- | --- | --- | --- | --- |
+| Streets around or toward the centre (`ringShare`; 44% is no direction at all) | 51% | 50% | 54% | 57% | 53% |
+| The same on the grid | 55% | 43% | 44% | 59% | 44% |
+| Busiest 15° of street directions (grid: 61 to 64%) | 10% | 9% | 10% | 24% | 21% |
+| Junctions of three or more streets where four or more meet (grid: 40 to 93%) | 7% | 5% | 7% | 0% | 5% |
+| Residents per hectare of lot (grid: 252, 259, 224, 157, 181) | 251 | 252 | 214 | 162 | 150 |
+| Time to lay out (grid: 35, 120, 50, 2, 2 ms) | 0.25 s | 0.9 s | 0.25 s | 7 ms | 10 ms |
+
+`ringShare` is in every layout's summary so that a town falling back into
+rings and spokes shows without a picture. It is the share of street and lane
+length within 20° of a circle about the centre or of a line to it, leaving
+out the innermost 30 m. The first grown generator, which followed the main
+roads' direction, scored 99% in Badanos; its pictures are kept as
+`docs/renders/*-rings.svg`.
+
+**Drawing a town.** `renderLayoutSvg(layout, options)` in core returns a
+picture of a layout as SVG text: water, streets by kind, lots tinted by
+district, the wall and its gates, the plaza, and exits labelled with where
+they lead. `npm run render` wraps it:
+
+```sh
+npm run render -- settlement-641 [--generator grid|grown] [--seed <number>] [--out <file.svg>]
+```
+
+`docs/renders/` holds each of the five towns above as `-grown`, `-grid` and
+`-rings`.
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line
@@ -913,6 +1002,11 @@ npm test            # every test in every package
 npm run typecheck   # strict TypeScript across packages and tests
 npm run check       # both
 npm run test:viewer # the viewer in a headless browser
+```
+
+```sh
+node scripts/measure-layout.ts --all       # the shape of the five towns, and of all Lomia
+node scripts/measure-life-on-layouts.ts    # a day in Badanos on each layout generator
 ```
 
 `npm run test:viewer` starts a server and the viewer on ports of their own,

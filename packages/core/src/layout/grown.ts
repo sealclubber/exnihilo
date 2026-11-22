@@ -44,20 +44,12 @@ import { type Coast, type River, makeCoast, makeRiver } from './water.ts';
 /** The name this generator records in a layout's summary. */
 export const GROWN_GENERATOR = 'grown';
 
-/** The share of the town's ground that lots are expected to cover, for a first guess at how far the town reaches. */
-const LOT_SHARE = 0.55;
 /** How many blocks a district may grow to find room for a spread civic building far enough from the others of its type. */
 const APART_BLOCKS = 3;
 /** How many blocks a district may grow looking for one a building can stand in. */
 const BLOCK_TRIES = 16;
 /** A pair of seeds either side of a line stand this share of the spacing from it. */
 const PAIR_REACH = 0.42;
-/** A lot cut from a block has between these shares of the area asked for, and at most this many times its typical frontage. */
-const LEAST_AREA = 0.7;
-const MOST_AREA = 1.35;
-const WIDEST = 3.5;
-/** An exit stands this far beyond the last junction of its road. */
-const EXIT_REACH = 70;
 /** An exit lies within this many degrees of the brief's bearing. */
 const EXIT_TOLERANCE = 5;
 const TAU = 2 * Math.PI;
@@ -165,7 +157,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const plazaArea = plazaBuilding ? Math.min(Math.max(brief.population * grown.plaza.perResident, grown.plaza.min), grown.plaza.max) : 0;
   const plazaRadius = Math.sqrt(plazaArea / Math.PI);
   const totalLotArea = city.buildings.reduce((sum, building) => sum + (building === plazaBuilding ? 0 : lotArea(building)), 0);
-  const needed = totalLotArea / LOT_SHARE + plazaArea;
+  const needed = totalLotArea / grown.lotShare + plazaArea;
   const townRadius = Math.sqrt(needed / Math.PI);
   const radius = townRadius * reachFactor + 4 * grown.spacing.edge;
   const spacingAt = (point: Point) => grown.spacing.centre + (grown.spacing.edge - grown.spacing.centre) * Math.min(1, Math.hypot(point[0], point[1]) / townRadius);
@@ -180,7 +172,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     // The shore stands far enough out for the centre of the town, near enough for the harbour to be at the water.
     const kindOf = new Map(city.districts.map((district) => [district.id, placementOf(district)]));
     const central = city.buildings.reduce((sum, building) => sum + (kindOf.get(building.districtId) === 'centre' && building !== plazaBuilding ? lotArea(building) : 0), 0);
-    coast = makeCoast(brief, grown.coast, seed, Math.sqrt((central / LOT_SHARE + plazaArea) / Math.PI) + 1.5 * grown.spacing.centre, radius * 1.3);
+    coast = makeCoast(brief, grown.coast, seed, Math.sqrt((central / grown.lotShare + plazaArea) / Math.PI) + 1.5 * grown.spacing.centre, radius * 1.3);
   }
   /** How far a point is from any water: negative in it. */
   const dryBy = (point: Point) => Math.min(river ? river.gap(point) : Infinity, coast ? coast.gap(point) : Infinity);
@@ -890,7 +882,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       if (cell.whole) return undefined;
       const { frontage: typical, depth } = lotSizeOf(building.type, pack);
       const wanted = typical * depth * spread;
-      const deepest = depth * grown.lots.depth.max;
+      const deepest = depth * grown.lots.deepest;
       let found: Fit | undefined;
       let emptiest = Infinity;
       for (const track of (cell.block as Block).tracks) {
@@ -909,13 +901,13 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
           cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, 0);
         }
         // What is left of the frontage, if too little for another lot, goes to this one where that does not make it much too big.
-        const last = room - width < grown.lots.leastFrontage && cutLot(track, track.cursor, track.cursor + room, deepest, track.lean, 0).area <= wanted * MOST_AREA;
+        const last = room - width < grown.lots.leastFrontage && cutLot(track, track.cursor, track.cursor + room, deepest, track.lean, 0).area <= wanted * grown.lots.area.max;
         const lean = last || room - width < grown.lots.leastFrontage ? 0 : (lotRng.next() * 2 - 1) * leanMost;
         if (last) width = room;
         // Or else it is drawn in to leave room enough for another.
         else if (room - width < grown.lots.leastFrontage && room - grown.lots.leastFrontage >= grown.lots.leastFrontage) width = room - grown.lots.leastFrontage;
         cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, lean);
-        if (cut.area < wanted * LEAST_AREA || cut.area > wanted * MOST_AREA || width > typical * WIDEST) continue;
+        if (cut.area < wanted * grown.lots.area.min || cut.area > wanted * grown.lots.area.max || width > typical * grown.lots.widest) continue;
         found = { track, cut, lean };
         emptiest = used;
       }
@@ -1033,7 +1025,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (frontier.size === 0) {
       // It begins where the free ground is enough for all of it, if anywhere is.
       const room = roomAt();
-      const wanted = buildings.reduce((sum, building) => sum + lotArea(building), 0) / LOT_SHARE;
+      const wanted = buildings.reduce((sum, building) => sum + lotArea(building), 0) / grown.lotShare;
       const all = owner.some((value) => value >= 0) ? besideTown() : cells.map((cell) => cell.id).filter(isFree);
       const most = Math.max(0, ...all.map((cell) => room[cell] as number));
       roomy = (cell) => (room[cell] as number) >= Math.min(wanted, most);
@@ -1157,16 +1149,16 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       const direction = bearingVector(exit.bearing + offset);
       for (const { joins, upTo } of candidates) {
         const from = corners[joins] as Point;
-        let reach = Math.hypot(from[0], from[1]) + EXIT_REACH;
+        let reach = Math.hypot(from[0], from[1]) + grown.exitReach;
         let point: Point = [direction[0] * reach, direction[1] * reach];
         // Toward the sea, or across the river, the exit stands at the water's edge.
         for (let back = 0; back < 60 && reach > 0 && dryBy(point) < widths.arterial / 2 + 1; back++) {
-          reach -= EXIT_REACH / 10;
+          reach -= grown.exitReach / 10;
           point = [direction[0] * reach, direction[1] * reach];
         }
         const steps = Math.max(1, Math.ceil(distance(from, point) / 2));
         const dryWay = Array.from({ length: steps + 1 }, (_, at): Point => [from[0] + ((point[0] - from[0]) * at) / steps, from[1] + ((point[1] - from[1]) * at) / steps]).every((spot) => dryBy(spot) >= widths.arterial / 2 + 1);
-        if (reach <= 0 || distance(from, point) < widths.arterial || distance(from, point) > 4 * EXIT_REACH || !dryWay || crossesTown(from, point) || exitDrafts.some((other) => other && distance(other.point, point) < widths.arterial)) continue;
+        if (reach <= 0 || distance(from, point) < widths.arterial || distance(from, point) > 4 * grown.exitReach || !dryWay || crossesTown(from, point) || exitDrafts.some((other) => other && distance(other.point, point) < widths.arterial)) continue;
         for (const id of road.edges.slice(0, upTo ?? last)) streets.add(id);
         exitDrafts[road.exit] = { point, joins };
         joined = true;

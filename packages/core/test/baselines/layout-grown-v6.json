@@ -1,10 +1,10 @@
 {
-  "note": "Fingerprints of LAYOUT_VERSION 6 layouts by the grown generator under the medieval pack 0.11.0, default seeds: the whole layout as JSON. Made again whenever LAYOUT_VERSION rises; the grid's fingerprints are in layout-v1.json.",
+  "note": "Fingerprints of LAYOUT_VERSION 6 layouts by the grown generator under the medieval pack 0.12.0, default seeds: the whole layout as JSON. Made again whenever LAYOUT_VERSION rises or the pack changes a layout; the grid's fingerprints are in layout-v1.json.",
   "towns": {
-    "Badanos": "42424b4131c58a132208a1b223987d788067785a35b112b2685eb9d0936848de",
-    "Pombal": "04d0a8d4cd13d67534bd7a5612750b05613db8bc8eac691584866c9cf086a4b6",
-    "Cevilefon": "1f00f5307402844812794110be8263164266fb6346f918b67507a174f6994816",
-    "Vereceldo": "41d94e9365cde2cd2808bf1d1f18fac4ab8e2991b2857ad821976c134da42851",
-    "Flupines": "ac1f51892eb79f0d0a8c058287dfc7b8368a4071bd6fa0a57a26cb5150647d26"
+    "Badanos": "c73cb38c14bdd97995653c4afeb361589bd5049f62692f7626900f397e4308d0",
+    "Pombal": "80746e6b5aef72a382f2f630becdc73682f28377a8a630d81b09495027526a80",
+    "Cevilefon": "ea7dfe0891232119c79fee13b11875e3270c45345849058fc0a9f2f7ac298d0c",
+    "Vereceldo": "2d0e91c173969faadc93c389b6a0b5dd37b11714a5742f5c49b5b20aec9421e0",
+    "Flupines": "7c9c55f1e552721fa701de4d50f027fd11e94cd19e46b480764e367ebe910bbe"
   }
 }

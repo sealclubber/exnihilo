@@ -21,6 +21,8 @@ current phase before starting, and the README for how things run today.
 | Start the viewer | `npm run client` |
 | Generate one city | `npm run generate -- <settlement id>` |
 | Print a settlement's day | `npm run day -- <settlement id> --day <number>` |
+| Draw a town's layout to SVG | `npm run render -- <settlement id> [--generator grid\|grown]` |
+| Measure the shape of laid-out towns | `node scripts/measure-layout.ts --all` |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -29,7 +31,7 @@ the server. Run `npm run check` before calling any task done.
 
 | Path | Holds | May depend on |
 | --- | --- | --- |
-| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generator, daily life, outsiders, the avatar | Nothing in this repository |
+| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generators, daily life, outsiders, the avatar | Nothing in this repository, and `d3-delaunay` |
 | `packages/server` | SQLite storage, pack loader, commands, world clock, the avatar's state, HTTP API | `core` |
 | `packages/client` | Browser viewer, city inspector and living town map | `core`, for types only |
 | `packs/medieval` | The first setting pack, as YAML | n/a |
@@ -68,13 +70,15 @@ enforce them. Do not weaken that test to make a change pass.
 11. **Layout is a separate module that reads a finished city.**
     `packages/core/src/layout` takes a city, its brief, the pack and a seed,
     and never reaches back to change the city. Its random streams are named
-    apart from the city generator's (`layout-…`).
+    apart from the city generator's (`layout-…` for the grid, `grown-…` for
+    the grown generator).
 12. **Consumers read the layout format, never the generator.** The viewer,
     the API, the path function and anything built later may use only what
     `layout/records.ts` guarantees. A segment is a polyline and a lot is a
     polygon: nothing that reads a layout may assume straight streets, right
-    angles, rectangles or a grid. The current generator (`layout/grid.ts`) is
-    deliberately regular and will be replaced; the format will not.
+    angles, rectangles or a grid. Two generators make it: `layout/grid.ts`,
+    deliberately regular, and `layout/grown.ts`, the pack's choice. Either may
+    be replaced; the format will not.
 
 13. **Nothing is stepped.** A resident's whereabouts are a pure function of
     game time: a day plan is derived from the person, the day number, the
@@ -171,9 +175,23 @@ centre, x east and y south; bearings are degrees clockwise from north.
   the district's lots.
 - **Footprints** are the outlines of a lot's buildings: they lie inside the
   lot and do not overlap each other, and the rest of the lot is open ground.
+- **Walls and places.** A wall is a line with gates on it, each a junction
+  kept by a gatehouse; no segment crosses a wall but at a gate. A plaza is a
+  place: open ground that is also the lot of its building. Only a brief
+  flagged for either has one.
+- **Water has its real shape.** A river may vary in width along its line
+  (`widths`, with `width` the mean), and nothing may assume a bank or a
+  shore is straight.
 - **The summary names the generator** that made the layout, so generators can
-  coexist.
-- Every length, width and density limit comes from `packs/medieval/layout.yaml`.
+  coexist, and carries `ringShare`: the share of street length that runs
+  around or toward the centre. An undirected town scores 44%; a town of rings
+  and spokes nearly 100%.
+- Every length, width and density limit comes from `packs/medieval/layout.yaml`;
+  the grown generator's numbers are in its `grown` block.
+- **Streets are the gaps between blocks.** The grown generator scatters
+  blocks and takes its streets from the boundaries between them. Do not add
+  anything that derives a street's direction from the centre or from the
+  main roads: that is what made rings.
 
 ## Conventions
 
@@ -189,7 +207,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 5, 4 and 5.
+  inputs would change. Today they are 6, 6 and 5.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

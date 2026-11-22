@@ -2,11 +2,14 @@
 # All lengths are in metres. Every value is a placeholder to be tuned by eye:
 # edit, then run the layout again or restart the server.
 #
-# The layout made from these numbers is deliberately regular: a street grid
-# trimmed to a compact outline, with lots along the streets.
+# Two generators read this file. The `grid` is deliberately regular: a street
+# grid trimmed to a compact outline, with lots along the streets. The `grown`
+# one scatters blocks and lets the streets be the gaps between them; water,
+# walls and the plaza are its alone.
 
-# Which generator lays towns out: `grid`, the plain one described above, or
-# `grown`, whose numbers are in the `grown` block at the end of this file.
+# Which generator lays towns out: `grid`, or `grown`, whose own numbers are
+# in the `grown` block at the end of this file. The numbers before that block
+# are read by both. Left out, the grid.
 generator: grown
 
 # The full width of the roadway, per kind of street segment. Arterials are the
@@ -173,6 +176,12 @@ grown:
   fabric: {merge: 0.16, court: 0.45, lane: 0.3}
   # Clear ground between a roadway and the lots along it.
   roadside: 0.4
+  # The share of a town's ground its lots are expected to cover. It sets how
+  # much ground is scattered with blocks to begin with and, through `wall`,
+  # how much a wall encloses; the town itself takes what its lots need.
+  lotShare: 0.55
+  # How far beyond the last junction of its road an exit stands.
+  exitReach: 70
   # How the town reaches out along its roads and the water, and how ragged
   # its edge is. See the schema for what each number does.
   outline: {arterialPull: 0.45, waterPull: 0.35, reach: 90, compact: 60, ragged: 25}
@@ -200,15 +209,20 @@ grown:
     harbour: {length: 320, depth: 70}
     pieceLength: 8
   # Lots. A type's lot size above is typical, not exact: frontage is drawn
-  # within this spread of it, never below the least; depth is what the block
-  # allows, between these multiples of the type's; side boundaries lean by up
-  # to so many degrees. A building whose lot is this big takes a whole block.
+  # within this spread of it, never below the least nor above `widest` times
+  # it; depth is what the block allows, up to `deepest` times the type's; and
+  # the frontage is then set so the lot's area comes between the two shares
+  # in `area` of the type's. Side boundaries lean by up to so many degrees. A
+  # building whose lot is `wholeBlock` square metres or more takes a whole
+  # block where no side of one has room for it.
   # Lots fill a block's frontage wall to wall in the `filled` district kinds;
   # elsewhere a gap follows a lot with the chance given for the kind.
   lots:
     frontageSpread: 0.3
     leastFrontage: 4
-    depth: {min: 0.6, max: 1.5}
+    widest: 3.5
+    deepest: 1.5
+    area: {min: 0.7, max: 1.35}
     lean: 3
     wholeBlock: 1300
     filled: [centre, craft, visitors, harbour]

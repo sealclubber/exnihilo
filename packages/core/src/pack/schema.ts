@@ -363,6 +363,10 @@ const GrownSettingsSchema = z.strictObject({
   fabric: z.strictObject({ merge: probability, court: probability, lane: probability }),
   /** The clear ground left between a roadway and the lots along it. */
   roadside: z.number().nonnegative(),
+  /** The share of a town's ground that its lots are expected to cover: how much ground is scattered with blocks to begin with, and how much a wall encloses. */
+  lotShare: probability,
+  /** How far beyond the last junction of its road an exit stands. */
+  exitReach: metres,
   /**
    * How the town reaches out. Ground is cheaper to take the nearer it is to a main road and to the water:
    * `arterialPull` and `waterPull` are the share by which the distance from the centre counts for less right beside
@@ -398,15 +402,18 @@ const GrownSettingsSchema = z.strictObject({
   }),
   /**
    * Lots. A building type's lot size is a typical size: each lot's frontage is drawn within `frontageSpread` of
-   * it, never below `leastFrontage`, and its depth is what its block allows, between `depth.min` and `depth.max`
-   * times the pack's. Side boundaries lean by up to `lean` degrees. A building whose lot is at least `wholeBlock`
-   * square metres takes a block to itself. In the district kinds listed under `filled`, lots fill a block's
+   * it, never below `leastFrontage` nor above `widest` times it, and its depth is what its block allows, up to
+   * `deepest` times the pack's; its frontage is then set so that its area comes between the two shares in `area`
+   * of the pack's. Side boundaries lean by up to `lean` degrees. A building whose lot is at least `wholeBlock`
+   * square metres takes a block to itself where no side of a block has room for it. In the district kinds listed under `filled`, lots fill a block's
    * frontage wall to wall; elsewhere a gap is left after a lot with the chance in `gaps`, by kind of district.
    */
   lots: z.strictObject({
     frontageSpread: probability,
     leastFrontage: metres,
-    depth: z.strictObject({ min: z.number().positive(), max: z.number().positive() }),
+    widest: z.number().positive(),
+    deepest: z.number().positive(),
+    area: z.strictObject({ min: z.number().positive(), max: z.number().positive() }),
     lean: z.number().nonnegative(),
     wholeBlock: metres,
     filled: z.array(id),
