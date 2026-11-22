@@ -48,9 +48,10 @@ const ORIGIN: Point = [0, 0];
 /**
  * How far a shape is from a river's water: negative by as much as it reaches into it. The river's width may vary
  * along its length, so each piece of its line is taken at the wider of its two ends. `closed` says the points are
- * a polygon's and not a line's.
+ * a polygon's and not a line's. Where only gaps up to `within` matter, pieces of the river further off than that
+ * are passed over, and the answer for a shape with none nearer is infinite.
  */
-export function gapToRiver(points: readonly Point[], river: Extract<Water, { kind: 'river' }>, closed: boolean): number {
+export function gapToRiver(points: readonly Point[], river: Extract<Water, { kind: 'river' }>, closed: boolean, within = Infinity): number {
   const shape = closed ? [...points, points[0] as Point] : points;
   const box = boxOf(shape);
   let nearest = Infinity;
@@ -59,15 +60,36 @@ export function gapToRiver(points: readonly Point[], river: Extract<Water, { kin
     const a = river.centreLine[at - 1] as Point;
     const b = river.centreLine[at] as Point;
     // A piece too far from the shape's box to matter is passed over.
-    const reach = Math.max(nearest, 0) + widest / 2;
+    const reach = Math.min(Math.max(nearest, 0), within) + widest / 2;
     if (Math.max(a[0], b[0]) < box.minX - reach || Math.min(a[0], b[0]) > box.maxX + reach || Math.max(a[1], b[1]) < box.minY - reach || Math.min(a[1], b[1]) > box.maxY + reach) {
-      if (nearest !== Infinity) continue;
+      if (nearest !== Infinity || within !== Infinity) continue;
     }
     const half = Math.max(riverWidthAt(river, at - 1), riverWidthAt(river, at)) / 2;
     const away = (closed ? distancePolygonToPolyline(points, [a, b]) : distanceBetweenPolylines(shape, [a, b])) - half;
     if (away < nearest) nearest = away;
   }
   return nearest;
+}
+
+/** The sides of each sea asked about, with the box of each, kept so that a shore of many pieces is looked through once. */
+const seaSides = new WeakMap<readonly Point[], Array<{ a: Point; b: Point; minX: number; maxX: number; minY: number; maxY: number }>>();
+
+/**
+ * Whether a polygon overlaps a sea. A shore has many pieces and a town many lots, so only the pieces of shore
+ * whose boxes meet the polygon's box are compared with it; a polygon with none near is wholly in the sea or
+ * wholly out of it, which one of its corners settles.
+ */
+function overlapsSea(polygon: readonly Point[], box: Box, sea: readonly Point[]): boolean {
+  let sides = seaSides.get(sea);
+  if (!sides) {
+    sides = sea.map((a, at) => {
+      const b = sea[(at + 1) % sea.length] as Point;
+      return { a, b, minX: Math.min(a[0], b[0]), maxX: Math.max(a[0], b[0]), minY: Math.min(a[1], b[1]), maxY: Math.max(a[1], b[1]) };
+    });
+    seaSides.set(sea, sides);
+  }
+  const near = sides.some((side) => side.minX <= box.maxX && side.maxX >= box.minX && side.minY <= box.maxY && side.maxY >= box.minY);
+  return near ? polygonsOverlap(polygon, sea) : strictlyInside(polygon[0] as Point, sea);
 }
 
 /** The distance from a polygon to a body of water. Zero when they meet. */
@@ -234,7 +256,7 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       }
     }
     for (const water of waters) {
-      const wet = water.kind === 'sea' ? polygonsOverlap(lot.polygon, water.polygon) : gapToRiver(lot.polygon, water, true) < -EPSILON;
+      const wet = water.kind === 'sea' ? overlapsSea(lot.polygon, box, water.polygon) : gapToRiver(lot.polygon, water, true, 0) < -EPSILON;
       if (wet) problem(`${lot.id} overlaps ${water.id}, the ${water.kind}`);
     }
   }
@@ -292,7 +314,7 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     for (const water of waters) {
       const wet =
         water.kind === 'river'
-          ? gapToRiver(segment.points, water, false) < segment.width / 2 - EPSILON
+          ? gapToRiver(segment.points, water, false, segment.width / 2) < segment.width / 2 - EPSILON
           : segment.points.some((point) => strictlyInside(point, water.polygon)) ||
             segment.points.some((point, at) => at > 0 && crossingsOfPolyline(segment.points[at - 1] as Point, point, [...water.polygon, water.polygon[0] as Point]) > 0);
       if (wet) problem(`${segment.id}, which is not a bridge, enters ${water.id}, the ${water.kind}`);
@@ -352,10 +374,16 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       problem(`${districtId} has lots but no district area`);
       continue;
     }
+    const boxes = area.polygons.map((polygon) => boxOf(polygon, EPSILON));
     for (const lot of districtLots) {
       // A gatehouse stands at its gate, wherever its district lies.
       if (gatehouses.has(lot.buildingId)) continue;
-      if (!area.polygons.some((polygon) => polygonWithin(lot.polygon, polygon))) problem(`${lot.id} lies outside the area of ${districtId}`);
+      const box = boxOf(lot.polygon);
+      const holds = (polygon: Point[], at: number) => {
+        const outer = boxes[at] as ReturnType<typeof boxOf>;
+        return box.minX >= outer.minX && box.maxX <= outer.maxX && box.minY >= outer.minY && box.maxY <= outer.maxY && polygonWithin(lot.polygon, polygon);
+      };
+      if (!area.polygons.some(holds)) problem(`${lot.id} lies outside the area of ${districtId}`);
     }
   }
   for (const area of districtAreas) {

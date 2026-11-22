@@ -127,8 +127,11 @@ describe('paths between street positions', () => {
     expect(path.segmentIds).toEqual([from.segmentId]);
     expect(path.length).toBeCloseTo(long.length * 0.5, 6);
     expect(path.walked).toEqual([path.length]);
-    expect(path.points[0]).toEqual(from.point);
-    expect(path.points.at(-1)).toEqual(to.point);
+    // To the last few digits: the point is found again on its segment.
+    expect(path.points[0]![0]).toBeCloseTo(from.point[0], 9);
+    expect(path.points[0]![1]).toBeCloseTo(from.point[1], 9);
+    expect(path.points.at(-1)![0]).toBeCloseTo(to.point[0], 9);
+    expect(path.points.at(-1)![1]).toBeCloseTo(to.point[1], 9);
     // And the other way is the same stretch, reversed.
     const back = finder.between(to, from);
     expect(back.length).toBeCloseTo(path.length, 9);

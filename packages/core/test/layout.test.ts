@@ -30,9 +30,9 @@ import {
   parsePack,
   shortestPath,
 } from '../src/index.ts';
-import { BEFORE_6B5, lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, lomiaWorld, medievalPackBefore6B, medievalPackBefore6D, rawMedievalPackBefore6D, settlement } from './pack.ts';
 
-const pack = medievalPack();
+const pack = medievalPackBefore6D();
 const { bearingDifference, exactBearing, distanceBetweenPolylines, crossingsOfPolyline, polylineLength, projectOnPolyline, distance } = geometry;
 
 interface Town {
@@ -49,7 +49,7 @@ const junctionOf = (layout: Layout, id: string) => layout.junctions.find((juncti
 const riverOf = (layout: Layout) => layout.waters.find((water) => water.kind === 'river') as Extract<Layout['waters'][number], { kind: 'river' }>;
 const seaOf = (layout: Layout) => layout.waters.find((water) => water.kind === 'sea') as Extract<Layout['waters'][number], { kind: 'sea' }>;
 const edited = (edit: (raw: any) => void): SettingPack => {
-  const raw = rawMedievalPack();
+  const raw = rawMedievalPackBefore6D();
   edit(raw);
   return parsePack(raw);
 };
@@ -337,7 +337,7 @@ describe('determinism and isolation', () => {
   it('gives a byte-identical layout for the same city, brief, pack and seed', () => {
     const again = generateLayout(badanos.city, badanos.brief, pack);
     expect(JSON.stringify(again)).toBe(JSON.stringify(badanos.layout));
-    const fresh = town('settlement-641', parsePack(rawMedievalPack()));
+    const fresh = town('settlement-641', parsePack(rawMedievalPackBefore6D()));
     expect(JSON.stringify(fresh.layout)).toBe(JSON.stringify(badanos.layout));
   });
 

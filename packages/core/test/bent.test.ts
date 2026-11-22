@@ -49,7 +49,8 @@ let life: SettlementLife;
 let finder: PathFinder;
 beforeAll(() => {
   city = generateCity(brief, pack);
-  straight = generateLayout(city, brief, pack);
+  // The bent town is the grid's Badanos, warped: a town whose streets were straight to begin with.
+  straight = generateLayout(city, brief, pack, { generator: 'grid' });
   layout = bend(straight);
   life = createLife({ city, layout, pack, brief });
   finder = createPathFinder(layout);

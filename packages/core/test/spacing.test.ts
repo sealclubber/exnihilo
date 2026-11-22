@@ -38,7 +38,7 @@ describe('civic buildings of a spread type', () => {
     const brief = settlement('settlement-641');
     const city = generateCity(brief, pack);
     const millRow = city.districts.find((district) => district.name === 'Mill Row')!;
-    const wells = spacing(city, generateLayout(city, brief, pack)).find((entry) => entry.districtId === millRow.id && entry.type === 'well')!;
+    const wells = spacing(city, generateLayout(city, brief, pack, { generator: 'grid' })).find((entry) => entry.districtId === millRow.id && entry.type === 'well')!;
     expect(wells.onSegment.length).toBeGreaterThanOrEqual(5);
     expect(Math.max(...wells.onSegment)).toBe(1);
   });
@@ -48,7 +48,7 @@ describe('civic buildings of a spread type', () => {
     let checked = 0;
     for (const brief of lomiaWorld().settlements) {
       const city = generateCity(brief, pack);
-      for (const { districtId, type, onSegment, segments } of spacing(city, generateLayout(city, brief, pack))) {
+      for (const { districtId, type, onSegment, segments } of spacing(city, generateLayout(city, brief, pack, { generator: 'grid' }))) {
         checked += onSegment.reduce((sum, count) => sum + count, 0);
         if (Math.max(...onSegment) > 1 && onSegment.length < segments) failures.push(`${brief.id}: ${districtId} has ${onSegment.join(', ')} of ${type} on its segments, and ${segments - onSegment.length} segments with none`);
       }

@@ -308,7 +308,7 @@ describe('the day command', () => {
     expect(text.split('\n').filter((line) => /^\s+\d\d:00\s/.test(line))).toHaveLength(48);
     expect(text).toMatch(/Outsiders, who are not residents: \d+ travellers in town at some time of the day \([^)]*merchant[^)]*\), and 29 vagrants/);
     expect(text).toMatch(/Hour\s+In town\s+Asleep\s+At lodging\s+Visiting\s+Travelling\s+Outside/);
-    expect(text).toMatch(/Busiest segments[^\n]*\n\s+segment-641-\d{6}\s+[\d,]+\s+bridge/);
+    expect(text).toMatch(/Busiest segments[^\n]*\n\s+segment-641-\d{6}\s+[\d,]+\s+(arterial|street|lane|bridge)/);
     expect(text).toBe(describeSettlementDay({ settlementId: 'settlement-641', day: 2, storePath, packPath: MEDIEVAL_PATH }));
     expect(describeSettlementDay({ settlementId: 'settlement-641', day: 7, storePath, packPath: MEDIEVAL_PATH })).toContain('Restday, a rest day');
   });

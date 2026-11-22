@@ -31,7 +31,7 @@ describe('GET /api/settlements/:id/layout', () => {
     expect(status).toBe(200);
     expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(expected)));
     expect(body.lots).toHaveLength(1825);
-    expect(body.summary.generator).toBe('grid');
+    expect(body.summary.generator).toBe('grown');
   });
 
   it('answers 404 for a settlement that does not exist', async () => {
@@ -59,7 +59,8 @@ describe('GET /api/settlements/:id/layout/path', () => {
     expect(LayoutPathSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(shortestPath(expected, from, to))));
     expect(body.length).toBeGreaterThan(100);
     expect(body.segmentIds.length).toBeGreaterThan(2);
-    expect(body.points[0]).toEqual(expected.lots[3]!.entrance.point);
+    expect(body.points[0]![0]).toBeCloseTo(expected.lots[3]!.entrance.point[0], 9);
+    expect(body.points[0]![1]).toBeCloseTo(expected.lots[3]!.entrance.point[1], 9);
   });
 
   it('serves a path of zero length from a lot to itself', async () => {

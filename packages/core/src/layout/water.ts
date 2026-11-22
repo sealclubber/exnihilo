@@ -113,46 +113,82 @@ export function makeRiver(brief: SettlementBrief, meanWidth: number, settings: G
 
   // Pieces are filed by square, so that the nearest is found without looking at them all.
   const square = Math.max(40, 4 * meanWidth);
-  const filed = new Map<string, number[]>();
+  const keyOf = (x: number, y: number) => (x + 32768) * 65536 + (y + 32768);
+  const filed = new Map<number, number[]>();
   for (let index = 1; index < line.length; index++) {
     const [ax, ay] = line[index - 1] as Point;
     const [bx, by] = line[index] as Point;
     for (let x = Math.floor(Math.min(ax, bx) / square); x <= Math.floor(Math.max(ax, bx) / square); x++) {
       for (let y = Math.floor(Math.min(ay, by) / square); y <= Math.floor(Math.max(ay, by) / square); y++) {
-        const key = `${x}:${y}`;
+        const key = keyOf(x, y);
         const list = filed.get(key);
         if (list) list.push(index);
         else filed.set(key, [index]);
       }
     }
   }
+  // For each square asked about, the pieces that could be nearest a point in it are worked out once: those in
+  // the rings of squares round it, out to the first ring that holds any and far enough beyond that nothing
+  // nearer can lie further out. Beyond a few rings the river is simply far off, and no more is said.
+  const nearSquare = new Map<number, number[] | null>();
+  const piecesNear = (cx: number, cy: number): number[] | null => {
+    const key = keyOf(cx, cy);
+    let found = nearSquare.get(key);
+    if (found !== undefined) return found;
+    const ring = (reach: number): number[] => {
+      const pieces: number[] = [];
+      for (let x = cx - reach; x <= cx + reach; x++) {
+        for (let y = cy - reach; y <= cy + reach; y++) {
+          if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== reach) continue;
+          const list = filed.get(keyOf(x, y));
+          if (list) for (const index of list) pieces.push(index);
+        }
+      }
+      return pieces;
+    };
+    found = null;
+    for (let first = 0; first <= FAR_RINGS; first++) {
+      const pieces = ring(first);
+      if (pieces.length === 0) continue;
+      // A piece in that ring is at most (first + 1) squares away along each axis; one in ring k at least k - 1.
+      const last = Math.ceil((first + 1) * Math.SQRT2) + 1;
+      for (let further = first + 1; further <= last; further++) for (const index of ring(further)) pieces.push(index);
+      found = [...new Set(pieces)];
+      break;
+    }
+    nearSquare.set(key, found);
+    return found;
+  };
   const nearest = (point: Point) => {
-    let best = { index: 1, along: 0, point: line[0] as Point, width: widths[0] as number, away: Infinity };
-    const look = (index: number) => {
+    const best = { index: 1, along: 0, point: line[0] as Point, width: widths[0] as number, away: FAR_RINGS * square };
+    const pieces = piecesNear(Math.floor(point[0] / square), Math.floor(point[1] / square));
+    if (!pieces) return best;
+    let nearestSquared = Infinity;
+    let at = 0;
+    let share = 0;
+    for (const index of pieces) {
       const a = line[index - 1] as Point;
       const b = line[index] as Point;
       const dx = b[0] - a[0];
       const dy = b[1] - a[1];
       const squared = dx * dx + dy * dy;
       const t = squared === 0 ? 0 : Math.min(1, Math.max(0, ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / squared));
-      const on: Point = [a[0] + dx * t, a[1] + dy * t];
-      const away = distance(point, on);
-      if (away < best.away) best = { index, along: (along[index - 1] as number) + t * Math.sqrt(squared), point: on, width: (widths[index - 1] as number) + ((widths[index] as number) - (widths[index - 1] as number)) * t, away };
-    };
-    // Rings of squares outward from the point's own, until one more ring could hold nothing nearer.
-    const cx = Math.floor(point[0] / square);
-    const cy = Math.floor(point[1] / square);
-    // Beyond a few squares the river is simply far off: what is nearest then is not looked for.
-    for (let ring = 0; ring <= FAR_RINGS; ring++) {
-      if (best.away < (ring - 1) * square) break;
-      for (let x = cx - ring; x <= cx + ring; x++) {
-        for (let y = cy - ring; y <= cy + ring; y++) {
-          if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== ring) continue;
-          for (const index of filed.get(`${x}:${y}`) ?? []) look(index);
-        }
+      const ox = a[0] + dx * t - point[0];
+      const oy = a[1] + dy * t - point[1];
+      const away = ox * ox + oy * oy;
+      if (away < nearestSquared) {
+        nearestSquared = away;
+        at = index;
+        share = t;
       }
     }
-    if (best.away === Infinity) best.away = FAR_RINGS * square;
+    const a = line[at - 1] as Point;
+    const b = line[at] as Point;
+    best.index = at;
+    best.point = [a[0] + (b[0] - a[0]) * share, a[1] + (b[1] - a[1]) * share];
+    best.along = (along[at - 1] as number) + share * ((along[at] as number) - (along[at - 1] as number));
+    best.width = (widths[at - 1] as number) + ((widths[at] as number) - (widths[at - 1] as number)) * share;
+    best.away = Math.sqrt(nearestSquared);
     return best;
   };
   return {

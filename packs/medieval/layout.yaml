@@ -7,7 +7,7 @@
 
 # Which generator lays towns out: `grid`, the plain one described above, or
 # `grown`, whose numbers are in the `grown` block at the end of this file.
-generator: grid
+generator: grown
 
 # The full width of the roadway, per kind of street segment. Arterials are the
 # streets that carry the brief's routes from the centre to the town's exits;
