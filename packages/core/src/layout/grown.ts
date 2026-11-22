@@ -36,8 +36,35 @@ import { arrangeTrades, placementOrder, spreadCivicTypes } from './shared.ts';
 import { type Row, type StripBlock, fitStrip, strip, stripBlock, uvOf } from './strips.ts';
 import { type Cell, type Edge, type Town, type Way, TooSmall, layTown } from './town.ts';
 
+/** A layout that broke a rule: laid out again on more ground before the fault is reported. */
+class Unsound extends Error {}
+/** A district boxed in by others, with buildings still to place. */
+class Stuck extends Error {
+  readonly district: number;
+
+  constructor(district: number) {
+    super(`district ${district} is boxed in`);
+    this.district = district;
+  }
+}
+/** How many times a wall's line is rounded between its gates. */
+const WALL_ROUNDS = 4;
+/** How much a block's cost of ground counts, beside its distance from a district's seed, in the order blocks are taken. */
+const COST_WEIGHT = 1.5;
+/** How many blocks a district by the water takes while a building that needs a block waits for one at the water. */
+const WAIT_FOR_WATER = 20;
+/** How much nearer, in metres, a block at the water counts for such a district. */
+const WATER_PULL = 1000;
+/** How many attempts a town is given, and the faults that mean it needs more ground rather than another draw. */
+const ATTEMPTS = 8;
+const SIZE_FAULTS = new Set(['the cost of ground', 'the ground', 'the rim', 'the centre']);
+/** How many times districts are grown again before the town is laid out on more ground. */
+const REGROWS = 4;
+
 /** The name this generator records in a layout's summary. */
 export const GROWN_GENERATOR = 'grown';
+/** A block has two rows back to back only where this share of each long side is street. */
+const TWO_ROWS = 0.75;
 /** A building that finds room in none of this many rows takes a whole block. */
 const FAILED_ROWS = 8;
 /** An exit lies within this many degrees of the brief's bearing. */
@@ -50,13 +77,19 @@ export function generateGrownLayout(city: City, brief: SettlementBrief, pack: Se
   const grown = pack.layout.grown;
   if (!grown) throw new LayoutGenerationError(`${brief.id} (${brief.name}): the pack's layout file has no \`grown\` block, which the grown generator needs`);
   // Start with room for the town and its roads, and lay out more ground for as long as it proves too small.
+  // A town that does not fit is laid out on more ground. One that fit but broke a rule, or could not place a road or
+  // a district, is laid out again on the same ground with its streams drawn afresh; the last attempt's fault is the
+  // one reported. The attempts, and so the layout, follow from the seed alone.
   let room = 1;
-  for (let attempt = 0; ; attempt++, room *= 1.3) {
+  let variant = 0;
+  for (let attempt = 0; ; attempt++) {
     try {
-      return attemptLayout(city, brief, pack, grown, seed, room);
+      return attemptLayout(city, brief, pack, grown, seed, room, variant);
     } catch (error) {
-      if ((globalThis as any).DBG && error instanceof TooSmall) (globalThis as any).console.log('TOO SMALL', room.toFixed(2), error.where);
-      if (error instanceof TooSmall && attempt < 6) continue;
+      if (error instanceof TooSmall && SIZE_FAULTS.has(error.where)) room *= 1.3;
+      else variant++;
+      if ((error instanceof TooSmall || error instanceof Unsound) && attempt < ATTEMPTS) continue;
+      if (error instanceof Unsound) throw new LayoutGenerationError(`${brief.id} (${brief.name}): ${error.message}`);
       if (error instanceof TooSmall) throw new LayoutGenerationError(`${brief.id} (${brief.name}): the town does not fit even ${room.toFixed(1)} times the usual ground (it stopped at ${error.where})`);
       if (error instanceof LayoutGenerationError) throw error;
       throw new LayoutGenerationError(`${brief.id} (${brief.name}): ${(error as Error).message}`);
@@ -81,10 +114,12 @@ interface Placed {
   whole?: true;
 }
 
-function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, grown: GrownSettings, seed: number, room: number): Layout {
+function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, grown: GrownSettings, seed: number, room: number, variant: number): Layout {
+  // The streams of a later attempt are drawn from the seed mixed with the attempt's number.
+  const streams = variant === 0 ? seed : (seed + Math.imul(variant, 0x9e3779b1)) >>> 0;
   const number = idNumber(brief.id);
   const fail = (message: string): never => {
-    throw new LayoutGenerationError(`${brief.id} (${brief.name}): ${message}`);
+    throw new Unsound(message);
   };
   const widths = pack.layout.streetWidths;
 
@@ -97,7 +132,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const placements = new Map(pack.districts.kinds.map((kind) => [kind.id, kind.placement]));
   const placementOf = (district: District) => placements.get(district.kind);
   const centralIds = new Set(city.districts.filter((district) => placementOf(district) === 'centre').map((district) => district.id));
-  const town: Town = layTown(brief, pack, grown, seed, {
+  const town: Town = layTown(brief, pack, grown, streams, {
     lotArea: city.buildings.reduce((sum, building) => sum + (building === plazaBuilding ? 0 : lotArea(building)), 0),
     plazaArea,
     gatehouses: gatehouses.length,
@@ -113,18 +148,17 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const rankOf = (id: number) => town.rank.get(id) ?? 1;
   const isGround = (id: number) => !cellOf(id).water && !cellOf(id).rim;
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// ---- Gates ---');
   // ---- Gates ----------------------------------------------------------------------------------------------------
   // The corners where a road passes the wall, each kept by a gatehouse, as many as there are gatehouses.
   if (town.gates.length !== gatehouses.length) {
     // Where more gatehouses stand than roads pass the wall, the rest keep gates where a street does.
-    const extra = [...town.wallCorners]
-      .filter((corner) => !town.gates.includes(corner))
-      .filter((corner) => {
-        const sides = (around[corner] as number[]).map(edgeOf).filter((edge) => edge.kind !== 'wall' && edge.cells.every(isGround) && town.passable(edge));
-        return sides.some((edge) => edge.cells.every((id) => cellOf(id).inside && ground.has(id))) && sides.some((edge) => edge.cells.every((id) => !cellOf(id).inside));
-      })
-      .sort((a, b) => a - b);
+    // Where a street reaches the wall from inside and another leads away outside; failing those, where a street
+    // reaches it from inside at all.
+    const sidesAt = (corner: number) => (around[corner] as number[]).map(edgeOf).filter((edge) => edge.kind !== 'wall' && edge.cells.every(isGround) && town.passable(edge));
+    const inward = (corner: number) => sidesAt(corner).some((edge) => edge.cells.every((id) => cellOf(id).inside));
+    const outward = (corner: number) => sidesAt(corner).some((edge) => edge.cells.every((id) => !cellOf(id).inside));
+    const open = [...town.wallCorners].filter((corner) => !town.gates.includes(corner) && inward(corner)).sort((a, b) => a - b);
+    const extra = [...open.filter(outward), ...open.filter((corner) => !outward(corner))];
     while (town.gates.length < gatehouses.length && extra.length > 0) {
       // The one furthest round the wall from every gate there is.
       const bearing = (corner: number) => Math.atan2((corners[corner] as Point)[0], -(corners[corner] as Point)[1]);
@@ -144,8 +178,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         const edge = edgeOf(id);
         // Streets that ran up to the wall here now pass through the gate.
         if (edge.wallEnd === corner) delete edge.wallEnd;
-        if (edge.kind === 'none' && edge.cells.every(isGround) && town.passable(edge) && (edge.cells.every((cell) => cellOf(cell).inside) || edge.cells.every((cell) => !cellOf(cell).inside))) {
-          edge.kind = 'lane';
+        // A street on each side of the gate, whether or not the town has reached it there yet.
+        if (edge.kind !== 'wall' && edge.cells.every(isGround) && town.passable(edge) && (edge.cells.every((cell) => cellOf(cell).inside) || edge.cells.every((cell) => !cellOf(cell).inside))) {
+          if (edge.kind === 'none') edge.kind = 'lane';
           edge.street = true;
         }
       }
@@ -154,7 +189,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   }
   const gateOf = new Map(town.gates.map((corner, index) => [corner, gatehouses[index] as Building]));
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// ---- 11. Districts ---');
   // ---- 11. Districts ---------------------------------------------------------------------------------------------
   const districtIndex = new Map(city.districts.map((district, index) => [district.id, index]));
   const buildingsOf: Building[][] = city.districts.map(() => []);
@@ -276,7 +310,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (chosen !== undefined) seeds.set(index, chosen);
   }
   for (let index = 0; index < city.districts.length; index++) if ((demand[index] as number) > 0 && !seeds.has(index)) fail(`${(city.districts[index] as District).name} has a kind whose placement the pack does not list`);
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// Each district takes the nea');
   const connectedWithout = (district: number, id: number) => {
     const own = new Set((cellsOf[district] as number[]).filter((other) => other !== id));
     if (own.size === 0) return false;
@@ -288,7 +321,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   };
   const placed: Placed[] = [];
   // ---- 12. Lots ---------------------------------------------------------------------------------------------------
-  const lotRng = stepRng(seed, 'grown-lots');
+  const lotRng = stepRng(streams, 'grown-lots');
   const { lots: lotRules } = grown;
   /** A cut's skew: drawn by chance, and never so far from the last cut's that a narrow strip's sides would meet. */
   const skewOf = (last = 0) => Math.max(last - 0.4 * lotRules.leastFrontage, Math.min(last + 0.4 * lotRules.leastFrontage, normal(lotRng) * lotRules.skew));
@@ -320,25 +353,53 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (laid.has(id)) return laid.get(id);
     const polygon = town.blockOf(id);
     if (polygon.length < 3) return undefined;
-    // Which long side has streets: a side with none has no row of its own, and the block is one row deep.
+    // How much of each long side has a street: a block has two rows back to back only where both sides are mostly
+    // street; otherwise one row, opening onto the side that is.
     const probe = stripBlock(polygon, Infinity, 0.5);
-    let low = 0;
-    let high = 0;
-    for (const edge of streetsOf(id)) {
+    const sides = { low: { street: 0, all: 0 }, high: { street: 0, all: 0 } };
+    for (const edge of cellOf(id).edges.map(edgeOf)) {
       const [a, b] = lineOf(edge);
       const middle: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
       const [, v] = uvOf(probe, middle);
       const length = distance(a, b);
       const share = Math.abs(((b[0] - a[0]) * probe.across[0] + (b[1] - a[1]) * probe.across[1]) / (length || 1));
       if (share > 0.7) continue;
-      if (v < (probe.minV + probe.maxV) / 2) low += length;
-      else high += length;
+      const side = v < (probe.minV + probe.maxV) / 2 ? sides.low : sides.high;
+      side.all += length;
+      if (edge.street && !edge.bridge) side.street += length;
     }
-    const only = low === 0 && high > 0 ? 'high' : high === 0 && low > 0 ? 'low' : undefined;
+    const cover = (side: { street: number; all: number }) => (side.all === 0 ? 0 : side.street / side.all);
+    const [low, high] = [cover(sides.low), cover(sides.high)];
+    const only = low >= TWO_ROWS && high >= TWO_ROWS ? undefined : low >= high && low > 0 ? 'low' : high > 0 ? 'high' : undefined;
     const block = stripBlock(polygon, lotRules.rows, between2(lotRules.split), only);
     laid.set(id, block);
     return block;
   };
+  /** Takes a block whole for a building, if it is untouched. */
+  const takeWhole = (id: number, building: Building): boolean => {
+    const block = layoutOf(id);
+    if (!block || block.rows.some((row) => row.lo !== block.minU || row.hi !== block.maxU)) return false;
+    const polygon = town.blockOf(id);
+    const door = doorOf(id, polygon);
+    if (door === undefined) return false;
+    for (const row of block.rows) row.lo = row.hi;
+    placed.push({ building, cell: id, polygon, from: block.minU, edge: door, whole: true });
+    return true;
+  };
+  // Districts and their lots are grown again, with a district that was boxed in reaching further, if need be.
+  const groundAtStart = new Set(ground);
+  const boost = city.districts.map(() => 1);
+  for (let regrow = 0; ; regrow++) {
+  try {
+  if (regrow > 0) {
+    placed.length = 0;
+    laid.clear();
+    owner.clear();
+    for (const list of cellsOf) list.length = 0;
+    ground.clear();
+    for (const id of groundAtStart) ground.add(id);
+    if (plazaDistrict !== undefined && town.plazaCell !== undefined) assign(town.plazaCell, plazaDistrict);
+  }
   // Gatehouses first: each just inside its gate, at the end of the row nearest it.
   for (const [corner, gatehouse] of [...gateOf].sort((a, b) => a[0] - b[0])) {
     const at = corners[corner] as Point;
@@ -348,33 +409,62 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       if (inside !== undefined) {
         ground.add(inside);
         town.rank.set(inside, 1);
-        town.addGround(inside);
+        for (const cell of town.addGround(inside)) if (!placed.some((lot) => lot.cell === cell)) (laid.delete(cell), capacity.delete(cell));
       }
     }
-    const options = groundAt(corner).filter((id) => ground.has(id) && cellOf(id).inside).sort((a, b) => a - b);
+    // Every block just inside the gate, taken into the town if it is not yet.
+    const options = groundAt(corner).filter((id) => cellOf(id).inside && !cellOf(id).rim).sort((a, b) => a - b);
+    // Taken in before they are measured, so that their blocks keep clear of the streets the town gives them.
+    for (const id of options) {
+      if (ground.has(id)) continue;
+      ground.add(id);
+      town.rank.set(id, 1);
+      for (const cell of town.addGround(id)) if (!placed.some((lot) => lot.cell === cell)) (laid.delete(cell), capacity.delete(cell));
+    }
     const outside = groundAt(corner).filter((id) => ground.has(id) && !cellOf(id).inside).sort((a, b) => a - b);
     let done = false;
+    // In the row and from the end nearest the gate first, then any row from either end, then a whole block.
+    // The cut nearest the gate, of every row of every block inside the wall at it; outside only where there is none.
+    let best: { cut: { polygon: Point[]; end: number }; block: StripBlock; id: number; row: Row; rowIndex: number; fromHigh: boolean; door: number; away: number } | undefined;
     for (const id of [...options, ...outside]) {
       const block = layoutOf(id);
-      if (!block || done) continue;
-      const [u] = uvOf(block, at);
-      const fromHigh = u > (block.minU + block.maxU) / 2;
-      const rowIndex = block.rows.reduce((bestRow, row, index) => {
-        const [, v] = uvOf(block, at);
-        const near = Math.abs(v - (row.outer === 'low' ? row.low : row.high));
-        const other = block.rows[bestRow] as Row;
-        return near < Math.abs(v - (other.outer === 'low' ? other.low : other.high)) ? index : bestRow;
-      }, 0);
-      const row = block.rows[rowIndex] as Row;
+      if (!block || (best && options.includes(best.id) && !options.includes(id))) continue;
+      const [u, v] = uvOf(block, at);
+      const nearHigh = u > (block.minU + block.maxU) / 2;
+      const tries = block.rows
+        .map((row, index) => ({ row, index, away: Math.abs(v - (row.outer === 'low' ? row.low : row.high)) }))
+        .sort((a, b) => a.away - b.away || a.index - b.index)
+        .flatMap((entry) => [nearHigh, !nearHigh].map((fromHigh) => ({ ...entry, fromHigh })));
       const wanted = lotArea(gatehouse);
-      const cut = fromHigh ? fitStrip(block, row.low, row.high, row.outer, row.hi, 0, -1, wanted, sizeOf(gatehouse).frontage * lotRules.widest, row.lo, 0) : fitStrip(block, row.low, row.high, row.outer, row.lo, 0, 1, wanted, sizeOf(gatehouse).frontage * lotRules.widest, row.hi, 0);
-      if (cut.polygon.length < 3 || cut.area < wanted * 0.3) continue;
-      const door = doorOf(id, cut.polygon);
-      if (door === undefined) continue;
+      for (const { row, index: rowIndex, fromHigh } of tries) {
+        const cut = fromHigh ? fitStrip(block, row.low, row.high, row.outer, row.hi, 0, -1, wanted, sizeOf(gatehouse).frontage * lotRules.widest, row.lo, 0) : fitStrip(block, row.low, row.high, row.outer, row.lo, 0, 1, wanted, sizeOf(gatehouse).frontage * lotRules.widest, row.hi, 0);
+        if (cut.polygon.length < 3 || cut.area < wanted * 0.3) continue;
+        const door = doorOf(id, cut.polygon);
+        if (door === undefined) continue;
+        // The cut nearest the gate.
+        const away = distance(polygonCentroid(cut.polygon), at);
+        if (!best || away < best.away) best = { cut, block, id, row, rowIndex, fromHigh, door, away };
+      }
+    }
+    if (best) {
+      const { cut, block, id, row, rowIndex, fromHigh, door } = best;
+      if (!ground.has(id)) {
+        ground.add(id);
+        town.rank.set(id, 1);
+        for (const cell of town.addGround(id)) if (!placed.some((lot) => lot.cell === cell)) (laid.delete(cell), capacity.delete(cell));
+      }
+      const from = fromHigh ? cut.end : row.lo;
       if (fromHigh) row.hi = cut.end;
       else row.lo = cut.end;
-      placed.push({ building: gatehouse, cell: id, polygon: cut.polygon, block, row: rowIndex, from: fromHigh ? cut.end : row.lo, edge: door, gatehouse: true });
+      placed.push({ building: gatehouse, cell: id, polygon: cut.polygon, block, row: rowIndex, from, edge: door, gatehouse: true });
       done = true;
+    }
+    for (const id of [...options, ...outside]) {
+      if (done || !layoutOf(id)) continue;
+      if (takeWhole(id, gatehouse)) {
+        (placed[placed.length - 1] as Placed).gatehouse = true;
+        done = true;
+      }
     }
     if (!done) fail(`the gate at (${Math.round(at[0])}, ${Math.round(at[1])}) has no ground beside it for its gatehouse`);
   }
@@ -401,6 +491,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     lastTarget: number;
     filled: boolean;
     gapChance: number;
+    /** A district by the water, and how many blocks away from it it has taken while a building waits for one at it. */
+    byWater: boolean;
+    dry: number;
   }
   const builders: Array<Builder | undefined> = city.districts.map((_, index) => {
     const buildings = buildingsOf[index] as Building[];
@@ -418,6 +511,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       lastTarget: 0,
       filled: lotRules.filled.includes(kindOf(index)),
       gapChance: lotRules.gaps[kindOf(index)] ?? 0,
+      byWater: placementOf(city.districts[index] as District) === 'waterside' && (town.river !== undefined || town.coast !== undefined),
+      dry: 0,
     };
   });
   const finished = (builder: Builder) => builder.whole.length + builder.deep.length + builder.queue.length + builder.waiting.length === 0;
@@ -440,35 +535,50 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     builder.last = undefined;
     builder.rowAt++;
   };
-  /** Takes a block whole for a building, if it is untouched. */
-  const takeWhole = (id: number, building: Building): boolean => {
-    const block = layoutOf(id);
-    if (!block || block.rows.some((row) => row.lo !== block.minU || row.hi !== block.maxU)) return false;
-    const polygon = town.blockOf(id);
-    const door = doorOf(id, polygon);
-    if (door === undefined) return false;
-    for (const row of block.rows) row.lo = row.hi;
-    placed.push({ building, cell: id, polygon, from: block.minU, edge: door, whole: true });
-    return true;
-  };
   /** Places as much of a district's buildings as a newly taken block holds. */
   const fill = (builder: Builder, id: number) => {
     const block = layoutOf(id);
     if (!block) return;
-    // A building that takes a block whole takes this one if it is near its size.
-    if (builder.whole.length > 0) {
+    // A building that takes a block whole takes this one if it is near its size. In a district by the water it waits,
+    // for a few blocks, for one at the water.
+    // At the water: the block itself comes within two bank widths of it.
+    const atWater = (cell: number) => town.blockOf(cell).some((point) => town.dryBy(point) <= 2 * town.bankside);
+    if (builder.whole.length > 0 && builder.byWater && !atWater(id) && builder.dry < WAIT_FOR_WATER) builder.dry++;
+    else if (builder.whole.length > 0) {
       const area = polygonArea(town.blockOf(id));
-      const index = builder.whole.findIndex(({ building }) => area >= lotArea(building) * 0.45 && area <= lotArea(building) * 2.2);
+      // By the water, they are cut first as strips through the full depth of a block at the water, several to a block.
+      if (builder.byWater && atWater(id)) {
+        for (const entry of [...builder.whole]) {
+          const start = Math.max(...block.rows.map((row) => row.lo));
+          const end = Math.min(...block.rows.map((row) => row.hi));
+          const cut = fitStrip(block, block.minV, block.maxV, 'low', start, 0, 1, lotArea(entry.building), sizeOf(entry.building).frontage * lotRules.widest, end, 0, lotRules.leastFrontage);
+          const door = cut.polygon.length >= 3 ? doorOf(id, cut.polygon) : undefined;
+          if (cut.polygon.length < 3 || cut.area < lotArea(entry.building) * lotRules.area.min || door === undefined) continue;
+          for (const row of block.rows) {
+            row.lo = cut.end;
+            row.skewLo = 0;
+          }
+          placed.push({ building: entry.building, cell: id, polygon: cut.polygon, block, from: start, edge: door });
+          builder.whole.splice(builder.whole.indexOf(entry), 1);
+        }
+      }
+      // One that takes a block whole takes this one if it is near its size, or by the water whatever its size.
+      const fits = (building: Building) => area >= lotArea(building) * 0.45 && (area <= lotArea(building) * 2.2 || (builder.byWater && atWater(id)));
+      const index = builder.whole.findIndex(({ building }) => fits(building));
       if (index >= 0 && takeWhole(id, (builder.whole[index] as Entry).building)) {
         builder.whole.splice(index, 1);
         return;
       }
+      // None of them suits this block: away from the water they go with the deep buildings.
+      if (!(builder.byWater && builder.dry < WAIT_FOR_WATER)) builder.deep.unshift(...builder.whole.splice(0));
     }
     // Buildings as deep as a block run through both rows from its start, straight across.
     while (builder.deep.length > 0) {
       const { building } = builder.deep[0] as Entry;
       const start = Math.max(...block.rows.map((row) => row.lo));
-      const cut = fitStrip(block, block.minV, block.maxV, 'low', start, 0, 1, lotArea(building) * (1 + (lotRng.next() * 2 - 1) * lotRules.frontageSpread), sizeOf(building).frontage * lotRules.widest, block.maxU, 0, lotRules.leastFrontage);
+      // No further than the nearest end any row was cut back to, by a gatehouse there.
+      const end = Math.min(...block.rows.map((row) => row.hi));
+      const cut = fitStrip(block, block.minV, block.maxV, 'low', start, 0, 1, lotArea(building) * (1 + (lotRng.next() * 2 - 1) * lotRules.frontageSpread), sizeOf(building).frontage * lotRules.widest, end, 0, lotRules.leastFrontage);
       const door = cut.polygon.length >= 3 ? doorOf(id, cut.polygon) : undefined;
       if (cut.polygon.length < 3 || cut.area < lotArea(building) * lotRules.area.min || door === undefined) break;
       for (const row of block.rows) {
@@ -516,12 +626,51 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       }
       const door = cut.polygon.length >= 3 ? doorOf(entry.id, cut.polygon, row.outer === 'low' ? [-rowBlock.across[0], -rowBlock.across[1]] : rowBlock.across) : undefined;
       if (cut.polygon.length < 3 || cut.area < target * lotRules.area.min || door === undefined) {
-        // No room in this row: it waits for the next. One that has found room in none of several rows takes a whole block.
+        // No room in this row for it: a smaller building still waiting may fit, the smallest first, one of each type.
+        const tried = new Set<string>([building.type]);
+        const smaller = builder.queue
+          .map((candidate, index) => ({ candidate, index }))
+          .filter(({ candidate }) => lotArea(candidate.building) < lotArea(building) && !tooNear(candidate.building))
+          .sort((a, b) => lotArea(a.candidate.building) - lotArea(b.candidate.building) || a.index - b.index)
+          .filter(({ candidate }) => (tried.has(candidate.building.type) ? false : (tried.add(candidate.building.type), true)))
+          .slice(0, 6);
+        let fitted = false;
+        for (const { candidate } of smaller) {
+          const want = lotArea(candidate.building);
+          const small = fitStrip(rowBlock, row.low, row.high, row.outer, row.lo, row.skewLo, 1, want, Math.max(lotRules.leastFrontage, sizeOf(candidate.building).frontage * lotRules.widest), row.hi, skew, lotRules.leastFrontage);
+          const smallDoor = small.polygon.length >= 3 ? doorOf(entry.id, small.polygon, row.outer === 'low' ? [-rowBlock.across[0], -rowBlock.across[1]] : rowBlock.across) : undefined;
+          if (small.polygon.length < 3 || small.area < want * lotRules.area.min || smallDoor === undefined) continue;
+          builder.queue.splice(builder.queue.indexOf(candidate), 1);
+          builder.queue.unshift(next);
+          const lot: Placed & { skewFrom?: number } = { building: candidate.building, cell: entry.id, polygon: small.polygon, block: rowBlock, row: entry.index, from: row.lo, edge: smallDoor, skewFrom: row.skewLo };
+          placed.push(lot);
+          row.lo = small.end;
+          row.skewLo = skew;
+          builder.last = lot;
+          builder.lastTarget = want;
+          fitted = true;
+          break;
+        }
+        if (fitted) continue;
+        // None here: the row is tried a little further along, where it may be wider or have its street, and only
+        // when it runs out does the building wait for the next row. One that has found room in none of several rows
+        // takes a whole block.
+        if (spreadCivic.has(building.type)) builder.waiting.unshift(next);
+        else builder.queue.unshift(next);
+        if (row.hi - row.lo > 2 * lotRules.leastFrontage) {
+          row.lo += lotRules.leastFrontage;
+          row.skewLo = 0;
+          builder.last = undefined;
+          continue;
+        }
         const tries = (builder.failures.get(building.id) ?? 0) + 1;
         builder.failures.set(building.id, tries);
-        if (tries > FAILED_ROWS) builder.whole.push(next);
-        else if (spreadCivic.has(building.type)) builder.waiting.unshift(next);
-        else builder.queue.unshift(next);
+        if (tries > FAILED_ROWS) {
+          const index = builder.queue.indexOf(next) >= 0 ? builder.queue.indexOf(next) : -1;
+          if (index >= 0) builder.queue.splice(index, 1);
+          else builder.waiting.splice(builder.waiting.indexOf(next), 1);
+          builder.whole.push(next);
+        }
         closeRow(builder);
         continue;
       }
@@ -545,7 +694,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   // into lots, until every building has one. Larger districts reach further for the same distance. Ground the town
   // was laid out on is taken first; ground beyond it only when a district can reach nothing else.
   const meanDemand = demand.reduce((sum, value) => sum + value, 0) / Math.max(1, demand.filter((value) => value > 0).length);
-  const reachOf = (district: number) => Math.sqrt(Math.max(demand[district] as number, 1) / meanDemand);
+  const reachOf = (district: number) => (boost[district] as number) * Math.sqrt(Math.max(demand[district] as number, 1) / meanDemand);
   const BEYOND = 40 * grown.blocks.length;
   const heap = new Heap();
   const order: Array<[number, number]> = [];
@@ -555,21 +704,41 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (cost >= (best.get(key) ?? Infinity)) return;
     best.set(key, cost);
     order.push([district, id]);
-    heap.push(cost / reachOf(district), order.length - 1);
+    // The town's own order counts as well as the district's reach: the cheapest ground is built on first, by whichever
+    // district it lies beside, so that what is left over lies at the edge of the town and not inside it.
+    // A district by the water with a building still waiting for a block at the water is drawn to the water.
+    const builder = builders[district];
+    const pull = builder && builder.byWater && builder.whole.length > 0 && town.blockOf(id).some((point) => town.dryBy(point) <= 2 * town.bankside) ? WATER_PULL : 0;
+    heap.push(cost / reachOf(district) + COST_WEIGHT * Math.max(0, cellOf(id).cost) - pull, order.length - 1);
   };
   const barredCell = (id: number) => !isGround(id) || cellOf(id).rim || (gatehouses.length > 0 && brief.population < grown.wall.enclosesAllBelow && !cellOf(id).inside);
   const spread = new Map<number, number>();
+  const refused = new Set<string>();
   const take = (district: number, id: number, cost: number) => {
     if (!ground.has(id)) {
       ground.add(id);
       town.rank.set(id, 1);
-      town.addGround(id);
+      for (const cell of town.addGround(id)) if (!placed.some((lot) => lot.cell === cell)) (laid.delete(cell), capacity.delete(cell));
     }
     assign(id, district);
     spread.set(id, cost);
     const builder = builders[district];
     // The plaza is open ground: no lots are cut from it.
-    if (builder && id !== town.plazaCell) fill(builder, id);
+    if (builder && id !== town.plazaCell) {
+      const before = placed.length;
+      fill(builder, id);
+      // A block the district could put nothing in goes back, and the district does not take it again.
+      if (placed.length === before && id !== seeds.get(district) && !finished(builder)) {
+        owner.delete(id);
+        cellsOf[district] = (cellsOf[district] as number[]).filter((other) => other !== id);
+        builder.rows = builder.rows.filter((row) => row.id !== id || builder.rows.indexOf(row) < builder.rowAt);
+        builder.rowAt = Math.min(builder.rowAt, builder.rows.length);
+        // Its rows are kept as cut where a gatehouse already stands in it.
+        if (!placed.some((lot) => lot.cell === id)) laid.delete(id);
+        refused.add(`${district}:${id}`);
+        return;
+      }
+    }
     if (!builder || finished(builder)) return;
     for (const next of neighbours.get(id) ?? []) {
       if (owner.has(next.cell) || barredCell(next.cell)) continue;
@@ -585,21 +754,20 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       const [, at] = heap.pop();
       const [district, id] = order[at] as [number, number];
       const builder = builders[district];
-      if (owner.has(id) || barredCell(id) || !builder || finished(builder)) continue;
+      if (owner.has(id) || barredCell(id) || !builder || finished(builder) || refused.has(`${district}:${id}`)) continue;
       take(district, id, best.get(`${district}:${id}`) as number);
     }
     const stuck = builders.findIndex((builder) => builder !== undefined && !finished(builder));
     if (stuck < 0) break;
-    if (round > 400) throw new TooSmall(`the lots of ${(city.districts[stuck] as District).name}`);
+    if (round > 400) throw new Stuck(stuck);
     // A district boxed in by others takes a block from a neighbour, which takes back what stood on it and grows on.
-    const builder = builders[stuck] as Builder;
     const own = cellsOf[stuck] as number[];
-    if (own.length === 0) throw new TooSmall(`the lots of ${(city.districts[stuck] as District).name}`);
+    if (own.length === 0) throw new Stuck(stuck);
     const beside = [...new Set(own.flatMap((id) => (neighbours.get(id) ?? []).map((next) => next.cell)))]
       .filter((id) => owner.has(id) && owner.get(id) !== stuck && id !== town.plazaCell && id !== seeds.get(owner.get(id) as number) && !placed.some((lot) => lot.cell === id && lot.gatehouse) && connectedWithout(owner.get(id) as number, id))
       .sort((a, b) => (spread.get(b) ?? 0) - (spread.get(a) ?? 0) || a - b);
     const chosen = beside[0];
-    if (chosen === undefined) throw new TooSmall(`the lots of ${(city.districts[stuck] as District).name}`);
+    if (chosen === undefined) throw new Stuck(stuck);
     const other = owner.get(chosen) as number;
     const giving = builders[other] as Builder;
     // The neighbour's lots there go back to it, to be placed again as it grows on.
@@ -621,7 +789,13 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     take(stuck, chosen, cost);
     // The neighbour grows on from its blocks to make up what it gave.
     for (const id of cellsOf[other] as number[]) for (const next of neighbours.get(id) ?? []) if (!owner.has(next.cell) && !barredCell(next.cell)) push((spread.get(id) ?? 0) + distance(cellOf(id).centre, cellOf(next.cell).centre) + next.cost + (ground.has(next.cell) ? 0 : BEYOND), other, next.cell);
-    void builder;
+  }
+  break;
+  } catch (error) {
+    if (!(error instanceof Stuck)) throw error;
+    if (regrow >= REGROWS) throw new TooSmall(`the lots of ${(city.districts[error.district] as District).name}`);
+    boost[error.district] = (boost[error.district] as number) * 1.6;
+  }
   }
   // Ground no district took goes back to the land.
   for (const id of [...ground]) if (!owner.has(id) && !placed.some((lot) => lot.cell === id)) ground.delete(id);
@@ -643,7 +817,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     );
   }
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// ---- 13. What is left ---');
   // ---- 13. What is left ------------------------------------------------------------------------------------------
   // A block with no lots at the edge of the town goes back to the land, as long as its district stays in one piece.
   const built = new Set(placed.map((lot) => lot.cell));
@@ -667,7 +840,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   // What is left with no lots inside the town is a green.
   const greens = [...ground].filter((id) => !built.has(id) && town.blockOf(id).length >= 3).sort((a, b) => a - b);
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// ---- The streets that are k');
   // ---- The streets that are kept -----------------------------------------------------------------------------
   const kept = new Set<number>();
   for (const edge of edges) {
@@ -706,7 +878,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       kept.delete(edge.id);
     }
   }
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// Highways: from the centre');
   // Highways: from the centre to where the town ends, then on as far again as the pack's distance, and no further.
   const exitDrafts: Array<{ point: Point; joins: number } | undefined> = brief.routes.map(() => undefined);
   const lotBoxes = placed.map((lot) => boxOf(lot.polygon, widths.arterial / 2));
@@ -754,7 +925,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     chain.forEach((id, index) => {
       if (index >= stop) kept.delete(id);
     });
-    const direction = bearingVector(route.bearing);
     let joined = false;
     for (let back = stop; back >= townEnd && back >= 0 && !joined; back--) {
       const joins = list[back] as number;
@@ -780,10 +950,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         joined = true;
       }
     }
-    void direction;
     if (!joined) throw new TooSmall(`the exit to ${route.routeId}`);
   }
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// Whatever is left apart is j');
   // Whatever is left apart is joined to the rest by the shortest way along boundaries a street may take.
   let joins = 0;
   for (;;) {
@@ -838,7 +1006,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     }
   }
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// ---- 14. Records ---');
   // ---- 14. Records ---------------------------------------------------------------------------------------------
   const keptEdges = [...kept].sort((a, b) => a - b).map(edgeOf);
   const degree = new Map<number, number>();
@@ -858,7 +1025,12 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const isJunction = (corner: number) => {
     if ((degree.get(corner) ?? 0) !== 2 || gateOf.has(corner) || atBridge.has(corner) || exitDrafts.some((draft) => draft?.joins === corner)) return true;
     const [one, other] = keptEdges.filter((edge) => endsOf(edge).includes(corner)) as [Edge, Edge];
-    return !same(one, other);
+    if (!same(one, other)) return true;
+    // A street that bends more sharply than a street passing through a junction may turns a corner there: two streets.
+    const here = corners[corner] as Point;
+    const [a, b] = [one, other].map((edge) => nodePoint(endsOf(edge)[0] === corner ? endsOf(edge)[1] : endsOf(edge)[0])) as [Point, Point];
+    const cosine = ((here[0] - a[0]) * (b[0] - here[0]) + (here[1] - a[1]) * (b[1] - here[1])) / ((distance(a, here) * distance(here, b)) || 1);
+    return (Math.acos(Math.max(-1, Math.min(1, cosine))) * 180) / Math.PI > grown.streets.through;
   };
   const junctionIds = new Map<string, string>();
   const layoutJunctions: Junction[] = [];
@@ -961,7 +1133,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   if (town.river) waters.push({ id: waterId(), kind: 'river', centreLine: town.river.line, width: town.river.width, widths: town.river.widths });
   if (town.coast) waters.push({ id: waterId(), kind: 'sea', polygon: town.coast.polygon });
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// The wall: the boundaries be');
   // The wall: the boundaries between the oldest ground and the rest, where the town is, smoothed between its gates.
   const walls: Wall[] = [];
   if (gatehouses.length > 0) {
@@ -991,7 +1162,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       // Smoothed between gates: each stretch from gate to gate is rounded, its ends held where they are.
       const gateAt = own.map((corner, index) => (gateOf.has(corner) && degree.has(corner) ? index : -1)).filter((index) => index >= 0);
       let points: Point[];
-      if (gateAt.length === 0) points = closed ? chaikin([...own, own[0] as number].map((corner) => corners[corner] as Point), 2).slice(0, -1) : chaikin(own.map((corner) => corners[corner] as Point), 2);
+      if (gateAt.length === 0) points = closed ? chaikin([...own, own[0] as number].map((corner) => corners[corner] as Point), WALL_ROUNDS).slice(0, -1) : chaikin(own.map((corner) => corners[corner] as Point), WALL_ROUNDS);
       else {
         const turned = closed ? [...own.slice(gateAt[0] as number), ...own.slice(0, gateAt[0] as number)] : own;
         const stops = turned.map((corner, index) => (gateOf.has(corner) && degree.has(corner) ? index : -1)).filter((index) => index >= 0);
@@ -1001,7 +1172,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         let from = closed ? 0 : 0;
         for (const stop of [...stops, ring.length - 1]) {
           if (stop <= from) continue;
-          const piece = chaikin(ring.slice(from, stop + 1).map((corner) => corners[corner] as Point), 2);
+          const piece = chaikin(ring.slice(from, stop + 1).map((corner) => corners[corner] as Point), WALL_ROUNDS);
           points.push(...(points.length > 0 ? piece.slice(1) : piece));
           from = stop;
         }
@@ -1021,11 +1192,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (made !== gatehouses.length) fail(`${gatehouses.length} gatehouses but ${made} gates in the wall`);
   }
 
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', '// Lots, numbered as their bui');
   // Lots, numbered as their buildings are.
   const buildingOrder = new Map(city.buildings.map((building, index) => [building.id, index]));
   placed.sort((a, b) => (buildingOrder.get(a.building.id) as number) - (buildingOrder.get(b.building.id) as number));
-  const segmentIdOf = (edge: number) => (segments[segmentOfEdge.get(edge) as number] as Segment).id;
   /** The entrance: the middle of the lot's front, on the street's line. */
   const entranceOn = (edge: number, polygon: Point[]) => {
     const segment = segments[segmentOfEdge.get(edge) as number] as Segment;
@@ -1038,9 +1207,24 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     if (distanceToPolygonEdge(point, polygon) <= segment.width / 2 + grown.roadside + 1.5) return { segmentId: segment.id, point };
     // Near a corner of its block the middle of a lot's front can stand off the street: the nearest point of the street to the lot, then.
     const nearest = polygon.map((corner) => projectOnPolyline(segment.points, corner)).reduce((best, entry) => (entry.distance < best.distance ? entry : best));
-    return { segmentId: segment.id, point: nearest.point };
+    if (distanceToPolygonEdge(nearest.point, polygon) <= segment.width / 2 + grown.roadside + 2) return { segmentId: segment.id, point: nearest.point };
+    // Drawn back from a corner, a lot can lose its street: it opens onto whichever street it borders most nearly.
+    const box = boxOf(polygon, 15);
+    let bestSegment: Segment | undefined;
+    let bestPoint: Point | undefined;
+    let bestGap = Infinity;
+    for (const other of segments) {
+      if (!other.points.some((point) => point[0] >= box.minX - 200 && point[0] <= box.maxX + 200 && point[1] >= box.minY - 200 && point[1] <= box.maxY + 200)) continue;
+      const near = polygon.map((corner) => projectOnPolyline(other.points, corner)).reduce((best, entry) => (entry.distance < best.distance ? entry : best));
+      const gap = distanceToPolygonEdge(near.point, polygon) - other.width / 2;
+      if (gap < bestGap) {
+        bestGap = gap;
+        bestSegment = other;
+        bestPoint = near.point;
+      }
+    }
+    return bestSegment && bestPoint ? { segmentId: bestSegment.id, point: bestPoint } : { segmentId: segment.id, point: nearest.point };
   };
-  void segmentIdOf;
   // Last, each lot is drawn back from any roadway, wall or bank that it still stands on: blocks keep clear of what
   // runs along their own sides, but not always of what passes a corner.
   const barriers: Array<{ a: Point; b: Point; half: number }> = [
@@ -1140,7 +1324,10 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     builtArea += polygonArea(lot.polygon);
     lots.push({ id, buildingId: lot.building.id, polygon: lot.polygon, districtId: lot.building.districtId, entrance: entranceOn(lot.edge, lot.polygon), footprints: footprint.length >= 3 ? [footprint] : [] });
   });
-  for (const id of greens) places.push({ id: `place-${number}-${pad(places.length + 1, 3)}`, kind: 'green', polygon: town.blockOf(id) });
+  for (const id of greens) {
+    const polygon = trimmed(town.blockOf(id), trimsOf(town.blockOf(id)));
+    if (polygon.length >= 3) places.push({ id: `place-${number}-${pad(places.length + 1, 3)}`, kind: 'green', polygon });
+  }
 
   // A district's area is its blocks; every block records its growth rank.
   let outlineArea = 0;
@@ -1192,8 +1379,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       seed,
     },
   };
-  (globalThis as any).__debug?.(layout, { placed, town });
-  (globalThis as any).DBG && (globalThis as any).MARK('STAGE', 'const broken = checkLayout(');
   const broken = checkLayout(layout, city, brief, pack);
   if (broken.length > 0) fail(`the layout breaks ${broken.length === 1 ? 'an invariant' : 'invariants'}:\n  ${broken.join('\n  ')}`);
   return layout;

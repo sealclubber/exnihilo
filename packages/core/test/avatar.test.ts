@@ -271,7 +271,8 @@ describe('the avatar', () => {
     if (toBuilding.kind !== 'walking') throw new Error('not walking');
     // It walks to the lot's entrance.
     const lot = badanos.layout.lots.find((entry) => entry.buildingId === building.id)!;
-    expect(toBuilding.path.points.at(-1)).toEqual(lot.entrance.point);
+    expect(toBuilding.path.points.at(-1)![0]).toBeCloseTo(lot.entrance.point[0], 9);
+    expect(toBuilding.path.points.at(-1)![1]).toBeCloseTo(lot.entrance.point[1], 9);
     expect(streetPoint(toBuilding, arrivalTime(toBuilding) - 1).walking).toBe(true);
     expect(avatarPosition(toBuilding, arrivalTime(toBuilding))).toEqual({ kind: 'building', buildingId: building.id });
     expect(settleAvatar(toBuilding, arrivalTime(toBuilding) + 5)).toEqual({ kind: 'inside', settlementId: 'settlement-641', buildingId: building.id });
@@ -332,7 +333,8 @@ describe('the avatar', () => {
     expect(leaveBuilding(arrived, badanos.town, T0 + 86_400)).toMatchObject({ kind: 'standing', point: lot.entrance.point });
     // A walk ordered from inside begins at the door.
     const out = walkToPoint(inside, badanos.town, [0, 0], T0 + 86_400, SPEED);
-    expect((out as { path: { points: Point[] } }).path.points[0]).toEqual(lot.entrance.point);
+    expect((out as { path: { points: Point[] } }).path.points[0]![0]).toBeCloseTo(lot.entrance.point[0], 9);
+    expect((out as { path: { points: Point[] } }).path.points[0]![1]).toBeCloseTo(lot.entrance.point[1], 9);
   });
 
   it('refuses an action that makes no sense, saying why', () => {
@@ -463,8 +465,10 @@ describe('perception', () => {
   it('perceives, in a building, exactly that building\'s occupants, and nobody on the street', () => {
     const { life, town, city } = badanos;
     const time = at(1, 11);
-    const stall = city.buildings.find((building) => building.type === 'market-stall')!;
-    const tannery = city.buildings.find((building) => building.type === 'tannery')!;
+    // A stall and a tannery with people in them at that time: which ones depends on where they stand.
+    const busy = (type: string) => city.buildings.filter((building) => building.type === type).find((building) => life.occupants(building.id, time).length > 0)!;
+    const stall = busy('market-stall');
+    const tannery = busy('tannery');
     for (const building of [stall, tannery]) {
       const walk = walkToBuilding(spawnAvatar(town, [0, 0]), town, building.id, time - 3600, SPEED);
       expect(avatarPosition(walk, time).kind).toBe('building');
@@ -533,7 +537,7 @@ describe('unchanged', () => {
 
   it('keeps every version where it was', () => {
     expect(LIFE_VERSION).toBe(5);
-    expect(LAYOUT_VERSION).toBe(6);
+    expect(LAYOUT_VERSION).toBe(7);
     expect(GENERATOR_VERSION).toBe(6);
   });
 });

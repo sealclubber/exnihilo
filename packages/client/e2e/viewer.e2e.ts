@@ -922,7 +922,7 @@ describe('the town as laid out', () => {
     expect(state.town).toMatchObject({ generator: 'grown', walls: layout.walls.length, gates: layout.summary.counts.gates, places: layout.places.length, living: false });
     expect(state.people).toEqual([]);
     // The plaza is no rectangle's worth of assumption: the lot found under a point inside its polygon is its own.
-    const plaza = layout.places[0]!;
+    const plaza = layout.places.find((place) => place.kind === 'plaza') as Extract<(typeof layout.places)[number], { kind: 'plaza' }>;
     const lot = layout.lots.find((entry) => entry.buildingId === plaza.buildingId)!;
     expect(lot.footprints).toEqual([]);
     const inside = geometry.pointInPolygon(geometry.polygonCentroid(plaza.polygon), plaza.polygon) ? geometry.polygonCentroid(plaza.polygon) : undefined;

@@ -183,8 +183,9 @@ grown:
   # The order ground is built on: distance from the nearest highway, plus
   # `along` per metre along it from the centre, plus `arterial` per metre from
   # the nearest arterial (up to `arterialCap`), plus slow noise. Ground across
-  # the water from its nearest road costs `water` more.
-  ground: {along: 0.45, arterial: 0.8, arterialCap: 200, noise: {depth: 30, length: 150}, water: 400}
+  # the water from its nearest road costs `water` more; a block on a highway
+  # costs `frontage` less, so the road's frontage is built on first.
+  ground: {along: 0.45, arterial: 0.8, arterialCap: 200, noise: {depth: 30, length: 150}, water: 400, frontage: 120}
   # Patches share a grain taken from their nearest road, turned by up to about
   # `turn` degrees.
   patches: {spacing: 200, turn: 10}
@@ -202,13 +203,13 @@ grown:
   # No block seed within `clear` of a road or `waterClear` of water; pairs
   # `offset` either side of each road, `spacing` apart, so roads fall between
   # blocks. Seeds nearer than `nearest` to an earlier one are dropped.
-  roadSeeds: {clear: 20, waterClear: 22, offset: 23, spacing: {min: 34, max: 70}, nearest: 14}
+  roadSeeds: {clear: 20, waterClear: 22, offset: 23, spacing: {min: 50, max: 90}, nearest: 14}
   # Two streets at a junction within `through` degrees of straight are one
   # street passing through; junctions are pulled `pull` of the way toward the
   # line of that street over `rounds` rounds. Streets shorter than `shortest`
   # are closed up; one passing fewer than `laneBelow` junctions is a lane. A
   # block's corners are cut back `corner` metres.
-  streets: {through: 40, rounds: 6, pull: 0.45, shortest: 7, laneBelow: 2, corner: 1.5}
+  streets: {through: 40, rounds: 10, pull: 0.45, shortest: 7, laneBelow: 2, corner: 1.5}
   # Clear ground between a roadway and the lots along it.
   roadside: 0.4
   # The share of the town's ground, streets included, that lots cover.
@@ -218,7 +219,7 @@ grown:
   # A block joins the nearest district, crossing a highway, an arterial or the
   # water counting as so many metres more.
   districts:
-    penalty: {highway: 140, arterial: 110, water: 400}
+    penalty: {highway: 300, arterial: 220, water: 600}
   # At most this many blocks inside the town are left as greens, with no lots.
   greens: 2
   # Wells and public ovens stand at least this far from another of their

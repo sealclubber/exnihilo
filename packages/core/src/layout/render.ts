@@ -63,8 +63,14 @@ export function renderLayoutSvg(layout: Layout, options: RenderOptions = {}): st
   // Places, then streets by kind, round at every join and end so that bends and junctions have no gaps.
   const placeOf = new Set(layout.places.flatMap((place) => (place.kind === 'plaza' ? [place.buildingId] : [])));
   for (const place of layout.places) lines.push(`<path d="${path(place.polygon, true)}" fill="${place.kind === 'plaza' ? PLAZA : GREEN}" stroke="${INK}" stroke-opacity="0.35" stroke-width="0.6"/>`);
+  // A street wider than the town's usual street is an arterial, drawn in the main roads' colour beneath them.
+  const counts = new Map<number, number>();
+  for (const segment of layout.segments) if (segment.kind === 'street') counts.set(segment.width, (counts.get(segment.width) ?? 0) + 1);
+  const usual = [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? Infinity;
+  const wide = layout.segments.filter((segment) => segment.kind === 'street' && segment.width > usual);
   for (const kind of ORDER) {
-    const drawn = layout.segments.filter((segment) => segment.kind === kind);
+    if (kind === 'arterial' && wide.length > 0) lines.push(`<path d="${wide.map((segment) => path(segment.points, false)).join('')}" fill="none" stroke="${STREETS.arterial}" stroke-width="${round(Math.max(...wide.map((segment) => segment.width)))}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    const drawn = layout.segments.filter((segment) => segment.kind === kind && !(kind === 'street' && segment.width > usual));
     if (drawn.length === 0) continue;
     const widths = [...new Set(drawn.map((segment) => segment.width))];
     for (const each of widths) {

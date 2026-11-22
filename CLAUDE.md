@@ -188,10 +188,14 @@ centre, x east and y south; bearings are degrees clockwise from north.
   and spokes nearly 100%.
 - Every length, width and density limit comes from `packs/medieval/layout.yaml`;
   the grown generator's numbers are in its `grown` block.
-- **Streets are the gaps between blocks.** The grown generator scatters
-  blocks and takes its streets from the boundaries between them. Do not add
-  anything that derives a street's direction from the centre or from the
-  main roads: that is what made rings.
+- **Road first.** The grown generator lays the brief's routes as highways
+  first, branches arterials off them, and grows the town along them; blocks
+  are seeded as brickwork in the grain of their nearest road, and the streets
+  are the boundaries between blocks. Do not derive a street's direction from
+  the centre: that is what made rings.
+- **Blocks and greens.** A grown layout lists its blocks, each with a
+  `growthRank` from 0 (first built on) to 1 (last). A block inside the town
+  with no lots is a `green` place; there are at most the pack's number.
 
 ## Conventions
 
@@ -207,7 +211,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 6 and 5.
+  inputs would change. Today they are 6, 7 and 5.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

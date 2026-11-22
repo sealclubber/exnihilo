@@ -33,6 +33,8 @@ import { type RoadLine, type RoadPlan, planRoads } from './roads.ts';
 import { type Coast, type River, makeCoast, makeRiver } from './water.ts';
 
 const TAU = 2 * Math.PI;
+/** Brickwork is laid on ground costing up to this many times the cost at which the town ends; beyond, a patch is one seed. */
+const BRICKS_OUT = 3.5;
 
 /** Thrown when the ground laid out proved too small; the town is laid out again on more. */
 export class TooSmall extends Error {
@@ -120,8 +122,8 @@ export interface Town {
   widthOf: (edge: Edge) => number;
   /** The block drawn in from a town cell's streets: empty if nothing is left of it. */
   blockOf: (cell: number) => Point[];
-  /** Takes a cell into the town after the rest: a street along each side of it that has none and could. */
-  addGround: (cell: number) => void;
+  /** Takes a cell into the town after the rest: a street along each side of it that has none and could. Returns the cells whose blocks that changed. */
+  addGround: (cell: number) => number[];
   /** Whether a boundary could carry a street: not the wall, dry, with ground on one side. */
   passable: (edge: Edge) => boolean;
   /** Whether a boundary lies between ground and water. */
@@ -249,7 +251,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   // arms and all, and is never a circle.
   let wallLine: Point[] | undefined;
   if (needs.gatehouses > 0) {
-    const wallCost = needs.enclosesAll ? townCost * 1.15 : quantile(grown.wall.share * needed);
+    const wallCost = needs.enclosesAll ? townCost * 1.6 : quantile(grown.wall.share * needed);
     const size = Math.ceil((2 * far) / GRID) + 1;
     const at = (i: number) => -far + i * GRID;
     // Old ground is 1 and the rest 0, then blurred.
@@ -400,6 +402,8 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
       const spacing = roadSeeds.spacing.min + (roadSeeds.spacing.max - roadSeeds.spacing.min) * seedRng.next();
       s += exact ? Math.min(spacing, 0.85 * roadSeeds.spacing.min + 0.15 * spacing) : spacing;
       if (Math.hypot(base[0], base[1]) > far * 0.97) continue;
+      // None crowds the plaza's ring.
+      if (needs.plazaArea > 0 && Math.hypot(base[0], base[1]) < 2.6 * plazaRadius + roadSeeds.offset) continue;
       for (const [sign, slide] of [[1, shift], [-1, other]] as const) {
         const point: Point = [base[0] + side[0] * roadSeeds.offset * sign + tangent[0] * slide, base[1] + side[1] * roadSeeds.offset * sign + tangent[1] * slide];
         const wet = dryBy(point) < 0;
@@ -418,7 +422,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   const wallIndex = new LineIndex(50);
   if (wallLine) wallIndex.add([...wallLine, wallLine[0] as Point]);
   const bricks: Seed[] = [];
-  const outer = 2.5 * townCost;
+  const outer = BRICKS_OUT * townCost;
   patches.forEach((patch, index) => {
     const reach = 1.65 * grown.patches.spacing;
     const [ca, sa] = [Math.cos(patch.grain), Math.sin(patch.grain)];
@@ -569,7 +573,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   })();
   if (starts.length === 0) throw new TooSmall('the centre');
   /** The cheapest way along the boundaries that keeps to a line, from any of `from` to the corner nearest its end. */
-  const follow = (line: Point[], from: number[], crosses: boolean, mayGate: boolean): number[] | undefined => {
+  const follow = (line: Point[], from: number[], crosses: boolean, mayGate: boolean, corridor = 4 * roadSeeds.offset): number[] | undefined => {
     const index = new LineIndex(40);
     index.add(line);
     const end = line[line.length - 1] as Point;
@@ -591,7 +595,6 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
       reached.set(start, 0);
       heap.push(0, start);
     }
-    const corridor = 4 * roadSeeds.offset;
     while (heap.size > 0) {
       const [so, corner] = heap.pop();
       if (so > (reached.get(corner) as number)) continue;
@@ -605,6 +608,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
         if (!near && way.to !== goal) continue;
         const off = near ? near.distance / roadSeeds.offset : 4;
         let step = distance(a, b) * (1 + off * off) * (onChain.has(edge.id) ? 4 : 1);
+        // A main road keeps its own width clear of the water where it can; where it cannot, it narrows.
         if (!edge.bridge && drynessOf(edge) < roadDry) step *= 6;
         if (wallCorners.has(way.to)) {
           if (!mayGate) continue;
@@ -662,7 +666,10 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
     const trunk = plan.roads[road] as RoadLine;
     // A highway leaves from the centre; a quay from the point on the shore nearest it.
     const from = trunk.kind === 'quay' ? [cornerNear(trunk.points[0] as Point)] : starts;
-    const chain = follow(trunk.points, from, true, true);
+    // A highway keeps to a corridor along its line where it can, and finds its way without one where it cannot. A
+    // quay passes the wall only where a gatehouse is left to keep a gate.
+    const mayGate = trunk.kind !== 'quay' || gatesLeft > 0;
+    const chain = follow(trunk.points, from, true, mayGate) ?? follow(trunk.points, from, true, mayGate, Infinity);
     // A highway that reaches the sea within a block of the centre has no chain at all: it ends there.
     if (!chain || chain.length === 0) {
       if (trunk.kind === 'highway' && distance(trunk.points[trunk.points.length - 1] as Point, [0, 0]) < grown.blocks.length) {
@@ -670,6 +677,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
         chainCorners.set(road, [from[0] as number]);
         return;
       }
+      if (trunk.kind === 'quay') return;
       throw new TooSmall('a highway');
     }
     take(road, chain, from);
@@ -705,6 +713,16 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   }
 
   // ---- 5 again. Taking the ground --------------------------------------------------------------------------
+  // Ground on a highway was built on first: a cell beside one costs `frontage` metres less.
+  for (const [road, chain] of chains) {
+    if (!trunkSet.has(road)) continue;
+    for (const id of chain) for (const cell of (edges[id] as Edge).cells) {
+      const entry = cells[cell] as Cell & { onHighway?: true };
+      if (entry.onHighway) continue;
+      entry.onHighway = true;
+      entry.cost -= costs.frontage;
+    }
+  }
   // From the centre outward, cheapest first, each cell beside one already taken or across a bridge a road uses,
   // until the blocks will hold every lot.
   const usedBridges = edges.filter((edge) => edge.bridge && onChain.has(edge.id));
@@ -944,7 +962,8 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   }
 
   // ---- 10. Blocks ---------------------------------------------------------------------------------------------
-  const widthOf = (edge: Edge): number => (edge.bridge ? widths.bridge : edge.kind === 'highway' ? widths.arterial : edge.kind === 'arterial' ? grown.arterials.width : edge.kind === 'lane' ? widths.lane : widths.street);
+  // A highway squeezed past the water narrows to a street's width there.
+  const widthOf = (edge: Edge): number => (edge.bridge ? widths.bridge : edge.kind === 'highway' ? (drynessOf(edge) >= roadDry ? widths.arterial : widths.street) : edge.kind === 'arterial' ? grown.arterials.width : edge.kind === 'lane' ? widths.lane : widths.street);
   const clearAt = (corner: number) => Math.max(0, ...(ways[corner] as Way[]).map((way) => edges[way.edge] as Edge).filter((edge) => edge.street).map((edge) => widthOf(edge) / 2), wallCorners.has(corner) ? grown.wall.width / 2 : 0) + roadside;
   const blocks = new Map<number, Point[]>();
   const blockOf = (id: number): Point[] => {
@@ -977,16 +996,20 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
     return result;
   };
 
-  const addGround = (id: number) => {
+  const addGround = (id: number): number[] => {
     taken.add(id);
+    const changed = new Set<number>([id]);
     for (const edgeId of (cells[id] as Cell).edges) {
       const edge = edges[edgeId] as Edge;
       if (edge.street || edge.bridge || edge.kind === 'wall' || edge.kind === 'none' || !passable(edge)) continue;
       if ([edge.a, edge.b].some((corner) => wallCorners.has(corner))) continue;
       edge.street = true;
       if (edge.kind === 'highway' || edge.kind === 'arterial') edge.kind = 'street';
+      // The block on the other side keeps clear of the new street too.
+      for (const cell of edge.cells) changed.add(cell);
     }
-    blocks.delete(id);
+    for (const cell of changed) blocks.delete(cell);
+    return [...changed];
   };
 
   return {

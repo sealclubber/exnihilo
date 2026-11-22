@@ -11,6 +11,8 @@ import { type City, type Layout, type Point, type SettlementBrief, generateCity,
 import { lomiaWorld, medievalPack } from '../packages/core/test/pack.ts';
 
 const pack = medievalPack();
+/** Phase 6D.1's least number of roads out of the centre for a town above 1,000 residents; no longer a pack number. */
+const ROADS_OUT = 5;
 const world = lomiaWorld();
 const { distance, polygonArea, polylineLength, distanceToPolyline, boxOf } = geometry;
 const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
@@ -86,7 +88,7 @@ function measure(brief: SettlementBrief, city: City, layout: Layout) {
     return { frontage: Math.max(...on) - Math.min(...on), depth: Math.max(...back) - Math.min(...back), from: Math.min(...on), side: Math.sign(-(lot.polygon[0]![0] - a[0]) * along[1] + (lot.polygon[0]![1] - a[1]) * along[0]) };
   };
   const shapes = new Map(layout.lots.map((lot) => [lot.id, shapeOf(lot)]));
-  const sized = layout.lots.filter((lot) => !layout.places.some((place) => place.buildingId === lot.buildingId));
+  const sized = layout.lots.filter((lot) => !layout.places.some((place) => place.kind === 'plaza' && place.buildingId === lot.buildingId));
   const nearSize = sized.filter((lot) => {
     const size = lotSizeOf(typeOf.get(lot.buildingId)!, pack);
     return Math.abs(polygonArea(lot.polygon) / (size.frontage * size.depth) - 1) <= 0.25;
@@ -252,7 +254,7 @@ if (process.argv.includes('--all')) {
     seconds += (performance.now() - started) / 1000;
     rings.push([layout.summary.ringShare, brief.name, brief.population]);
     if (brief.population > 2000) labelRings.push([Math.max(...layout.districtAreas.map((area) => ringShare(layout.segments, area.labelPoint))), brief.name]);
-    if (brief.population > 1000 && layout.summary.roadsOut < (pack.layout.grown?.roadsOut ?? 0)) fewRoads.push(`${brief.name} ${layout.summary.roadsOut}`);
+    if (brief.population > 1000 && layout.summary.roadsOut < ROADS_OUT) fewRoads.push(`${brief.name} ${layout.summary.roadsOut}`);
     if (brief.population > 1000 && !layout.segments.some((segment) => segment.kind === 'lane')) noLanes.push(brief.name);
     const bounds = layout.summary.bounds;
     const near = (point: Point) => point[0] >= bounds.minX - 200 && point[0] <= bounds.maxX + 200 && point[1] >= bounds.minY - 200 && point[1] <= bounds.maxY + 200;

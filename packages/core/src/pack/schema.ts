@@ -381,9 +381,9 @@ const GrownSettingsSchema = z.strictObject({
    * The cost of ground, which decides the order it is built on: its distance from the nearest highway, plus `along`
    * for every metre along the highway from the centre, plus `arterial` for every metre from the nearest arterial
    * (counted up to `arterialCap`), plus slow noise `noise.depth` metres deep over `noise.length` metres. Ground across
-   * the water from its nearest road costs `water` metres more.
+   * the water from its nearest road costs `water` metres more; a block on a highway costs `frontage` metres less.
    */
-  ground: z.strictObject({ along: z.number().nonnegative(), arterial: z.number().nonnegative(), arterialCap: metres, noise: z.strictObject({ depth: z.number().nonnegative(), length: metres }), water: z.number().nonnegative() }),
+  ground: z.strictObject({ along: z.number().nonnegative(), arterial: z.number().nonnegative(), arterialCap: metres, noise: z.strictObject({ depth: z.number().nonnegative(), length: metres }), water: z.number().nonnegative(), frontage: z.number().nonnegative() }),
   /** Patches of town that share a grain: `spacing` metres apart, each turned from its nearest road by up to about `turn` degrees. */
   patches: z.strictObject({ spacing: metres, turn: z.number().nonnegative() }),
   /**

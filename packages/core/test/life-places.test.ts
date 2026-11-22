@@ -91,7 +91,7 @@ describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
     expect(LIFE_VERSION).toBe(5);
     expect(GENERATOR_VERSION).toBe(6);
-    expect(LAYOUT_VERSION).toBe(6);
+    expect(LAYOUT_VERSION).toBe(7);
   });
 });
 
@@ -324,8 +324,9 @@ describe('being outside', () => {
   it('puts everyone at an open-air building outside, on its lot', () => {
     const { city, layout, life } = badanos;
     const lots = new Map(layout.lots.map((lot) => [lot.buildingId, lot.polygon]));
-    const stall = city.buildings.find((building) => building.type === 'market-stall')!;
+    // A stall whose keepers are at it at that hour: which one depends on where the stalls stand.
     const time = at(WORK_DAY, 11);
+    const stall = city.buildings.filter((building) => building.type === 'market-stall').find((building) => life.occupants(building.id, time).some((occupant) => occupant.kind === 'work'))!;
     const there = life.occupants(stall.id, time);
     expect(there.filter((occupant) => occupant.kind === 'work').length).toBeGreaterThan(0);
     expect(there.every((occupant) => occupant.outside === true)).toBe(true);

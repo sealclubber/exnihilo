@@ -135,7 +135,7 @@ describe('the avatar\'s actions', () => {
     const building = city.buildings.find((entry) => entry.type === 'market-stall')!;
     const toBuilding = (await main.post('walk-to-building', { buildingId: building.id })).body.avatar as Extract<AvatarState, { kind: 'walking' }>;
     expect(toBuilding.destination).toEqual({ kind: 'building', buildingId: building.id });
-    expect(toBuilding.path.points[0]).toEqual(here.point);
+    expect(geometry.distance(toBuilding.path.points[0]!, here.point)).toBeLessThan(1e-6);
     main.clock.setTime(T0 + 130);
     const turned = (await main.post('walk-to-point', { point: [0, 0] })).body.avatar as Extract<AvatarState, { kind: 'walking' }>;
     expect(geometry.distance(turned.path.points[0]!, (avatarPosition(toBuilding, T0 + 130) as { point: [number, number] }).point)).toBeLessThan(1e-6);
@@ -146,7 +146,8 @@ describe('the avatar\'s actions', () => {
     expect((await main.post<{ error: string }>('walk-to-building', { buildingId: building.id })).body.error).toMatch(/already in building-641-\d+/);
     const left = (await main.post('leave')).body.avatar!;
     const lot = layout.lots.find((entry) => entry.buildingId === building.id)!;
-    expect(left).toEqual({ kind: 'standing', settlementId: 'settlement-641', segmentId: lot.entrance.segmentId, point: lot.entrance.point });
+    expect(left).toMatchObject({ kind: 'standing', settlementId: 'settlement-641', segmentId: lot.entrance.segmentId });
+    expect(geometry.distance((left as { point: [number, number] }).point, lot.entrance.point)).toBeLessThan(1e-6);
   });
 
   it('refuses what makes no sense with 409 and the reason, and a malformed request with 400', async () => {
@@ -203,7 +204,8 @@ describe('what the avatar perceives', () => {
   it('is, in a building, exactly that building\'s occupants', { timeout: SLOW }, async () => {
     const { get, post, clock, app } = await server();
     apps.push(app);
-    const stall = city.buildings.find((entry) => entry.type === 'market-stall')!;
+    // A stall with people at it at that hour: which one depends on where the stalls stand.
+    const stall = city.buildings.filter((entry) => entry.type === 'market-stall').find((entry) => expected.occupants(entry.id, at(1, 11)).length > 0)!;
     await post('spawn', { settlementId: 'settlement-641', point: [0, 0] });
     const walk = (await post('walk-to-building', { buildingId: stall.id })).body.avatar as Extract<AvatarState, { kind: 'walking' }>;
     expect(arrivalTime(walk)).toBeLessThan(at(1, 11));

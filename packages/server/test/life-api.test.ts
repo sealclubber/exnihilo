@@ -259,7 +259,8 @@ describe('buildings and households', () => {
     const morning = (await get<OccupantsNow>(`${LIFE}/buildings/${tavern.id}/occupants?time=${at(2, 9)}`)).body;
     expect(morning.open).toBe(false);
     expect(morning.hours).toEqual(evening.hours);
-    const stall = city.buildings.find((building) => building.type === 'market-stall')!;
+    // A stall with people at it at that hour: which one depends on where the stalls stand.
+    const stall = city.buildings.filter((building) => building.type === 'market-stall').find((building) => expected.occupants(building.id, at(2, 11)).length > 0)!;
     const noon = (await get<OccupantsNow>(`${LIFE}/buildings/${stall.id}/occupants?time=${at(2, 11)}`)).body;
     expect(noon.open).toBe(true);
     expect(noon.occupants.length).toBeGreaterThan(0);

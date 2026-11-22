@@ -190,12 +190,13 @@ export function planRoads(input: RoadInput): RoadPlan {
   wet.sort((a, b) => distance(branches[a.index]!.points[a.at] as Point, [0, 0]) - distance(branches[b.index]!.points[b.at] as Point, [0, 0]) || a.index - b.index);
   const bridges = brief.population >= settings.river.secondBridgeAbove ? 2 : 1;
   const bridging = new Set(wet.slice(0, bridges).map((entry) => entry.index));
-  // Where none of them reaches the river, the one whose end comes nearest it is carried across.
-  if (input.river && bridging.size === 0 && branches.length > 0) {
+  // Where too few of them reach the river, those whose ends come nearest it are carried across.
+  while (input.river && bridging.size < bridges && bridging.size < branches.length) {
     const river = input.river;
-    let nearest = 0;
+    let nearest = -1;
     let gap = Infinity;
     branches.forEach((line, index) => {
+      if (bridging.has(index)) return;
       const end = line.points[line.points.length - 1] as Point;
       const away = river.gap(end);
       if (away < gap) {
@@ -203,6 +204,7 @@ export function planRoads(input: RoadInput): RoadPlan {
         nearest = index;
       }
     });
+    if (nearest < 0) break;
     const line = branches[nearest] as RoadLine;
     const end = line.points[line.points.length - 1] as Point;
     const near = river.nearest(end);
@@ -213,7 +215,7 @@ export function planRoads(input: RoadInput): RoadPlan {
       const start = line.points[0] as Point;
       line.points = wander(branch, start, across, arterials.wander);
       bridging.add(nearest);
-    }
+    } else break;
   }
   branches.forEach((line, index) => {
     let points = line.points;
