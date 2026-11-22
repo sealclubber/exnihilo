@@ -18,7 +18,8 @@
     "client": "npm run dev -w @worldsim/client",
     "client:build": "npm run build -w @worldsim/client",
     "generate": "node packages/server/src/generate-cli.ts",
-    "day": "node packages/server/src/day-cli.ts"
+    "day": "node packages/server/src/day-cli.ts",
+    "render": "node packages/server/src/render-cli.ts"
   },
   "devDependencies": {
     "playwright": "^1.65.1",
