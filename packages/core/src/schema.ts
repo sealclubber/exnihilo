@@ -201,12 +201,28 @@ export const SettlementRiverSchema = z.strictObject({
 });
 export type SettlementRiver = z.infer<typeof SettlementRiverSchema>;
 
+/** The settlement a route leads to: the first one reached along it in one direction. */
+export const RouteLeadSchema = z.strictObject({
+  settlementId: SettlementIdSchema,
+  name: text,
+  sizeGroup: SizeGroupSchema,
+  population: count,
+  /** The names of its culture and its state. */
+  culture: text,
+  state: text,
+  /** How far it is along the route, in the world's distance unit (`info.distanceScale.unit`). */
+  distance: z.number().nonnegative(),
+});
+export type RouteLead = z.infer<typeof RouteLeadSchema>;
+
 export const RouteExitSchema = z.strictObject({
   routeId: RouteIdSchema,
   name: text.optional(),
   kind: RouteKindSchema,
   towardCellId: CellIdSchema,
   bearing: BearingSchema,
+  /** The next settlement along the route in this direction. Absent when the route reaches none. */
+  leadsTo: RouteLeadSchema.optional(),
 });
 export type RouteExit = z.infer<typeof RouteExitSchema>;
 

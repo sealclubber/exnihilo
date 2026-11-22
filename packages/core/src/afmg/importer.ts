@@ -521,6 +521,48 @@ export function importAfmg(source: unknown): ImportResult {
     };
   });
 
+  // Where each route leads: follow the route from the settlement's cell, in the direction of the exit, to the
+  // first cell that holds another settlement. A sea route is followed the same way, to the next settlement on it.
+  const settlementAt = new Map(settlements.map((brief) => [brief.cellId, brief]));
+  for (const brief of settlements) {
+    for (const exit of brief.routes) {
+      const { points } = routeById.get(exit.routeId) as Route;
+      const lead = (from: number, step: number): RouteExit['leadsTo'] => {
+        let travelled = 0;
+        for (let at = from + step; at >= 0 && at < points.length; at += step) {
+          const [ax, ay] = (points[at - step] as Route['points'][number]).position;
+          const [bx, by] = (points[at] as Route['points'][number]).position;
+          travelled += Math.hypot(bx - ax, by - ay);
+          const reached = settlementAt.get((points[at] as Route['points'][number]).cellId);
+          if (!reached || reached.id === brief.id) continue;
+          return {
+            settlementId: reached.id,
+            name: reached.name,
+            sizeGroup: reached.sizeGroup,
+            population: reached.population,
+            culture: reached.culture.name,
+            state: reached.state.name,
+            distance: Math.round(travelled * worldInfo.distanceScale.unitsPerMapUnit * 10) / 10,
+          };
+        }
+        return undefined;
+      };
+      // The exit is the step of the route from this cell to the neighbour it names.
+      let found = false;
+      for (let at = 0; at < points.length && !found; at++) {
+        if ((points[at] as Route['points'][number]).cellId !== brief.cellId) continue;
+        for (const step of [1, -1]) {
+          if (points[at + step]?.cellId !== exit.towardCellId) continue;
+          const leadsTo = lead(at, step);
+          if (leadsTo) exit.leadsTo = leadsTo;
+          found = true;
+          break;
+        }
+      }
+      if (!found) warn('route-misses-exit', brief.id, `has an exit by ${exit.routeId} toward ${exit.towardCellId}, which is not a step of that route, so where it leads is not known`);
+    }
+  }
+
   const world: World = {
     info: worldInfo,
     cells: [...cellSources.values()].map((source) => source.cell),

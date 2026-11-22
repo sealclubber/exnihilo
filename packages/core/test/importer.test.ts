@@ -112,14 +112,16 @@ describe('the Badanos brief', () => {
 
   it('has two exits on the Pusztaszian trail', () => {
     expect(badanos.routes).toHaveLength(2);
-    expect(badanos.routes).toContainEqual({
+    // Where each exit leads is checked in routes.test.ts.
+    const withoutLeads = badanos.routes.map(({ leadsTo: _leadsTo, ...exit }) => exit);
+    expect(withoutLeads).toContainEqual({
       routeId: 'route-34',
       name: 'Pusztaszian trail',
       kind: 'trail',
       towardCellId: 'cell-2236',
       bearing: 227,
     });
-    expect(badanos.routes).toContainEqual({
+    expect(withoutLeads).toContainEqual({
       routeId: 'route-34',
       name: 'Pusztaszian trail',
       kind: 'trail',

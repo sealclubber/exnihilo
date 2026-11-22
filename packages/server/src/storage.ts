@@ -26,7 +26,7 @@ export class WorldStoreError extends Error {
 }
 
 /** Bump when the stored layout or the world format changes shape. */
-const STORAGE_VERSION = '2';
+const STORAGE_VERSION = '3';
 
 const LISTS = {
   cell: 'cells',

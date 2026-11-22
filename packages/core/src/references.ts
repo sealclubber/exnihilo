@@ -73,6 +73,7 @@ export function findDanglingReferences(world: World): string[] {
     for (const exit of brief.routes) {
       check(brief.id, 'routes', exit.routeId);
       check(brief.id, 'routes', exit.towardCellId);
+      check(brief.id, 'routes leadsTo', exit.leadsTo?.settlementId);
     }
   }
   return problems;
