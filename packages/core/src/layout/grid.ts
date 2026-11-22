@@ -38,6 +38,7 @@ import {
 } from './geometry.ts';
 import { Heap } from './heap.ts';
 import { BEARING_TOLERANCE, checkLayout } from './invariants.ts';
+import { arrangeTrades, placementOrder } from './shared.ts';
 import { type Exit, type Junction, type Layout, type Lot, type Segment, type SegmentKind, type Water, LAYOUT_VERSION } from './records.ts';
 
 /** The name this generator records in a layout's summary. */
@@ -224,8 +225,6 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
   const buildingsOf: Building[][] = city.districts.map(() => []);
   for (const building of city.buildings) (buildingsOf[districtIndex.get(building.districtId) as number] as Building[]).push(building);
   const atExits = new Set(settings.atExits ?? []);
-  /** Civic buildings the pack spreads across the districts: within a district they are kept to streets of their own. */
-  const spreadCivic = new Set(pack.landmarks.filter((landmark) => landmark.spread).map((landmark) => landmark.id));
   const exitVectors = brief.routes.map((route) => bearingVector(route.bearing));
   /** Buildings that belong toward an exit take the exits in turn. */
   const exitOf = new Map<string, number>();
@@ -373,31 +372,14 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       ofTypeOn.set(key, (ofTypeOn.get(key) ?? 0) + 1);
     };
 
-    // Landmarks take their larger lots first; buildings that belong toward an exit go last, on that side.
-    const area = (building: Building) => {
-      const size = lotSizeOf(building.type, pack);
-      return size.frontage * size.depth;
-    };
+    // Landmarks take their larger lots first, and the civic buildings that are spread take their turns among the
+    // rest; buildings that belong toward an exit go last, on that side.
     const towardExit = buildings.filter((building) => exitOf.has(building.id));
-    const apart = buildings.filter((building) => spreadCivic.has(building.type) && !exitOf.has(building.id));
-    const landmarks = buildings
-      .filter((building) => building.kind === 'landmark' && !exitOf.has(building.id) && !spreadCivic.has(building.type))
-      .sort((a, b) => area(b) - area(a) || (a.id < b.id ? -1 : 1));
-    const others = buildings.filter((building) => building.kind !== 'landmark' && !exitOf.has(building.id));
-    for (let index = others.length - 1; index > 0; index--) {
-      const other = lotRng.int(0, index);
-      [others[index], others[other]] = [others[other] as Building, others[index] as Building];
-    }
     addBlock(seedCell, 0);
-    // The civic buildings that are spread take their turns at even steps among the rest, so that the district has
-    // grown to a new street by the time the next one of a type is placed.
-    const rest = [...landmarks, ...others];
-    let next = 0;
-    rest.forEach((building, turn) => {
-      while (next < apart.length && Math.floor(((next + 0.5) * rest.length) / apart.length) <= turn) placeApart(apart[next++] as Building);
-      place(building);
-    });
-    while (next < apart.length) placeApart(apart[next++] as Building);
+    for (const { building, apart } of placementOrder(buildings, pack, lotRng, (held) => exitOf.has(held.id))) {
+      if (apart) placeApart(building);
+      else place(building);
+    }
     const exitBlocks = new Map<number, Block>();
     for (const building of towardExit) {
       const exit = exitOf.get(building.id) as number;
@@ -726,52 +708,16 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
   // are alike (the same size, covered by the same share of building) change places, so that buildings of one type
   // stand on neighbouring lots along a street, while types the pack spreads stand apart from each other.
   if (arrange) {
-    const spreadTypes = new Set([...pack.workplaces, ...pack.landmarks].filter((type) => type.spread).map((type) => type.id));
-    const alike = new Map<string, Placed[]>();
-    for (const lot of placed) {
-      // Buildings that belong toward an exit keep their place.
-      if (exitOf.has(lot.building.id)) continue;
-      const key = `${lot.building.districtId}|${lot.frontage}|${lot.depth}|${footprintCoverageOf(lot.building.type, pack)}`;
-      const list = alike.get(key);
-      if (list) list.push(lot);
-      else alike.set(key, [lot]);
-    }
-    for (const lots of alike.values()) {
-      const types = new Map<string, Building[]>();
-      for (const { building } of lots) types.set(building.type, [...(types.get(building.type) ?? []), building]);
-      if (types.size < 2) continue;
-      // The lots in the order they stand: street by street, one side at a time, along the street.
-      const street = (lot: Placed) => cellJ(lot.cell) + (lot.north ? 0 : 1);
-      const along = (lot: Placed) => cellI(lot.cell) * pitchX + lot.start;
-      const slots = [...lots].sort((a, b) => street(a) - street(b) || Number(a.north) - Number(b.north) || along(a) - along(b));
-      const byId = (a: Building, b: Building) => (a.id < b.id ? -1 : 1);
-      for (const list of types.values()) list.sort(byId);
-      // Spread types, the commonest first. They are to stand apart from their own kind.
-      const spread = [...types].filter(([type]) => spreadTypes.has(type)).sort(([a, one], [b, other]) => other.length - one.length || (a < b ? -1 : 1));
-      const apart = spread.flatMap(([, list]) => list);
-      // The rest stand together by type, the commonest first.
-      const together = [...types].filter(([type]) => !spreadTypes.has(type)).sort(([a, one], [b, other]) => other.length - one.length || (a < b ? -1 : 1)).flatMap(([, list]) => list);
-      // Lots that stand side by side form a run; a lot with no like lot beside it stands alone, and whatever is put
-      // there has no neighbour of its own type. So the spread types, which are meant to stand apart, take the lone
-      // lots first, and the trades that gather take the runs.
-      const beside = (a: Placed, b: Placed) => a.cell === b.cell && a.north === b.north && Math.abs(a.start + a.frontage - b.start) < EPSILON;
-      const inRun = slots.map((slot, index) => (index > 0 && beside(slots[index - 1] as Placed, slot)) || (index + 1 < slots.length && beside(slot, slots[index + 1] as Placed)));
-      const alone = slots.filter((_, index) => !inRun[index]);
-      const runs = slots.filter((_, index) => inRun[index]);
-      const given = new Map<Placed, Building>();
-      const evenly = (buildings: Building[], among: Placed[]) => buildings.forEach((building, turn) => given.set(among[Math.floor(((turn + 0.5) * among.length) / buildings.length)] as Placed, building));
-      // A lone lot has no like lot beside it, so nothing put there is beside its own kind: the commonest spread
-      // types, which are the hardest to keep apart, go there first.
-      evenly(apart.slice(0, alone.length), alone);
-      // The rest go into the runs at even steps, in an order that never has two of a type in a row unless one type
-      // is more than half of them: every other place is filled first, commonest type first, then the places between.
-      const rest = apart.slice(alone.length);
-      const mixed = new Array<Building>(rest.length);
-      rest.forEach((building, turn) => (mixed[turn * 2 < rest.length ? turn * 2 : (turn - Math.ceil(rest.length / 2)) * 2 + 1] = building));
-      evenly(mixed, runs);
-      let next = 0;
-      for (const slot of [...runs, ...alone]) slot.building = given.get(slot) ?? (together[next++] as Building);
-    }
+    // The lots in the order they stand: street by street, one side at a time, along the street. Buildings that
+    // belong toward an exit keep their place.
+    const street = (lot: Placed) => cellJ(lot.cell) + (lot.north ? 0 : 1);
+    const along = (lot: Placed) => cellI(lot.cell) * pitchX + lot.start;
+    arrangeTrades(
+      placed.filter((lot) => !exitOf.has(lot.building.id)),
+      pack,
+      (a, b) => street(a) - street(b) || Number(a.north) - Number(b.north) || along(a) - along(b),
+      (a, b) => a.cell === b.cell && a.north === b.north && Math.abs(a.start + a.frontage - b.start) < EPSILON,
+    );
   }
 
   // Lots are numbered as their buildings are.

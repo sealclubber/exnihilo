@@ -39,7 +39,7 @@ export const BEARING_TOLERANCE = 20;
 
 const MOST_PROBLEMS_LISTED = 20;
 /** The clear ground a layout may leave between a roadway and the lots along it, in metres. */
-const VERGE = 1;
+const VERGE = 3;
 /** A segment that ends at a gate is on the wall's line there; it is looked at from this far along, in metres. */
 const GATE_REACH = 0.01;
 const ORIGIN: Point = [0, 0];

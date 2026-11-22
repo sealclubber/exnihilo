@@ -167,7 +167,7 @@ grown:
   arterialDrift: {min: 5, max: 10}
   # The bending of the whole town: how far a point is moved at most, and the
   # distance over which the bending swings from one side to the other.
-  warp: {amplitude: 9, wavelength: 420}
+  warp: {amplitude: 22, wavelength: 1100}
   # How far the river swings aside between arriving and leaving, as a share
   # of its length through the town.
   riverBend: 0.12
@@ -186,8 +186,8 @@ grown:
   # type, where the district has the room.
   civicSpacing: 70
   # The plaza of a town flagged for one: square metres for each resident,
-  # between a least and a most.
-  plaza: {perResident: 0.09, min: 1200, max: 4500}
+  # between a least and a most, and the building whose lot it is.
+  plaza: {perResident: 0.09, min: 1200, max: 4500, building: market-square}
   # The wall of a town flagged for one: its width, the clear strip inside
   # it, the share of the town's ground it encloses, the number of residents
   # below which it encloses everything, and the building at each gate.

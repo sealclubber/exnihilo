@@ -377,8 +377,11 @@ const GrownSettingsSchema = z.strictObject({
   outline: z.strictObject({ arterialPull: probability, waterPull: probability, reach: metres, compact: z.number().nonnegative(), ragged: z.number().nonnegative() }),
   /** Civic buildings of a spread type stand at least this far from another of their type, where the district has room. */
   civicSpacing: metres,
-  /** The plaza of a town flagged for one: so much ground for each resident, between a least and a most, in square metres. */
-  plaza: z.strictObject({ perResident: z.number().nonnegative(), min: metres, max: metres }),
+  /**
+   * The plaza of a town flagged for one: so much ground for each resident, between a least and a most, in square
+   * metres, and the building type whose lot the plaza is.
+   */
+  plaza: z.strictObject({ perResident: z.number().nonnegative(), min: metres, max: metres, building: id }),
   /**
    * The wall of a town flagged for one: its width, the clear strip kept inside it, the share of the town's ground it
    * encloses, the number of residents below which it encloses everything, and the building type that stands at each gate.
@@ -1122,6 +1125,7 @@ function crossCheck(pack: SettingPack): string[] {
     for (const [name, span] of [['ringDepth', grown.ringDepth], ['blockLength', grown.blockLength], ['arterialDrift', grown.arterialDrift], ['plaza', grown.plaza]] as const) {
       if (span.min > span.max) problems.push(`layout: grown.${name} has a least above its most`);
     }
+    if (!buildingTypes.has(grown.plaza.building)) problems.push(`layout: grown.plaza names the building type "${grown.plaza.building}", which is not a building type`);
     if (!buildingTypes.has(grown.wall.gatehouse)) problems.push(`layout: grown.wall names the gatehouse type "${grown.wall.gatehouse}", which is not a building type`);
     const deepest = Math.max(pack.layout.defaultLot.depth, ...Object.values(pack.layout.lots).map((lot) => lot.depth));
     if (grown.ringDepth.min < deepest) problems.push(`layout: grown.ringDepth.min is ${grown.ringDepth.min}, less than the deepest lot, ${deepest}: a ring must hold a lot that runs from street to street`);
