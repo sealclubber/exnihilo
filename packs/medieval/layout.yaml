@@ -148,40 +148,34 @@ watersideReach: 40
 # Town walls have no geometry yet; gatehouses are ordinary lots.
 atExits: [gatehouse]
 
-# --- The grown generator (phase 6D) ----------------------------------------
-# A town of ring streets about its centre and cross streets between them,
-# with main roads running out to the exits, the whole bent out of true. Lots
-# line the ring streets and the main roads. EVERY NUMBER IS A PLACEHOLDER, to
-# be tuned by eye against the renders in docs/renders.
+# --- The grown generator (phases 6D and 6D.1) ------------------------------
+# A town of blocks scattered over its ground, with the streets the gaps
+# between them. Water comes first and has no straight edge; main roads find
+# their way through the blocks from the centre to the exits; lots line each
+# block's streets. EVERY NUMBER IS A PLACEHOLDER, to be tuned by eye against
+# the renders in docs/renders.
 grown:
-  # How deep a ring of blocks is, from one ring street to the next, not
-  # counting the streets. Two rows of lots stand back to back in it, so the
-  # least must be twice the usual lot depth, and at least the deepest lot.
-  ringDepth: {min: 44, max: 56}
-  # How long a block is along its ring street, between two cross streets.
-  blockLength: {min: 45, max: 110}
-  # No two junctions on a ring street are nearer than this.
-  junctionGap: 14
-  # How far a main road swings aside from the straight line to its exit, in
-  # degrees at its middle.
-  arterialDrift: {min: 5, max: 10}
-  # The bending of the whole town: how far a point is moved at most, and the
-  # distance over which the bending swings from one side to the other.
-  warp: {amplitude: 22, wavelength: 1100}
-  # How far the river swings aside between arriving and leaving, as a share
-  # of its length through the town.
-  riverBend: 0.12
-  # The share of cross streets that stop half way as a dead-end court.
-  courtShare: 0.18
-  # Lines are cut into pieces no longer than this, so that they bend.
-  pieceLength: 7
+  # How far apart blocks are seeded, in the middle of town and at its edge.
+  # Smaller makes more, smaller blocks and more streets.
+  spacing: {centre: 45, edge: 75}
+  # A gap between blocks shorter than this is closed up into one junction.
+  shortestStreet: 7
+  # A town has at least this many roads out of its centre. Where the brief
+  # has fewer exits, local streets are added in the widest gaps.
+  roadsOut: 5
+  # Main roads: how much more a stretch counts that leads aside from where
+  # the road is going (higher is straighter), and how far its line is eased
+  # afterwards (0 leaves every corner, 1 smooths most of them out).
+  wander: {aside: 1.2, ease: 0.5}
+  # Of the gaps between blocks: the share closed, so that two blocks become
+  # one larger block; of those, the share that keep a dead-end court; and of
+  # the rest, the share that are lanes and not streets.
+  fabric: {merge: 0.16, court: 0.45, lane: 0.3}
   # Clear ground between a roadway and the lots along it.
   roadside: 0.4
-  # The radius of the first ring street in a town with no plaza.
-  centreRadius: 34
   # How the town reaches out along its roads and the water, and how ragged
   # its edge is. See the schema for what each number does.
-  outline: {arterialPull: 0.45, waterPull: 0.2, reach: 90, compact: 60, ragged: 25}
+  outline: {arterialPull: 0.45, waterPull: 0.35, reach: 90, compact: 60, ragged: 25}
   # Wells and public ovens stand at least this far from another of their
   # type, where the district has the room.
   civicSpacing: 70
@@ -190,5 +184,33 @@ grown:
   plaza: {perResident: 0.09, min: 1200, max: 4500, building: market-square}
   # The wall of a town flagged for one: its width, the clear strip inside
   # it, the share of the town's ground it encloses, the number of residents
-  # below which it encloses everything, and the building at each gate.
-  wall: {width: 3, clearStrip: 4, share: 0.75, enclosesAllBelow: 1000, gatehouse: gatehouse}
+  # below which it encloses everything, how far its line strays from a
+  # circle, and the building at each gate.
+  wall: {width: 3, clearStrip: 4, share: 0.75, enclosesAllBelow: 1000, wobble: 0.08, gatehouse: gatehouse}
+  # A river: meanders eleven widths long, swinging aside by a share of that;
+  # width varying by a share along its length; the length of the pieces its
+  # line is cut into; and the size above which a town on both banks has a
+  # second bridge.
+  river: {meanderLength: 11, meanderSwing: 0.14, widthVariation: 0.25, pieceLength: 3, secondBridgeAbove: 5000}
+  # The coast: broad bays and headlands, a smaller wobble on top, and the bay
+  # a port's harbour stands in. Lengths are along the shore, depths across it.
+  coast:
+    bays: {length: 700, depth: 60}
+    wobble: {length: 110, depth: 9}
+    harbour: {length: 320, depth: 70}
+    pieceLength: 8
+  # Lots. A type's lot size above is typical, not exact: frontage is drawn
+  # within this spread of it, never below the least; depth is what the block
+  # allows, between these multiples of the type's; side boundaries lean by up
+  # to so many degrees. A building whose lot is this big takes a whole block.
+  # Lots fill a block's frontage wall to wall in the `filled` district kinds;
+  # elsewhere a gap follows a lot with the chance given for the kind.
+  lots:
+    frontageSpread: 0.3
+    leastFrontage: 4
+    depth: {min: 0.6, max: 1.5}
+    lean: 3
+    wholeBlock: 1300
+    filled: [centre, craft, visitors, harbour]
+    gaps: {common: 0.08, upper: 0.2, lower: 0.1, outskirts: 0.3, shanty: 0.05}
+    gapWidth: {min: 2, max: 9}

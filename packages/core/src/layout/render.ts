@@ -8,6 +8,7 @@
  * the drawing is one metre.
  */
 import type { Point, SettlementBrief } from '../schema.ts';
+import { riverOutline } from './measure.ts';
 import type { Layout, SegmentKind } from './records.ts';
 
 // Flat fills and thin lines, as in the viewer.
@@ -52,7 +53,7 @@ export function renderLayoutSvg(layout: Layout, options: RenderOptions = {}): st
   // Water: the sea as its polygon, a river as a line of its width.
   for (const water of layout.waters) {
     if (water.kind === 'sea') lines.push(`<path d="${path(water.polygon, true)}" fill="${WATER}"/>`);
-    else lines.push(`<path d="${path(water.centreLine, false)}" fill="none" stroke="${WATER}" stroke-width="${round(water.width)}" stroke-linejoin="round"/>`);
+    else lines.push(`<path d="${path(riverOutline(water), true)}" fill="${WATER}"/>`);
   }
   // The ground each district covers, faintly, so that the town's outline shows.
   for (const area of layout.districtAreas) {

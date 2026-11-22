@@ -54,6 +54,8 @@ function fixture(): { layout: Layout; city: City; brief: SettlementBrief } {
       bounds: { minX: -60, minY: -2, maxX: 70, maxY: 30 },
       builtArea: 0,
       residentsPerHectare: 0,
+      ringShare: 0,
+      roadsOut: 1,
       layoutVersion: LAYOUT_VERSION,
       generator: 'by-hand',
       pack: { name: 'medieval', version: pack.pack.version },
@@ -72,7 +74,7 @@ describe('walls, gates and places in the format', () => {
     const { layout, city, brief } = fixture();
     expect(LayoutSchema.safeParse(layout).success).toBe(true);
     expect(checkLayout(layout, city, brief, pack)).toEqual([]);
-    expect(LAYOUT_VERSION).toBe(5);
+    expect(LAYOUT_VERSION).toBe(6);
   });
 
   type Parts = ReturnType<typeof fixture>;

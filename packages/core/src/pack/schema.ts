@@ -346,28 +346,23 @@ export type LotSize = z.infer<typeof LotSizeSchema>;
 export const LayoutGeneratorSchema = z.enum(['grid', 'grown']);
 export type LayoutGenerator = z.infer<typeof LayoutGeneratorSchema>;
 
-/** The numbers of the `grown` generator: a town of ring streets and cross streets about its centre, bent out of true. */
+/**
+ * The numbers of the `grown` generator: a town of blocks scattered over its ground, with the streets the gaps
+ * between them, on water that has no straight edge.
+ */
 const GrownSettingsSchema = z.strictObject({
-  /** How deep a ring of blocks is, between one ring street and the next, before the streets themselves: least and most. */
-  ringDepth: z.strictObject({ min: metres, max: metres }),
-  /** How long a block is along its ring street, between two cross streets: least and most. */
-  blockLength: z.strictObject({ min: metres, max: metres }),
-  /** The least distance along a ring street between two junctions. */
-  junctionGap: metres,
-  /** How far a main road drifts aside from the straight line to its exit, in degrees at its middle: least and most. */
-  arterialDrift: z.strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() }),
-  /** The bending of the whole town out of true: how far a point is moved at most, and over what distance the bending swings. */
-  warp: z.strictObject({ amplitude: z.number().nonnegative(), wavelength: metres }),
-  /** How far a river's line swings aside between where it arrives and where it leaves, as a share of its length through town. */
-  riverBend: z.number().nonnegative(),
-  /** The share of cross streets that stop half way into their ring as a dead-end court. */
-  courtShare: probability,
-  /** Lines are cut into pieces no longer than this, so that they bend with the town. */
-  pieceLength: metres,
+  /** How far apart blocks are seeded: in the middle of town, and at its edge. Blocks are small in the old core and larger outside. */
+  spacing: z.strictObject({ centre: metres, edge: metres }),
+  /** A gap between blocks shorter than this is closed up: its two ends become one junction. */
+  shortestStreet: metres,
+  /** A town has at least this many roads leaving its centre: where the brief's exits are fewer, local streets are added in the widest gaps. */
+  roadsOut: wholeNumber,
+  /** How much more a main road counts a stretch that leads away from where it is going, and how much its line is eased afterwards (0 not at all, 1 fully). */
+  wander: z.strictObject({ aside: z.number().nonnegative(), ease: probability }),
+  /** Of the gaps between blocks: the share closed so that two blocks become one, the share of those that keep a dead-end court, and the share of the rest that are lanes. */
+  fabric: z.strictObject({ merge: probability, court: probability, lane: probability }),
   /** The clear ground left between a roadway and the lots along it. */
   roadside: z.number().nonnegative(),
-  /** The radius of the first ring street round the centre of a town with no plaza. */
-  centreRadius: metres,
   /**
    * How the town reaches out. Ground is cheaper to take the nearer it is to a main road and to the water:
    * `arterialPull` and `waterPull` are the share by which the distance from the centre counts for less right beside
@@ -384,9 +379,40 @@ const GrownSettingsSchema = z.strictObject({
   plaza: z.strictObject({ perResident: z.number().nonnegative(), min: metres, max: metres, building: id }),
   /**
    * The wall of a town flagged for one: its width, the clear strip kept inside it, the share of the town's ground it
-   * encloses, the number of residents below which it encloses everything, and the building type that stands at each gate.
+   * encloses, the number of residents below which it encloses everything, how far its line strays from a circle
+   * as a share of its radius, and the building type that stands at each gate.
    */
-  wall: z.strictObject({ width: metres, clearStrip: z.number().nonnegative(), share: probability, enclosesAllBelow: wholeNumber, gatehouse: id }),
+  wall: z.strictObject({ width: metres, clearStrip: z.number().nonnegative(), share: probability, enclosesAllBelow: wholeNumber, wobble: probability, gatehouse: id }),
+  /**
+   * A river: the length of its meanders as a multiple of its width, their swing aside as a share of that length,
+   * the share by which its width varies along it, the length of the pieces its line is cut into, and the number
+   * of residents above which a town built on both banks has a second bridge.
+   */
+  river: z.strictObject({ meanderLength: z.number().positive(), meanderSwing: probability, widthVariation: probability, pieceLength: metres, secondBridgeAbove: wholeNumber }),
+  /** The coast: broad bays and headlands, a smaller wobble on top (each a length along the shore and a depth), and the bay a port's harbour stands in. */
+  coast: z.strictObject({
+    bays: z.strictObject({ length: metres, depth: z.number().nonnegative() }),
+    wobble: z.strictObject({ length: metres, depth: z.number().nonnegative() }),
+    harbour: z.strictObject({ length: metres, depth: z.number().nonnegative() }),
+    pieceLength: metres,
+  }),
+  /**
+   * Lots. A building type's lot size is a typical size: each lot's frontage is drawn within `frontageSpread` of
+   * it, never below `leastFrontage`, and its depth is what its block allows, between `depth.min` and `depth.max`
+   * times the pack's. Side boundaries lean by up to `lean` degrees. A building whose lot is at least `wholeBlock`
+   * square metres takes a block to itself. In the district kinds listed under `filled`, lots fill a block's
+   * frontage wall to wall; elsewhere a gap is left after a lot with the chance in `gaps`, by kind of district.
+   */
+  lots: z.strictObject({
+    frontageSpread: probability,
+    leastFrontage: metres,
+    depth: z.strictObject({ min: z.number().positive(), max: z.number().positive() }),
+    lean: z.number().nonnegative(),
+    wholeBlock: metres,
+    filled: z.array(id),
+    gaps: z.record(id, probability),
+    gapWidth: z.strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() }),
+  }),
 });
 export type GrownSettings = z.infer<typeof GrownSettingsSchema>;
 
@@ -1122,13 +1148,10 @@ function crossCheck(pack: SettingPack): string[] {
   const grown = pack.layout.grown;
   if (pack.layout.generator === 'grown' && !grown) problems.push('layout: the generator is "grown", so the file needs a `grown` block with its numbers');
   if (grown) {
-    for (const [name, span] of [['ringDepth', grown.ringDepth], ['blockLength', grown.blockLength], ['arterialDrift', grown.arterialDrift], ['plaza', grown.plaza]] as const) {
-      if (span.min > span.max) problems.push(`layout: grown.${name} has a least above its most`);
-    }
+    if (grown.plaza.min > grown.plaza.max) problems.push('layout: grown.plaza has a least above its most');
+    for (const kind of [...grown.lots.filled, ...Object.keys(grown.lots.gaps)]) if (!kinds.has(kind)) problems.push(`layout: grown.lots names the district kind "${kind}", which districts does not list`);
     if (!buildingTypes.has(grown.plaza.building)) problems.push(`layout: grown.plaza names the building type "${grown.plaza.building}", which is not a building type`);
     if (!buildingTypes.has(grown.wall.gatehouse)) problems.push(`layout: grown.wall names the gatehouse type "${grown.wall.gatehouse}", which is not a building type`);
-    const deepest = Math.max(pack.layout.defaultLot.depth, ...Object.values(pack.layout.lots).map((lot) => lot.depth));
-    if (grown.ringDepth.min < deepest) problems.push(`layout: grown.ringDepth.min is ${grown.ringDepth.min}, less than the deepest lot, ${deepest}: a ring must hold a lot that runs from street to street`);
   }
   for (const type of pack.layout.atExits ?? []) {
     if (!buildingTypes.has(type)) problems.push(`layout: atExits lists "${type}", which is not a building type`);

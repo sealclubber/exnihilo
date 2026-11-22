@@ -65,6 +65,8 @@ function fixture(): { layout: Layout; city: City; brief: SettlementBrief } {
       bounds: { minX: -50, minY: -4, maxX: 60, maxY: 28 },
       builtArea: 0,
       residentsPerHectare: 0,
+      ringShare: 0,
+      roadsOut: 1,
       layoutVersion: LAYOUT_VERSION,
       generator: 'by-hand',
       pack: { name: 'medieval', version: pack.pack.version },

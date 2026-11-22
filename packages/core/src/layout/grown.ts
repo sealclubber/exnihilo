@@ -1,173 +1,148 @@
 /**
- * The grown layout generator: a town that looks as if it grew about its
- * centre. Ring streets run round the centre and cross streets between them,
- * staggered from ring to ring so that most junctions are T-shaped; main roads
- * run out from the centre to the brief's exits, drifting as they go; and the
- * whole is bent out of true by a smooth warp, so that no street is straight
- * and no two blocks match.
+ * The grown layout generator: a town of blocks scattered over its ground,
+ * with the streets the gaps between them.
  *
  * A finished city, its brief, the pack and a seed in; a layout out, in the
  * same format the grid makes. The city is read and never changed. Every
  * length comes from the pack's layout settings; randomness comes from streams
  * of this generator's own (`grown-…`).
  *
- * The town is first laid out about the centre in distance and bearing, where
- * a block is the ground between two ring streets and two cross streets and a
- * lot is a piece of a block between two distances and two bearings. Lots in
- * one block therefore cannot overlap, and a lot keeps its pack area exactly.
- * Only then is every point moved by the warp, which keeps apart what was
- * apart. Lines are cut into short pieces first, at the same places wherever
- * two shapes share a line, so that they still share it after bending.
+ * Nothing here takes a street's direction from the centre. Points are
+ * scattered, each gets the ground nearest it as a block, and the boundaries
+ * between blocks are the candidate streets (`fabric.ts`). Main roads find
+ * their way along those boundaries; some boundaries are closed so that two
+ * blocks become one, some are lanes, some keep a dead-end court.
  *
  * The steps, in order:
- *   1. Site: the river, bending gently, and the sea with its shore.
- *   2. Main roads: one from the centre, or the plaza's edge, toward each exit.
- *   3. The lattice of ring streets, cross streets and courts, and the wall.
- *   4. Districts, grown block by block from the centre outward along the
- *      main roads and the water, packing each one's lots as it grows.
- *   5. Exits, bridges, and the streets that are kept.
- *   6. The records, with the warp applied, and every layout invariant checked.
+ *   1. Water: the river and the coast, neither with a straight edge.
+ *   2. The fabric: seeds, fixed in pairs along banks, shore and wall so that
+ *      a boundary follows each, then scattered; cells, corners and edges.
+ *   3. Roads: a main road from the centre toward each exit, local streets
+ *      where the brief's exits are few, bridges, and gates in the wall.
+ *   4. What each remaining boundary is: a street, a lane, a court, or none.
+ *   5. Districts, grown block by block from the centre outward along the
+ *      roads and the water, cutting each one's lots as it grows.
+ *   6. Exits, the second bridge, and the streets that are kept.
+ *   7. The records, and every layout invariant checked.
  */
 import type { Building, City, District } from '../city/records.ts';
 import { stepRng } from '../city/random.ts';
 import { idNumber } from '../ids.ts';
 import { type GrownSettings, type SettingPack, footprintCoverageOf, lotSizeOf } from '../pack/schema.ts';
 import type { Point, SettlementBrief } from '../schema.ts';
-import { EPSILON, bearingVector, boxOf, crossingsOfPolyline, distance, distanceBetweenPolylines, distanceToPolyline, polygonArea, projectOnPolyline } from './geometry.ts';
+import { type Block, type BlockSide, type Cut, type Track, clip, cutLot, frontOf, frontage, makeBlock } from './blocks.ts';
+import { type Fabric, type FabricCell, type Seed, scatter, weave } from './fabric.ts';
+import { bearingVector, boxOf, distance, distancePolygonToPolyline, distanceToPolyline, piecesCross, polygonArea, polygonCentroid, projectOnPolyline } from './geometry.ts';
 import { type LayoutOptions, LayoutGenerationError } from './grid.ts';
 import { Heap } from './heap.ts';
 import { checkLayout } from './invariants.ts';
+import { ringShare } from './measure.ts';
 import { type Exit, type Junction, type JunctionKind, type Layout, type Lot, type Place, type Segment, type SegmentKind, type Wall, type Water, LAYOUT_VERSION } from './records.ts';
 import { arrangeTrades, placementOrder, spreadCivicTypes } from './shared.ts';
+import { type Coast, type River, makeCoast, makeRiver } from './water.ts';
 
 /** The name this generator records in a layout's summary. */
 export const GROWN_GENERATOR = 'grown';
 
-/** An exit lies within this many degrees of the brief's bearing: it moves aside only to keep out of the river. */
-const EXIT_TOLERANCE = 5;
 /** The share of the town's ground that lots are expected to cover, for a first guess at how far the town reaches. */
 const LOT_SHARE = 0.55;
 /** How many blocks a district may grow to find room for a spread civic building far enough from the others of its type. */
 const APART_BLOCKS = 3;
-/** Every ring has at least this many cross streets, so that no block runs all the way round. */
-const LEAST_RADIALS = 3;
+/** How many blocks a district may grow looking for one a building can stand in. */
+const BLOCK_TRIES = 16;
+/** A pair of seeds either side of a line stand this share of the spacing from it. */
+const PAIR_REACH = 0.42;
+/** An exit stands this far beyond the last junction of its road. */
+const EXIT_REACH = 70;
+/** An exit lies within this many degrees of the brief's bearing. */
+const EXIT_TOLERANCE = 5;
 const TAU = 2 * Math.PI;
 
-/** Thrown inside an attempt when the lattice proved too small; the attempt is repeated on a larger one. */
-class TooSmall extends Error {}
+/** Thrown inside an attempt when the scattered ground proved too small; the attempt is repeated on more. */
+class TooSmall extends Error {
+  /** Which step found the ground too small, for saying so if it never proves enough. */
+  readonly where: number;
+
+  constructor(where: number) {
+    super(`too small (${where})`);
+    this.where = where;
+  }
+}
 
 const pad = (value: number, digits: number) => String(value).padStart(digits, '0');
-const dot = (a: Point, b: Point) => a[0] * b[0] + a[1] * b[1];
-/** A bearing brought into 0 up to a full turn. */
 const turn = (angle: number) => ((angle % TAU) + TAU) % TAU;
-/** The bearing equal to `angle` that is the first at or after `from`. */
-const after = (angle: number, from: number) => angle + TAU * Math.ceil((from - angle) / TAU - 1e-12);
-const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+const apart = (a: number, b: number) => Math.min(turn(a - b), turn(b - a));
+const bearingOf = (point: Point) => turn(Math.atan2(point[0], -point[1]));
 
 export function generateGrownLayout(city: City, brief: SettlementBrief, pack: SettingPack, options: LayoutOptions = {}): Layout {
   const seed = options.seed ?? brief.seed;
   if (!pack.layout.grown) throw new LayoutGenerationError(`${brief.id} (${brief.name}): the pack's layout file has no \`grown\` block, which the grown generator needs`);
-  // Start with room for the town twice over, and widen the lattice for as long as it proves too small.
-  let reach = 1.6;
-  for (let attempt = 0; ; attempt++, reach *= 1.5) {
+  // Start with room for the town a few times over, and scatter more ground for as long as it proves too small.
+  let reach = 1.7;
+  for (let attempt = 0; ; attempt++, reach *= 1.45) {
     try {
       return attemptLayout(city, brief, pack, pack.layout.grown, seed, reach);
     } catch (error) {
-      if (!(error instanceof TooSmall) || attempt >= 7) {
-        if (error instanceof TooSmall) throw new LayoutGenerationError(`${brief.id} (${brief.name}): the town does not fit even a lattice ${reach.toFixed(1)} times its size`);
+      if (!(error instanceof TooSmall) || attempt >= 6) {
+        if (error instanceof TooSmall) throw new LayoutGenerationError(`${brief.id} (${brief.name}): the town does not fit even ground ${reach.toFixed(1)} times its size (stopped at step ${error.where})`);
         throw error;
       }
     }
   }
 }
 
-/** A cross street of one ring: a line from the ring's inner street to its outer, at a bearing that may drift on the way. */
-interface Radial {
-  /** The bearing where it meets the inner ring street, and the outer. */
-  inner: number;
-  outer: number;
-  /** The exit whose main road this is a piece of. */
-  arterial?: number;
-  /** A court: it stops half way, from the inner street or from the outer. */
-  court?: 'inner' | 'outer';
-  /** Whether a street runs along it. In the wall's ring only the gates do; the rest are bounds between its cells. */
-  street: boolean;
-  /** For a gate: the gatehouse that keeps it. */
-  gate?: Building;
-}
-interface Ring {
-  index: number;
-  /** The ring the wall stands in: it has no blocks and no lots. */
-  band: boolean;
-  inner: number;
-  outer: number;
-  radials: Radial[];
-  cells: number[];
-}
-/** A piece of a block's frontage that lots are packed along: bearings for a ring street's, distances for a main road's. */
-interface Track {
-  from: number;
-  to: number;
-  cursor: number;
-}
-/** A block: the ground between two ring streets and two cross streets. */
-interface Cell {
-  id: number;
-  ring: Ring;
-  left: Radial;
-  right: Radial;
-  /** Added to the right cross street's bearings, so that they follow the left's. */
-  shift: number;
-  neighbours: number[];
-  /** The outline along the middles of the streets round it, bent. */
-  polygon: Point[];
-  centre: Point;
-  wet: boolean;
-  /** Not to be built on: outside a wall that encloses everything. */
-  barred: boolean;
-  edges: number[];
-  /** Where lots may be: between two distances from the centre, and frontages along each street that has one. */
-  near?: number;
-  far?: number;
-  tracks?: { inner?: Track; outer?: Track; left?: Track; right?: Track };
-  /** Distances and bearings at which a lot of this block has a corner: every line in the block is cut there. */
-  radii: number[];
-  bearings: number[];
-}
+/** What a boundary between two blocks is. */
+type EdgeKind = 'arterial' | 'street' | 'lane' | 'court' | 'none' | 'wall';
 interface Edge {
   id: number;
-  from: number;
-  to: number;
-  points: Point[];
-  length: number;
-  kind: SegmentKind;
-  /** Wider than its kind: a quay. */
-  quay: boolean;
-  /** The exit whose main road this is a piece of. */
-  arterial?: number;
-  /** On a ring street: which, and between which bearings. */
-  circle?: number;
-  span?: [number, number];
-  radial?: Radial;
-  wet: boolean;
+  a: number;
+  b: number;
   cells: number[];
+  kind: EdgeKind;
+  /** Settled, and not to be closed or demoted: a road, a riverside street, the street round the plaza, a gate's street. */
+  fixed: boolean;
+  /** The exit whose main road it carries. */
+  exit?: number;
+  /** As wide as a main road though it is none: a port's quay. */
+  quay?: true;
+  /** For a court: the corner it is entered from. */
+  from?: number;
+  /** For a bridge: not a boundary between blocks at all. */
+  bridge?: true;
 }
-/** A lot as it is packed: a piece of a block between two distances and two bearings, or along a main road. */
+interface Cell extends FabricCell {
+  water: boolean;
+  /** Inside the wall. */
+  inside: boolean;
+  /** Not to be built on. */
+  barred: boolean;
+  /** The blocks it shares a boundary with, and those besides that a road's bridge leads to. */
+  touching: number[];
+  neighbours: number[];
+  centre: Point;
+  block?: Block;
+  /** Taken whole by one building. */
+  whole?: true;
+}
 interface Placed {
   building: Building;
   cell: Cell;
-  /** Which frontage it stands on; `through` runs from the inner street to the outer and opens onto the outer. */
-  track: 'inner' | 'outer' | 'through' | 'left' | 'right';
-  /** A gatehouse, which keeps its place by its gate. */
+  polygon: Point[];
+  /** The track it was cut from, and the cut; nothing for a building that has a block to itself. */
+  track?: Track;
+  cut?: Cut;
+  /** The street it opens onto, and where its frontage is. */
+  street: number;
+  door: Point;
   gatehouse?: true;
-  /** Distances from the centre. */
-  near: number;
-  far: number;
-  /** Bearings; for a lot along a main road, how deep it is back from the road instead. */
-  from: number;
-  to: number;
-  depth: number;
 }
+interface Road {
+  /** The exit it leads to, or nothing for a local street. */
+  exit?: number;
+  corners: number[];
+  edges: number[];
+}
+type Way = { to: number; edge: number };
 
 function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, grown: GrownSettings, seed: number, reachFactor: number): Layout {
   const settings = pack.layout;
@@ -176,42 +151,10 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     throw new LayoutGenerationError(`${brief.id} (${brief.name}): ${message}`);
   };
   const widths = settings.streetWidths;
-  const widest = Math.max(widths.arterial, widths.street, widths.lane, widths.bridge);
-  const { pieceLength } = grown;
-  const halfDepth = grown.ringDepth.min / 2;
+  const { roadside } = grown;
+  const widthOf = (edge: Edge): number => (edge.bridge ? widths.bridge : edge.quay || edge.kind === 'arterial' ? widths.arterial : edge.kind === 'street' ? widths.street : widths.lane);
 
-  // ---- The warp -------------------------------------------------------------------
-  // A few long waves, each pushing along its own direction. Their slopes together stay well below one, so that no
-  // two points are ever moved onto each other.
-  const waves = (() => {
-    const rng = stepRng(seed, 'grown-warp');
-    return [1, 0.62, 1.7].map((scale, index) => {
-      const along = rng.next() * TAU;
-      const push = rng.next() * TAU;
-      return { kx: (Math.cos(along) * TAU) / (grown.warp.wavelength * scale), ky: (Math.sin(along) * TAU) / (grown.warp.wavelength * scale), phase: rng.next() * TAU, px: Math.cos(push), py: Math.sin(push), share: [0.5, 0.2, 0.3][index] as number };
-    });
-  })();
-  const warp = ([x, y]: Point): Point => {
-    let dx = 0;
-    let dy = 0;
-    for (const wave of waves) {
-      const swing = grown.warp.amplitude * wave.share * Math.sin(wave.kx * x + wave.ky * y + wave.phase);
-      dx += wave.px * swing;
-      dy += wave.py * swing;
-    }
-    return [x + dx, y + dy];
-  };
-  // The warp squeezes in places by as much as its steepest slope, and what is squeezed must still clear a roadway:
-  // the clear ground beside a street is laid out wider by that much, and so is a street's own half-width.
-  const squeeze = 1 - waves.reduce((sum, wave) => sum + grown.warp.amplitude * wave.share * Math.hypot(wave.kx, wave.ky), 0);
-  if (!(squeeze > 0.5)) fail('the warp is too steep: its amplitude must be a small part of its wavelength');
-  const roadside = grown.roadside / squeeze;
-  /** Half the width of a roadway, as it is allowed for before the warp. */
-  const half = (width: number) => width / 2 / squeeze;
-  /** A place by its distance and bearing from the centre, as it stands on the map. */
-  const at = (radius: number, bearing: number): Point => warp([radius * Math.sin(bearing), -radius * Math.cos(bearing)]);
-
-  // ---- How much ground --------------------------------------------------------------
+  // ---- How much ground ------------------------------------------------------------------
   const lotArea = (building: Building) => {
     const size = lotSizeOf(building.type, pack);
     return size.frontage * size.depth;
@@ -222,560 +165,647 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const totalLotArea = city.buildings.reduce((sum, building) => sum + (building === plazaBuilding ? 0 : lotArea(building)), 0);
   const needed = totalLotArea / LOT_SHARE + plazaArea;
   const townRadius = Math.sqrt(needed / Math.PI);
-  const pitch = (grown.ringDepth.min + grown.ringDepth.max) / 2 + widths.street + 2 * roadside;
-  const latticeRadius = townRadius * reachFactor + 3 * pitch;
+  const radius = townRadius * reachFactor + 4 * grown.spacing.edge;
+  const spacingAt = (point: Point) => grown.spacing.centre + (grown.spacing.edge - grown.spacing.centre) * Math.min(1, Math.hypot(point[0], point[1]) / townRadius);
 
-  // ---- Water ------------------------------------------------------------------------
-  // The river runs from the brief's arrival bearing to its departure bearing, beside the centre, swinging gently
-  // on the way. Its ends lie beyond the lattice, so it always reaches the town's edge.
-  const beyond = latticeRadius + 4 * pitch;
-  const riverClearance = settings.riverWidth / 2 + widest / 2;
-  let riverLine: Point[] | undefined;
-  if (brief.river) {
-    const arrives = brief.river.arrivesFrom?.bearing;
-    const leaves = brief.river.leavesToward?.bearing ?? brief.coast.waterBearing ?? (arrives === undefined ? fail('the brief has a river with no bearing to place it by') : (arrives + 180) % 360);
-    const beside = riverClearance + plazaRadius + grown.centreRadius + pitch;
-    const end = (bearing: number): Point => {
-      const [x, y] = bearingVector(bearing);
-      return [x * beyond, y * beyond];
-    };
-    let through: Point[];
-    if (arrives === undefined) {
-      const [x, y] = bearingVector(leaves + 90);
-      through = [[x * beside, y * beside], end(leaves)];
-    } else {
-      const bend = ((leaves - arrives + 540) % 360) - 180;
-      const [x, y] = bearingVector(arrives + (Math.abs(bend) === 180 ? 90 : bend / 2));
-      through = [end(arrives), [x * beside, y * beside], end(leaves)];
-    }
-    // Each straight stretch swings aside in one slow wave, nothing at its ends.
-    const rng = stepRng(seed, 'grown-river');
-    riverLine = [];
-    for (let stretch = 1; stretch < through.length; stretch++) {
-      const a = through[stretch - 1] as Point;
-      const b = through[stretch] as Point;
-      const length = distance(a, b);
-      const swing = (rng.next() < 0.5 ? -1 : 1) * grown.riverBend * Math.min(length, 2 * townRadius) * (0.6 + 0.4 * rng.next());
-      const pieces = Math.max(2, Math.ceil(length / (4 * pieceLength)));
-      for (let piece = stretch === 1 ? 0 : 1; piece <= pieces; piece++) {
-        const share = piece / pieces;
-        // The swing is taken out near the centre's end of the stretch too, so that the river keeps clear of it.
-        const aside = swing * Math.sin(Math.PI * share) * (stretch === 1 && through.length === 3 ? 1 - share : share < 1 && through.length === 3 ? share : 1);
-        riverLine.push([a[0] + (b[0] - a[0]) * share - ((b[1] - a[1]) / length) * aside, a[1] + (b[1] - a[1]) * share + ((b[0] - a[0]) / length) * aside]);
-      }
-    }
-  }
-  const nearRiver = (points: readonly Point[], clearance = riverClearance) => riverLine !== undefined && distanceBetweenPolylines(points, riverLine) < clearance - EPSILON;
-
-  // The sea lies beyond a shore on the side of the brief's water bearing. The shore is set before anything is
-  // built: far enough out for the centre of the town, near enough for the harbour to stand at the water.
+  // ---- Water ------------------------------------------------------------------------------
   const placements = new Map(pack.districts.kinds.map((kind) => [kind.id, kind.placement]));
   const placementOf = (district: District) => placements.get(district.kind);
-  const seaward = brief.coast.waterBearing === undefined ? undefined : bearingVector(brief.coast.waterBearing);
-  let shore: number | undefined;
-  if (seaward) {
+  const river: River | undefined = makeRiver(brief, settings.riverWidth, grown.river, seed, plazaRadius + 1.6 * grown.spacing.centre + settings.riverWidth, radius * 1.6);
+  if (brief.river && !river) fail('the brief has a river with no bearing to place it by');
+  let coast: Coast | undefined;
+  if (brief.coast.waterBearing !== undefined) {
+    // The shore stands far enough out for the centre of the town, near enough for the harbour to be at the water.
     const kindOf = new Map(city.districts.map((district) => [district.id, placementOf(district)]));
     const central = city.buildings.reduce((sum, building) => sum + (kindOf.get(building.districtId) === 'centre' && building !== plazaBuilding ? lotArea(building) : 0), 0);
-    shore = Math.sqrt((central / LOT_SHARE + plazaArea) / Math.PI) + 1.5 * pitch + grown.centreRadius;
+    coast = makeCoast(brief, grown.coast, seed, Math.sqrt((central / LOT_SHARE + plazaArea) / Math.PI) + 1.5 * grown.spacing.centre, radius * 1.3);
   }
-  const inset = widest / 2;
-  const inSea = (point: Point) => shore !== undefined && dot(point, seaward as Point) > shore - inset + EPSILON;
+  /** How far a point is from any water: negative in it. */
+  const dryBy = (point: Point) => Math.min(river ? river.gap(point) : Infinity, coast ? coast.gap(point) : Infinity);
+  if (dryBy([0, 0]) < grown.spacing.centre / 2) fail('the town centre is under water');
 
-  // ---- Main roads ---------------------------------------------------------------------
-  // One for each exit, at the brief's bearing, swinging aside in the middle of its way through town and back.
-  // The swing is held to a part of the gap to the next main road, so that no two ever cross.
-  const exitBearings = brief.routes.map((route) => toRadians(route.bearing));
-  const drifts = (() => {
-    const rng = stepRng(seed, 'grown-arterials');
-    return exitBearings.map((bearing, index) => {
-      const gap = Math.min(TAU, ...exitBearings.filter((_, other) => other !== index).map((other) => Math.min(turn(other - bearing), turn(bearing - other))));
-      const wanted = toRadians(grown.arterialDrift.min + rng.next() * (grown.arterialDrift.max - grown.arterialDrift.min));
-      return (rng.next() < 0.5 ? -1 : 1) * Math.min(wanted, gap * 0.3);
-    });
-  })();
-  const arterialBearing = (index: number, radius: number) => (exitBearings[index] as number) + (drifts[index] as number) * Math.sin(Math.PI * Math.min(1, radius / townRadius));
-
-  // ---- The lattice --------------------------------------------------------------------
-  // Ring streets at uneven distances, each ring cut into blocks of uneven length by cross streets that do not line
-  // up with those of the ring inside it. The main roads are cross streets that do line up, from ring to ring.
-  const rings: Ring[] = [];
-  /** The ring streets: circle `n` is the inner street of ring `n`. Circle 0 is the street round the plaza, or the centre itself. */
-  const circles: number[] = [];
+  // ---- The wall's line ----------------------------------------------------------------------
   const gatehouses = brief.flags.walls ? city.buildings.filter((building) => building.type === grown.wall.gatehouse) : [];
   const walled = gatehouses.length > 0;
   const enclosesAll = walled && brief.population < grown.wall.enclosesAllBelow;
-  /** The wall stands just beyond the first ring street at least this far out. */
-  const wallFrom = walled ? Math.sqrt(((enclosesAll ? 1.25 * reachFactor : grown.wall.share) * needed) / Math.PI) : Infinity;
-  let wallRadius: number | undefined;
-  let band: Ring | undefined;
+  const wallRadius = (() => {
+    if (!walled) return () => Infinity;
+    const rng = stepRng(seed, 'grown-wall');
+    const mean = Math.max(Math.sqrt(((enclosesAll ? 1.3 * reachFactor : grown.wall.share) * needed) / Math.PI), plazaRadius * 2 + 2.5 * grown.spacing.centre);
+    const waves = [2, 3, 5].map((count) => ({ count, phase: rng.next() * TAU }));
+    return (bearing: number) => mean * (1 + grown.wall.wobble * waves.reduce((sum, wave, index) => sum + ([0.5, 0.3, 0.2][index] as number) * Math.sin(wave.count * bearing + wave.phase), 0));
+  })();
+  const insideWall = (point: Point) => Math.hypot(point[0], point[1]) < wallRadius(bearingOf(point));
+
+  // ---- Seeds ----------------------------------------------------------------------------------
+  const fixed: Seed[] = [];
+  const crowds = (point: Point, room: number) => fixed.some((other) => distance(other.point, point) < room);
+  /** A pair either side of a line, so that the boundary between the two follows it; `step` is how far apart pairs stand along the line. */
+  const pair = (on: Point, normal: Point, reach: number, water: boolean, step: number) => {
+    const land: Point = [on[0] + normal[0] * reach, on[1] + normal[1] * reach];
+    const other: Point = [on[0] - normal[0] * reach, on[1] - normal[1] * reach];
+    if (Math.hypot(land[0], land[1]) > radius || crowds(land, 0.65 * step) || crowds(other, 0.5 * step)) return;
+    fixed.push({ point: land, fixed: true }, { point: other, fixed: true, ...(water && { water: true as const }) });
+  };
+  if (plazaBuilding) {
+    // The plaza is a block of its own: a seed at the centre and a ring of seeds twice its radius away.
+    fixed.push({ point: [0, 0], fixed: true });
+    const count = Math.max(6, Math.round((TAU * 2 * plazaRadius) / grown.spacing.centre));
+    const rng = stepRng(seed, 'grown-plaza');
+    const start = rng.next() * TAU;
+    for (let index = 0; index < count; index++) {
+      const bearing = start + (TAU * (index + (rng.next() - 0.5) * 0.3)) / count;
+      const away = 2 * plazaRadius * (1 + (rng.next() - 0.5) * 0.12);
+      fixed.push({ point: [Math.sin(bearing) * away, -Math.cos(bearing) * away], fixed: true });
+    }
+  }
+  // Along each bank, so that a street can follow the water.
+  // Any road may come to run along a bank, so the street there keeps a main road's half-width clear of the water.
+  // A street between two corners is straight and the bank is not, so it stands a lane's width further back, and
+  // corners along the water are near enough together that the bank bows no further than that between them.
+  const bankside = widths.arterial / 2 + roadside + widths.lane + 1;
+  const chordOn = (bendRadius: number) => Math.sqrt(8 * bendRadius * widths.lane);
+  const riverStep = chordOn((grown.river.meanderLength * settings.riverWidth) / (4 * Math.PI * Math.PI * grown.river.meanderSwing));
+  const shoreStep = chordOn(grown.coast.wobble.length ** 2 / (4 * Math.PI * Math.PI * grown.coast.wobble.depth));
+  if (river) {
+    for (let along = 0; along < (river.along[river.along.length - 1] as number); ) {
+      const { point, direction, width } = river.at(along);
+      const spacing = spacingAt(point);
+      const step = Math.min(spacing * 0.85, riverStep);
+      along += step;
+      if (Math.hypot(point[0], point[1]) > radius) continue;
+      for (const sign of [1, -1]) {
+        const normal: Point = [-direction[1] * sign, direction[0] * sign];
+        const offset = width / 2 + bankside;
+        const on: Point = [point[0] + normal[0] * offset, point[1] + normal[1] * offset];
+        const land: Point = [on[0] + normal[0] * spacing * PAIR_REACH, on[1] + normal[1] * spacing * PAIR_REACH];
+        // On the inside of a bend the bank doubles back on itself: no pair where another stretch of river is nearer.
+        if (river.nearest(land).away < (offset + spacing * PAIR_REACH) * 0.9 || (coast && coast.gap(land) < spacing)) continue;
+        pair(on, normal, spacing * PAIR_REACH, true, step);
+      }
+    }
+  }
+  // Along the shore, so that a quay can.
+  const quayside = bankside;
+  if (coast) {
+    let since = Infinity;
+    for (let index = 1; index < coast.shore.length - 1; index++) {
+      const point = coast.shore[index] as Point;
+      since += distance(coast.shore[index - 1] as Point, point);
+      const spacing = spacingAt(point);
+      const step = Math.min(spacing * 0.85, shoreStep);
+      if (since < step || Math.hypot(point[0], point[1]) > radius) continue;
+      since = 0;
+      const before = coast.shore[index - 1] as Point;
+      const after = coast.shore[index + 1] as Point;
+      const length = distance(before, after) || 1;
+      // Inland is the side away from the open water.
+      let normal: Point = [-(after[1] - before[1]) / length, (after[0] - before[0]) / length];
+      if (normal[0] * coast.seaward[0] + normal[1] * coast.seaward[1] > 0) normal = [-normal[0], -normal[1]];
+      const on: Point = [point[0] + normal[0] * quayside, point[1] + normal[1] * quayside];
+      if (river && river.gap(on) < spacing) continue;
+      pair(on, normal, spacing * PAIR_REACH, true, step);
+    }
+  }
+  // Along the wall.
+  if (walled) {
+    for (let bearing = 0; bearing < TAU; ) {
+      const away = wallRadius(bearing);
+      const on: Point = [Math.sin(bearing) * away, -Math.cos(bearing) * away];
+      const spacing = spacingAt(on);
+      const inward: Point = [-Math.sin(bearing), Math.cos(bearing)];
+      bearing += (spacing * 0.9) / away;
+      if (dryBy(on) < spacing * 1.2) continue;
+      pair(on, inward, spacing * PAIR_REACH, false, spacing * 0.85);
+    }
+  }
+  const blocked = (point: Point) => dryBy(point) < 0 || (plazaBuilding !== undefined && Math.hypot(point[0], point[1]) < 2.2 * plazaRadius);
+  const seeds = scatter(stepRng(seed, 'grown-seeds'), radius, spacingAt, blocked, fixed);
+  const fabric: Fabric = weave(seeds, radius, grown.shortestStreet, blocked);
+  const corners = fabric.corners;
+  const around = fabric.around;
+
+  // ---- Cells and edges ---------------------------------------------------------------------------
+  const outlineOf = (cell: FabricCell): Point[] => cell.corners.map((corner) => corners[corner] as Point);
+  /** Water comes too near a point for a road to pass there. */
+  const tooWet = (point: Point) => dryBy(point) < widths.arterial / 2 + roadside / 2;
+  const cells: Cell[] = fabric.cells.map((cell) => {
+    const outline = outlineOf(cell);
+    const centre = polygonCentroid(outline);
+    const midway = (point: Point, index: number): Point => [(point[0] + (outline[(index + 1) % outline.length] as Point)[0]) / 2, (point[1] + (outline[(index + 1) % outline.length] as Point)[1]) / 2];
+    const water = cell.seed.water === true || dryBy(centre) < 0 || outline.some(tooWet) || outline.some((point, index) => tooWet(midway(point, index))) || outline.some((point) => dryBy([(point[0] + centre[0]) / 2, (point[1] + centre[1]) / 2]) < 0);
+    const inside = !walled || insideWall(cell.seed.point);
+    return { ...cell, water, inside, barred: cell.rim || (enclosesAll && !inside), touching: [], neighbours: [], centre };
+  });
+  const edges: Edge[] = fabric.edges.map((edge) => ({ ...edge, kind: 'street' as EdgeKind, fixed: false }));
+  const isGround = (id: number) => !(cells[id] as Cell).water && !(cells[id] as Cell).rim;
+  for (const edge of edges) {
+    const [one, other] = edge.cells;
+    if (other === undefined || one === undefined) continue;
+    if (walled && isGround(one) && isGround(other) && (cells[one] as Cell).inside !== (cells[other] as Cell).inside) {
+      edge.kind = 'wall';
+      edge.fixed = true;
+    }
+  }
+  const lengthOf = (edge: Edge) => distance(corners[edge.a] as Point, corners[edge.b] as Point);
+  /** A boundary a street could run along: not the wall, with ground on at least one side and dry at both ends. */
+  const dryAlong = new Map<number, boolean>();
+  const isDry = (edge: Edge) => {
+    let dry = dryAlong.get(edge.id);
+    if (dry === undefined) {
+      const [a, b] = [corners[edge.a] as Point, corners[edge.b] as Point];
+      const pieces = Math.max(1, Math.ceil(distance(a, b) / 5));
+      dry = Array.from({ length: pieces + 1 }, (_, at): Point => [a[0] + ((b[0] - a[0]) * at) / pieces, a[1] + ((b[1] - a[1]) * at) / pieces]).every((point) => !tooWet(point));
+      dryAlong.set(edge.id, dry);
+    }
+    return dry;
+  };
+  const passable = (edge: Edge) => edge.kind !== 'wall' && edge.cells.some(isGround) && edge.cells.every((id) => !(cells[id] as Cell).rim) && isDry(edge);
+  const atWater = (edge: Edge) => edge.cells.length === 2 && edge.cells.some(isGround) && edge.cells.some((id) => (cells[id] as Cell).water);
+  const wallCorners = new Set(edges.filter((edge) => edge.kind === 'wall').flatMap((edge) => [edge.a, edge.b]));
+  const plazaCell = plazaBuilding ? cells.find((cell) => cell.seed.fixed && cell.seed.point[0] === 0 && cell.seed.point[1] === 0) : undefined;
+  if (plazaBuilding && (!plazaCell || plazaCell.water)) fail('the plaza has no dry ground at the centre');
+
+  // ---- Bridges that could be built ---------------------------------------------------------------
+  // Wherever a corner of one bank's street has a corner of the other's nearly straight across, where the river is no wider than usual.
+  const bridges: Edge[] = [];
+  if (river) {
+    const banks = new Map<number, { side: number; along: number; width: number }>();
+    for (const edge of edges) {
+      if (!atWater(edge) || !passable(edge)) continue;
+      for (const corner of [edge.a, edge.b]) {
+        if (banks.has(corner)) continue;
+        const point = corners[corner] as Point;
+        const near = river.nearest(point);
+        if (near.away > near.width / 2 + bankside + grown.spacing.edge / 2) continue;
+        const { direction } = river.at(near.along);
+        banks.set(corner, { side: Math.sign(direction[0] * (point[1] - near.point[1]) - direction[1] * (point[0] - near.point[0])), along: near.along, width: near.width });
+      }
+    }
+    for (const [corner, bank] of banks) {
+      if (bank.side <= 0 || bank.width > river.width) continue;
+      let best: number | undefined;
+      let nearest = Infinity;
+      for (const [other, across] of banks) {
+        if (across.side >= 0) continue;
+        const away = distance(corners[corner] as Point, corners[other] as Point);
+        // Straight across: no further along the river than a third of the way over.
+        if (Math.abs(across.along - bank.along) > away / 3 || away > bank.width + 2 * bankside + grown.spacing.centre / 2) continue;
+        if (away < nearest) {
+          nearest = away;
+          best = other;
+        }
+      }
+      if (best === undefined) continue;
+      bridges.push({ id: edges.length + bridges.length, a: corner, b: best, cells: [], kind: 'street', fixed: true, bridge: true });
+    }
+  }
+  const edgeById = (id: number): Edge => (id < edges.length ? (edges[id] as Edge) : (bridges[id - edges.length] as Edge));
+  /** The ways out of each corner. */
+  const ways: Way[][] = corners.map(() => []);
+  for (const edge of [...edges, ...bridges]) {
+    if (!edge.bridge && !passable(edge)) continue;
+    (ways[edge.a] as Way[]).push({ to: edge.b, edge: edge.id });
+    (ways[edge.b] as Way[]).push({ to: edge.a, edge: edge.id });
+  }
+
+  // ---- Roads ---------------------------------------------------------------------------------------
+  // A road is the cheapest way along the boundaries from the centre toward a far point. A stretch that leads aside
+  // from where the road is going counts for more, so it wanders with the fabric without doubling back.
+  let starts: number[];
+  if (plazaCell) starts = plazaCell.corners.filter((corner) => (ways[corner] as Way[]).length > 0);
+  else {
+    let nearest = -1;
+    corners.forEach((point, index) => {
+      if ((ways[index] as Way[]).length > 0 && (nearest === -1 || Math.hypot(point[0], point[1]) < Math.hypot(...(corners[nearest] as Point)))) nearest = index;
+    });
+    starts = nearest === -1 ? [] : [nearest];
+  }
+  if (starts.length === 0) throw new TooSmall(1);
+  /** Corners where a road has been let through the wall, and the gatehouse that keeps each. */
+  const gates = new Map<number, Building>();
+  const spare = [...gatehouses];
+  const usedByRoad = new Set<number>();
+  const roadTo = (target: Point, mayOpenGate: boolean): Road | undefined => {
+    const reached = new Map<number, number>();
+    const cameBy = new Map<number, [number, number]>();
+    const heap = new Heap();
+    for (const start of starts) {
+      reached.set(start, 0);
+      heap.push(0, start);
+    }
+    while (heap.size > 0) {
+      const [so, corner] = heap.pop();
+      if (so > (reached.get(corner) as number)) continue;
+      const here = corners[corner] as Point;
+      const toward: Point = [target[0] - here[0], target[1] - here[1]];
+      const far = Math.hypot(toward[0], toward[1]) || 1;
+      for (const way of ways[corner] as Way[]) {
+        const edge = edgeById(way.edge);
+        const there = corners[way.to] as Point;
+        const length = distance(here, there);
+        const cosine = ((there[0] - here[0]) * toward[0] + (there[1] - here[1]) * toward[1]) / (length * far || 1);
+        // A road already there is cheap to follow; a bridge is dear; and the wall is passed only at a gate, or where one may be opened.
+        let cost = length * (1 + grown.wander.aside * (1 - cosine)) * (usedByRoad.has(edge.id) ? 0.6 : 1) * (edge.bridge ? 4 : 1);
+        if (wallCorners.has(way.to) && !gates.has(way.to)) {
+          if (!mayOpenGate) continue;
+          cost += 2 * grown.spacing.edge;
+        }
+        const next = so + cost;
+        if (next < (reached.get(way.to) ?? Infinity)) {
+          reached.set(way.to, next);
+          cameBy.set(way.to, [corner, way.edge]);
+          heap.push(next, way.to);
+        }
+      }
+    }
+    // The road ends at the corner it reached that is nearest where it was going.
+    let end: number | undefined;
+    let nearest = Infinity;
+    for (const corner of reached.keys()) {
+      const away = distance(corners[corner] as Point, target);
+      if (away < nearest) {
+        nearest = away;
+        end = corner;
+      }
+    }
+    if (end === undefined || !cameBy.has(end)) return undefined;
+    const road: Road = { corners: [end], edges: [] };
+    for (let back = end; cameBy.has(back); back = (cameBy.get(back) as [number, number])[0]) {
+      road.corners.push((cameBy.get(back) as [number, number])[0]);
+      road.edges.push((cameBy.get(back) as [number, number])[1]);
+    }
+    road.corners.reverse();
+    road.edges.reverse();
+    return road;
+  };
+  const roads: Road[] = [];
+  const takeRoad = (road: Road, kind: 'arterial' | 'street', exit?: number) => {
+    for (const id of road.edges) {
+      const edge = edgeById(id);
+      usedByRoad.add(id);
+      if (kind === 'arterial' || edge.kind !== 'arterial') edge.kind = kind;
+      edge.fixed = true;
+      if (exit !== undefined && edge.exit === undefined) edge.exit = exit;
+    }
+    // A road through the wall has a gate there, kept by a gatehouse.
+    for (const corner of road.corners) if (wallCorners.has(corner) && !gates.has(corner) && spare.length > 0) gates.set(corner, spare.shift() as Building);
+    roads.push({ ...road, ...(exit !== undefined && { exit }) });
+  };
+  const farPoint = (bearing: number): Point => {
+    const [x, y] = bearingVector(bearing);
+    return [x * radius * 0.92, y * radius * 0.92];
+  };
+  brief.routes.forEach((route, index) => {
+    const road = roadTo(farPoint(route.bearing), spare.length > 0);
+    if (!road) throw new TooSmall(2);
+    takeRoad(road, 'arterial', index);
+  });
+  // More ways out: local streets in the widest gaps between the roads there are, until the town has the pack's number.
   {
-    const rng = stepRng(seed, 'grown-lattice');
-    const centre = plazaBuilding ? plazaRadius + half(widths.arterial) + roadside : 0;
-    circles.push(centre);
-    let inner = centre;
-    /** The cross streets that already meet the ring street now being built on, from the ring inside it. */
-    let met: Radial[] = [];
-    while (inner < latticeRadius || rings.length < 3) {
-      const first = rings.length === 0 && !plazaBuilding;
-      if (walled && !band && inner >= wallFrom && rings.length >= 2) {
-        // The wall's ring: a street inside the wall with a clear strip, the wall, and a street outside it.
-        const outer = inner + 2 * half(widths.street) + (grown.wall.clearStrip + grown.wall.width) / squeeze + 2 * roadside;
-        wallRadius = inner + half(widths.street) + roadside + (grown.wall.clearStrip + grown.wall.width / 2) / squeeze;
-        // Its bounds carry on from the cross streets inside it; which of them are gates is settled once the water is known.
-        const through = met.map((radial): Radial => ({ inner: radial.outer, outer: radial.arterial !== undefined ? arterialBearing(radial.arterial, outer) : radial.outer, ...(radial.arterial !== undefined && { arterial: radial.arterial }), street: false }));
-        band = { index: rings.length, band: true, inner, outer, radials: through.sort((a, b) => turn(a.inner) - turn(b.inner)), cells: [] };
-        rings.push(band);
-        circles.push(outer);
-        inner = outer;
-        met = band.radials;
-        continue;
-      }
-      const depth = first ? grown.centreRadius : grown.ringDepth.min + rng.next() * (grown.ringDepth.max - grown.ringDepth.min) + widths.street + 2 * roadside;
-      const outer = inner + depth;
-      const middle = (inner + outer) / 2;
-      const radials: Radial[] = exitBearings.map((_, index) => ({ inner: arterialBearing(index, inner), outer: arterialBearing(index, outer), arterial: index, street: true }));
-      // Cross streets between the main roads: as many as give blocks of about the pack's length, each moved a
-      // little by chance, and kept clear of the junctions the ring street already has.
-      const gap = grown.junctionGap / Math.max(inner, grown.junctionGap);
-      const fixed = radials.map((radial) => turn(radial.inner)).sort((a, b) => a - b);
-      const taken = [...met.map((radial) => turn(radial.outer)), ...fixed];
-      const clear = (bearing: number, others: number[]) => others.every((other) => Math.min(turn(other - bearing), turn(bearing - other)) >= gap);
-      const bounds = fixed.length === 0 ? [0, TAU] : fixed.map((bearing, index) => [bearing, index + 1 < fixed.length ? (fixed[index + 1] as number) : (fixed[0] as number) + TAU]).flat();
-      for (let pair = 0; pair + 1 < bounds.length; pair += 2) {
-        const from = bounds[pair] as number;
-        const to = bounds[pair + 1] as number;
-        const arc = (to - from) * middle;
-        const length = grown.blockLength.min + rng.next() * (grown.blockLength.max - grown.blockLength.min);
-        // The first ring of a town with no plaza has only what cross streets it needs to be more than one block.
-        const count = first ? Math.max(0, Math.ceil((LEAST_RADIALS - fixed.length) / Math.max(fixed.length, 1))) : Math.max(0, Math.round(arc / length) - 1);
-        for (let piece = 1; piece <= count; piece++) {
-          let bearing = from + ((to - from) * (piece + (rng.next() - 0.5) * 0.5)) / (count + 1);
-          // Moved aside from a junction it would crowd, if there is room; otherwise left out.
-          for (let nudge = 0; nudge < 4 && !clear(bearing, taken); nudge++) bearing += gap * (nudge % 2 === 0 ? 1 : -1) * (nudge + 1);
-          if (!clear(bearing, taken)) continue;
-          taken.push(turn(bearing));
-          radials.push({ inner: bearing, outer: bearing, street: true });
-        }
-      }
-      // A ring needs a few cross streets whatever the main roads give it.
-      for (let extra = 0; radials.length < LEAST_RADIALS && extra < 12; extra++) {
-        const bearing = rng.next() * TAU;
-        if (!clear(bearing, taken)) continue;
-        taken.push(turn(bearing));
-        radials.push({ inner: bearing, outer: bearing, street: true });
-      }
-      radials.sort((a, b) => turn(a.inner) - turn(b.inner));
-      // Some cross streets stop half way as a court. Never a main road, never beside another court, and never in
-      // the first ring, where every one is needed.
-      if (rings.length > 0) {
-        radials.forEach((radial, index) => {
-          const beside = [radials[(index + radials.length - 1) % radials.length] as Radial, radials[(index + 1) % radials.length] as Radial];
-          if (radial.arterial === undefined && radials.length > LEAST_RADIALS + 1 && beside.every((other) => !other.court) && rng.next() < grown.courtShare) radial.court = rng.next() < 0.5 ? 'inner' : 'outer';
-        });
-      }
-      rings.push({ index: rings.length, band: false, inner, outer, radials, cells: [] });
-      circles.push(outer);
-      met = radials.filter((radial) => radial.court !== 'inner');
-      inner = outer;
-    }
-  }
-
-  // ---- Lines, cut the same way everywhere ---------------------------------------------
-  /** The bearings at which cross streets meet each ring street. */
-  const stops: number[][] = circles.map(() => []);
-  for (const ring of rings) {
-    for (const radial of ring.radials) {
-      if (radial.court !== 'outer') (stops[ring.index] as number[]).push(turn(radial.inner));
-      if (radial.court !== 'inner') (stops[ring.index + 1] as number[]).push(turn(radial.outer));
-    }
-  }
-  stops.forEach((list, circle) => {
-    list.sort((a, b) => a - b);
-    stops[circle] = list.filter((bearing, index) => index === 0 || bearing - (list[index - 1] as number) > 1e-12);
-  });
-  /** The bearings at which a block has a corner on each ring street, whether or not a street meets it there: every line along the ring street is cut at them. */
-  const corners: number[][] = circles.map(() => []);
-  for (const ring of rings) {
-    for (const radial of ring.radials) {
-      (corners[ring.index] as number[]).push(turn(radial.inner));
-      (corners[ring.index + 1] as number[]).push(turn(radial.outer));
-    }
-  }
-  /** The bearings at which a line round the centre is cut between two bearings: every so many metres, and wherever a line meets it. */
-  const cuts = (radius: number, from: number, to: number, meets: readonly number[] = []): number[] => {
-    const found = [from, to];
-    if (radius > 0) {
-      const step = pieceLength / radius;
-      for (let mark = Math.ceil(from / step + 1e-9); mark * step < to - 1e-9; mark++) found.push(mark * step);
-    }
-    for (const meet of meets) {
-      for (let bearing = after(meet, from); bearing < to - 1e-12; bearing += TAU) if (bearing > from + 1e-12) found.push(bearing);
-    }
-    found.sort((a, b) => a - b);
-    return found.filter((bearing, index) => index === 0 || bearing - (found[index - 1] as number) > 1e-12);
-  };
-  /** The distances at which a line outward from the centre is cut between two distances. */
-  const steps = (from: number, to: number, meets: readonly number[] = []): number[] => {
-    const found = [from, to];
-    for (let mark = Math.ceil(from / pieceLength + 1e-9); mark * pieceLength < to - 1e-9; mark++) found.push(mark * pieceLength);
-    for (const meet of meets) if (meet > from + 1e-9 && meet < to - 1e-9) found.push(meet);
-    found.sort((a, b) => a - b);
-    return found.filter((radius, index) => index === 0 || radius - (found[index - 1] as number) > 1e-9);
-  };
-  /** The bearing of a cross street at a distance from the centre. */
-  const bearingAt = (ring: Ring, radial: Radial, radius: number) => radial.inner + ((radial.outer - radial.inner) * (radius - ring.inner)) / (ring.outer - ring.inner);
-  /** A line round the centre, from one bearing to another, as points on the map. */
-  const arc = (radius: number, from: number, to: number, meets?: readonly number[]): Point[] => (radius === 0 ? [at(0, 0)] : cuts(radius, from, to, meets).map((bearing) => at(radius, bearing)));
-  /** A line along a cross street, shifted round the centre by so many metres at each point, between two distances. */
-  const spoke = (ring: Ring, radial: Radial, near: number, far: number, aside = 0, shift = 0, meets?: readonly number[]): Point[] =>
-    steps(near, far, meets).map((radius) => at(radius, bearingAt(ring, radial, radius) + shift + (radius > 0 ? aside / radius : 0)));
-
-  // ---- Junctions, edges and blocks ------------------------------------------------------
-  const junctions: Array<{ point: Point; kind?: JunctionKind }> = [];
-  const junctionKeys = new Map<string, number>();
-  const junctionAt = (key: string, point: () => Point): number => {
-    let index = junctionKeys.get(key);
-    if (index === undefined) {
-      index = junctions.length;
-      junctions.push({ point: point() });
-      junctionKeys.set(key, index);
-    }
-    return index;
-  };
-  const onCircle = (circle: number, bearing: number) => ((circles[circle] as number) === 0 ? junctionAt('centre', () => at(0, 0)) : junctionAt(`${circle}:${Math.round(turn(bearing) * 1e9)}`, () => at(circles[circle] as number, bearing)));
-  const edges: Edge[] = [];
-  const addEdge = (edge: Omit<Edge, 'id' | 'length' | 'wet' | 'cells'>): Edge => {
-    const made: Edge = { ...edge, id: edges.length, length: edge.points.reduce((sum, point, index) => (index === 0 ? 0 : sum + distance(edge.points[index - 1] as Point, point)), 0), wet: false, cells: [] };
-    edges.push(made);
-    return made;
-  };
-  /** The edges of each ring street, in order round the centre. */
-  const ringEdges: Edge[][] = circles.map(() => []);
-  circles.forEach((radius, circle) => {
-    const list = stops[circle] as number[];
-    if (radius === 0 || list.length < 2) return;
-    list.forEach((from, index) => {
-      const to = index + 1 < list.length ? (list[index + 1] as number) : (list[0] as number) + TAU;
-      (ringEdges[circle] as Edge[]).push(addEdge({ from: onCircle(circle, from), to: onCircle(circle, to), points: arc(radius, from, to, corners[circle]), kind: 'street', quay: false, circle, span: [from, to] }));
-    });
-  });
-  const radialEdges = new Map<Radial, Edge[]>();
-  const gateJunctions = new Map<Radial, number>();
-  for (const ring of rings) {
-    for (const radial of ring.radials) {
-      if (!radial.street) continue;
-      const kind: SegmentKind = radial.arterial !== undefined ? 'arterial' : 'lane';
-      const common = { kind, quay: false, radial, ...(radial.arterial !== undefined && { arterial: radial.arterial }) };
-      if (ring.band) continue;
-      const middle = (ring.inner + ring.outer) / 2;
-      const near = radial.court === 'outer' ? middle : ring.inner;
-      const far = radial.court === 'inner' ? middle : ring.outer;
-      const end = (radius: number, circle: number) => (radius === middle ? junctionAt(`court:${ring.index}:${Math.round(turn(radial.inner) * 1e9)}`, () => at(middle, bearingAt(ring, radial, middle))) : onCircle(circle, bearingAt(ring, radial, radius)));
-      radialEdges.set(radial, [addEdge({ ...common, from: end(near, ring.index), to: end(far, ring.index + 1), points: spoke(ring, radial, near, far) })]);
-    }
-  }
-  /** Opens a gate in the wall along one of the bounds of its ring: a street from the street inside to the gate on the wall's line, and on to the street outside. */
-  const openGate = (radial: Radial, gatehouse: Building) => {
-    const ring = band as Ring;
-    radial.street = true;
-    radial.gate = gatehouse;
-    const kind: SegmentKind = radial.arterial !== undefined ? 'arterial' : 'lane';
-    const common = { kind, quay: false, radial, ...(radial.arterial !== undefined && { arterial: radial.arterial }) };
-    const gate = junctionAt(`gate:${Math.round(turn(radial.inner) * 1e9)}`, () => at(wallRadius as number, bearingAt(ring, radial, wallRadius as number)));
-    (junctions[gate] as { kind?: JunctionKind }).kind = 'gate';
-    gateJunctions.set(radial, gate);
-    const made = [
-      addEdge({ ...common, from: onCircle(ring.index, radial.inner), to: gate, points: spoke(ring, radial, ring.inner, wallRadius as number) }),
-      addEdge({ ...common, from: gate, to: onCircle(ring.index + 1, radial.outer), points: spoke(ring, radial, wallRadius as number, ring.outer) }),
-    ];
-    radialEdges.set(radial, made);
-    return made;
-  };
-  const cells: Cell[] = [];
-  for (const ring of rings) {
-    ring.radials.forEach((left, index) => {
-      const right = ring.radials[(index + 1) % ring.radials.length] as Radial;
-      const shift = after(right.inner, left.inner + 1e-9) - right.inner;
-      const from = left.inner;
-      const to = right.inner + shift;
-      const outerFrom = left.outer;
-      const outerTo = right.outer + shift;
-      const polygon = [
-        ...arc(ring.inner, from, to, corners[ring.index]),
-        ...spoke(ring, right, ring.inner, ring.outer, 0, shift).slice(1),
-        ...arc(ring.outer, outerFrom, outerTo, corners[ring.index + 1])
-          .reverse()
-          .slice(1),
-        ...spoke(ring, left, ring.inner, ring.outer).reverse().slice(1, -1),
-      ];
-      const middle = (ring.inner + ring.outer) / 2;
-      const cell: Cell = { id: cells.length, ring, left, right, shift, neighbours: [], polygon, centre: at(middle, (bearingAt(ring, left, middle) + bearingAt(ring, right, middle) + shift) / 2), wet: false, barred: false, edges: [], radii: [], bearings: [] };
-      cells.push(cell);
-      ring.cells.push(cell.id);
-      for (const radial of [left, right]) for (const edge of radialEdges.get(radial) ?? []) if (!edge.cells.includes(cell.id)) (cell.edges.push(edge.id), edge.cells.push(cell.id));
-      // The pieces of the two ring streets that run along the block.
-      for (const [circle, a, b] of [[ring.index, from, to], [ring.index + 1, outerFrom, outerTo]] as const) {
-        for (const edge of ringEdges[circle] as Edge[]) {
-          const [start, finish] = edge.span as [number, number];
-          // The first turn of the piece that ends after the block's span begins: it runs along the block if it begins before the span ends.
-          const begins = after(start, a - (finish - start) + 1e-9);
-          if (begins < b - 1e-9 && !edge.cells.includes(cell.id)) (cell.edges.push(edge.id), edge.cells.push(cell.id));
-        }
-      }
-    });
-  }
-  // Blocks beside each other in a ring are neighbours, and blocks of two rings whose spans overlap.
-  for (const ring of rings) {
-    ring.cells.forEach((id, index) => {
-      const cell = cells[id] as Cell;
-      const next = ring.cells[(index + 1) % ring.cells.length] as number;
-      if (next !== id) {
-        if (!cell.neighbours.includes(next)) cell.neighbours.push(next);
-        if (!(cells[next] as Cell).neighbours.includes(id)) (cells[next] as Cell).neighbours.push(id);
-      }
-      const above = rings[ring.index + 1];
-      if (!above) return;
-      const from = cell.left.outer;
-      const to = cell.right.outer + cell.shift;
-      for (const otherId of above.cells) {
-        const other = cells[otherId] as Cell;
-        const start = after(other.left.inner, from - TAU + 1e-9);
-        const width = other.right.inner + other.shift - other.left.inner;
-        // Either turn of the other block's span may be the one that overlaps this block's.
-        if ([start, start + TAU].some((begin) => Math.min(begin + width, to) - Math.max(begin, from) > 1e-6)) {
-          cell.neighbours.push(otherId);
-          other.neighbours.push(id);
-        }
-      }
-    });
-  }
-
-  // ---- What is under water ---------------------------------------------------------------
-  const wetJunction = new Uint8Array(junctions.length);
-  const markWet = () => {
-    junctions.forEach((junction, index) => {
-      wetJunction[index] = inSea(junction.point) || (riverLine !== undefined && distanceToPolyline(junction.point, riverLine) < riverClearance - EPSILON) ? 1 : 0;
-    });
-    for (const edge of edges) edge.wet = nearRiver(edge.points) || edge.points.some(inSea) || wetJunction[edge.from] === 1 || wetJunction[edge.to] === 1;
-    // A block is under water if any of it is, or any street along it: a lot must be able to open onto every street of its block.
-    for (const cell of cells) cell.wet = nearRiver([...cell.polygon, cell.polygon[0] as Point]) || cell.polygon.some(inSea) || cell.edges.some((id) => (edges[id] as Edge).wet);
-  };
-  markWet();
-  if (seaward && shore !== undefined) {
-    // The harbour must stand at the water: if no dry block comes near the shore, the shore comes in to the nearest.
-    const reachOf = (cell: Cell) => Math.max(...cell.polygon.map((point) => dot(point, seaward)));
-    const dry = cells.filter((cell) => !cell.wet && !cell.ring.band);
-    if (dry.length === 0) throw new TooSmall();
-    const nearest = dry.reduce((best, cell) => (reachOf(cell) > reachOf(best) ? cell : best));
-    if (shore - reachOf(nearest) > settings.watersideReach / 2) {
-      shore = reachOf(nearest) + inset + 1;
-      markWet();
-    }
-  }
-  if (cells.every((cell) => cell.wet)) throw new TooSmall();
-  for (const cell of cells) cell.barred = enclosesAll && band !== undefined && cell.ring.index >= band.index;
-  // A port's quay: the streets along the sea are as wide as a main road.
-  if (brief.flags.port && shore !== undefined) {
-    const bySea = (cell: Cell) => cell.wet && cell.polygon.some(inSea);
-    for (const edge of edges) edge.quay = !edge.wet && edge.kind === 'street' && edge.cells.some((id) => bySea(cells[id] as Cell)) && edge.cells.some((id) => !(cells[id] as Cell).wet);
-  }
-  const halfWidth = (edge: Edge) => (edge.quay ? widths.arterial : widths[edge.kind]) / 2;
-
-  // ---- Gates --------------------------------------------------------------------------------
-  // One where each main road meets the wall, then the rest where they split the longest stretches without one. A
-  // gate needs dry ground through the wall, and a dry block just inside it for its gatehouse.
-  /** Where each gatehouse stands: the block, and the side of it that is along the gate's street. */
-  const gateLots: Array<{ gate: Radial; cell: Cell; side: 'left' | 'right' }> = [];
-  if (band) {
-    const inside = (rings[band.index - 1] as Ring).cells.map((id) => cells[id] as Cell);
-    const same = (a: number, b: number) => Math.min(turn(a - b), turn(b - a)) < 1e-9;
-    /** The block inside the wall that a gatehouse can stand in: clockwise of the gate's street, or failing that the other side. */
-    const blockFor = (radial: Radial): { cell: Cell; side: 'left' | 'right' } | undefined => {
-      const clockwise = inside.find((cell) => !cell.wet && same(cell.left.outer, radial.inner) && cell.left.court !== 'inner');
-      if (clockwise) return { cell: clockwise, side: 'left' };
-      const other = inside.find((cell) => !cell.wet && same(cell.right.outer, radial.inner) && cell.right.court !== 'inner');
-      return other && { cell: other, side: 'right' };
-    };
-    const dry = (radial: Radial) => {
-      const line = [at(band!.inner, radial.inner), at(wallRadius as number, bearingAt(band as Ring, radial, wallRadius as number)), at(band!.outer, radial.outer)];
-      return !nearRiver(line, riverClearance + grown.wall.width) && !line.some(inSea);
-    };
-    const spare = [...gatehouses];
-    const open: Radial[] = [];
-    const choose = (radial: Radial) => {
-      const block = blockFor(radial);
-      if (!block || spare.length === 0 || !dry(radial)) return false;
-      openGate(radial, spare.shift() as Building);
-      gateLots.push({ gate: radial, ...block });
-      open.push(radial);
-      return true;
-    };
-    for (const radial of band.radials) if (radial.arterial !== undefined) choose(radial);
-    const lesser = band.radials.filter((radial) => radial.arterial === undefined);
-    while (spare.length > 0 && lesser.length > 0) {
-      // The bound furthest, round the wall, from every gate there is.
-      let furthest = -1;
-      let best = 0;
-      lesser.forEach((radial, index) => {
-        const away = Math.min(TAU, ...open.map((gate) => Math.min(turn(gate.inner - radial.inner), turn(radial.inner - gate.inner))));
-        if (away > furthest) {
-          furthest = away;
-          best = index;
+    const bearings = brief.routes.map((route) => (route.bearing * Math.PI) / 180);
+    for (let tries = 0; roads.length < grown.roadsOut && tries < 2 * grown.roadsOut; tries++) {
+      const sorted = [...bearings].sort((a, b) => a - b);
+      let widest = sorted.length === 0 ? TAU : 0;
+      let from = 0;
+      sorted.forEach((bearing, index) => {
+        const gap = index + 1 < sorted.length ? (sorted[index + 1] as number) - bearing : (sorted[0] as number) + TAU - bearing;
+        if (gap > widest) {
+          widest = gap;
+          from = bearing;
         }
       });
-      choose(lesser.splice(best, 1)[0] as Radial);
+      const bearing = turn(from + widest / 2);
+      bearings.push(bearing);
+      const road = roadTo(farPoint((bearing * 180) / Math.PI), spare.length > 0);
+      // A local street that could go nowhere of its own is left out.
+      if (!road || road.edges.every((id) => usedByRoad.has(id)) || Math.hypot(...(corners[road.corners[road.corners.length - 1] as number] as Point)) < townRadius * 0.6) continue;
+      takeRoad(road, 'street');
     }
-    if (spare.length > 0) fail(`${spare.length} of its ${gatehouses.length} gatehouses have no dry place in the wall for a gate`);
-    // The blocks beside a gate have its street along them.
-    for (const cell of cells) for (const radial of [cell.left, cell.right]) if (radial.gate) for (const edge of radialEdges.get(radial) ?? []) if (!edge.cells.includes(cell.id)) (cell.edges.push(edge.id), edge.cells.push(cell.id));
+  }
+  // Lesser gates: the gatehouses left over, where they split the longest stretches of wall without a gate.
+  if (walled) {
+    const through = (corner: number) => {
+      const sides = (ways[corner] as Way[]).map((way) => edgeById(way.edge)).filter((edge) => !edge.bridge && edge.cells.length === 2 && edge.cells.every(isGround));
+      return { inward: sides.find((edge) => edge.cells.every((id) => (cells[id] as Cell).inside)), outward: sides.find((edge) => edge.cells.every((id) => !(cells[id] as Cell).inside)) };
+    };
+    const candidates = [...wallCorners].filter((corner) => !gates.has(corner) && through(corner).inward && through(corner).outward).sort((a, b) => a - b);
+    while (spare.length > 0 && candidates.length > 0) {
+      let chosen = 0;
+      let furthest = -1;
+      candidates.forEach((corner, index) => {
+        const away = Math.min(TAU, ...[...gates.keys()].map((gate) => apart(bearingOf(corners[gate] as Point), bearingOf(corners[corner] as Point))));
+        if (away > furthest) {
+          furthest = away;
+          chosen = index;
+        }
+      });
+      const [corner] = candidates.splice(chosen, 1) as [number];
+      gates.set(corner, spare.shift() as Building);
+      for (const edge of Object.values(through(corner))) {
+        if (!edge || edge.fixed) continue;
+        edge.kind = 'lane';
+        edge.fixed = true;
+      }
+    }
+    if (spare.length > 0) fail(`${spare.length} of its ${gatehouses.length} gatehouses have no place in the wall for a gate`);
+    // No street touches the wall but at a gate: every other boundary that runs up to it is closed.
+    for (const edge of edges) {
+      if (edge.kind === 'wall') continue;
+      const ends = [edge.a, edge.b].filter((corner) => wallCorners.has(corner));
+      if (ends.length > 0 && !(edge.fixed && ends.every((corner) => gates.has(corner)))) {
+        edge.kind = 'none';
+        edge.fixed = true;
+      }
+    }
   }
 
-  // ---- Where lots may stand in a block ------------------------------------------------------
-  const prepare = (cell: Cell): NonNullable<Cell['tracks']> => {
-    if (cell.tracks) return cell.tracks;
-    const { ring, left, right, shift } = cell;
-    cell.tracks = {};
-    if (ring.band) return cell.tracks;
-    // A ring street with a quay anywhere along it is allowed for at the quay's width all the way round.
-    const sideOf = (circle: number) => half(Math.max(widths.street, ...(ringEdges[circle] as Edge[]).map((edge) => 2 * halfWidth(edge))));
-    const widthOf = (radial: Radial) => half(radial.arterial !== undefined ? widths.arterial : widths.lane);
-    const first = ring.inner === 0;
-    const far = ring.outer - sideOf(ring.index + 1) - roadside;
-    const near = first ? Math.max(far - halfDepth, 1) : ring.inner + sideOf(ring.index) + roadside;
-    cell.near = near;
-    cell.far = far;
-    if (far - near < halfDepth - EPSILON) return cell.tracks;
-    const leftAt = (radius: number) => bearingAt(ring, left, radius) + (widthOf(left) + roadside) / radius;
-    const rightAt = (radius: number) => bearingAt(ring, right, radius) + shift - (widthOf(right) + roadside) / radius;
-    let from = Math.max(leftAt(near), leftAt(far));
-    let to = Math.min(rightAt(near), rightAt(far));
-    // Along a main road, a strip as deep as a lot is kept for lots that front it.
-    const room = (to - from) * near;
-    const strips = [left, right].filter((radial) => radial.arterial !== undefined).length;
-    if (!first && strips > 0 && room > strips * halfDepth + grown.blockLength.min / 3) {
-      if (left.arterial !== undefined) {
-        cell.tracks.left = { from: near, to: far, cursor: near };
-        from = Math.max(leftAt(near) + halfDepth / near, leftAt(far) + halfDepth / far);
-      }
-      if (right.arterial !== undefined) {
-        cell.tracks.right = { from: near, to: far, cursor: near };
-        to = Math.min(rightAt(near) - halfDepth / near, rightAt(far) - halfDepth / far);
+  // ---- Easing the roads --------------------------------------------------------------------------
+  // A road's corners are drawn toward the line between their neighbours on it, so that it bends where the fabric
+  // does without a corner at every block. Corners on the water, the wall and the plaza keep their places.
+  {
+    const kept = new Set<number>([...wallCorners, ...(plazaCell?.corners ?? []), ...bridges.flatMap((bridge) => [bridge.a, bridge.b])]);
+    for (const edge of edges) if (atWater(edge) || edge.cells.some((id) => (cells[id] as Cell).rim)) (kept.add(edge.a), kept.add(edge.b));
+    for (let pass = 0; pass < 2; pass++) {
+      for (const road of roads) {
+        for (let at = 1; at + 1 < road.corners.length; at++) {
+          const corner = road.corners[at] as number;
+          if (kept.has(corner)) continue;
+          const before = corners[road.corners[at - 1] as number] as Point;
+          const after = corners[road.corners[at + 1] as number] as Point;
+          const here = corners[corner] as Point;
+          const moved: Point = [here[0] + (((before[0] + after[0]) / 2 - here[0]) * grown.wander.ease) / 2, here[1] + (((before[1] + after[1]) / 2 - here[1]) * grown.wander.ease) / 2];
+          // Never so far that a boundary at the corner would be left with no length.
+          const clear = (around[corner] as number[]).every((id) => {
+            const edge = edges[id] as Edge;
+            return distance(moved, corners[edge.a === corner ? edge.b : edge.a] as Point) > grown.shortestStreet;
+          });
+          if (clear) corners[corner] = moved;
+        }
       }
     }
-    if (to - from <= 0) return cell.tracks;
-    if (!first) cell.tracks.inner = { from, to, cursor: from };
-    cell.tracks.outer = { from, to, cursor: from };
-    return cell.tracks;
+    for (const cell of cells) cell.centre = polygonCentroid(outlineOf(cell));
+    dryAlong.clear();
+  }
+
+  // ---- What each boundary is ------------------------------------------------------------------------
+  {
+    const rng = stepRng(seed, 'grown-fabric');
+    const merged = new Set<number>();
+    if (plazaCell) for (const id of plazaCell.edges) (edges[id] as Edge).fixed = true;
+    // How many boundaries at each corner are still open to a street. One is never closed where that would leave
+    // a street at either end of it with nowhere to go on to.
+    const open: number[] = corners.map(() => 0);
+    const shut = (corner: number) => {
+      open[corner] = (open[corner] as number) - 1;
+    };
+    for (const edge of edges) {
+      if (edge.kind === 'none' || !passable(edge)) continue;
+      open[edge.a] = (open[edge.a] as number) + 1;
+      open[edge.b] = (open[edge.b] as number) + 1;
+    }
+    const spared = (corner: number) => open[corner] !== 2;
+    for (const edge of edges) {
+      if (edge.kind === 'wall') continue;
+      // A street along the water, as wide as a main road on a port's shore.
+      if (atWater(edge) && edge.kind !== 'none') {
+        edge.fixed = true;
+        if (brief.flags.port && coast && Math.min(coast.gap(corners[edge.a] as Point), coast.gap(corners[edge.b] as Point)) < quayside + grown.spacing.centre / 2) edge.quay = true;
+      }
+      if (edge.fixed) continue;
+      const [one, other] = edge.cells;
+      const draw = rng.next();
+      const both = one !== undefined && other !== undefined && isGround(one) && isGround(other);
+      if (both && draw < grown.fabric.merge && !merged.has(one) && !merged.has(other) && passable(edge) && spared(edge.a) && spared(edge.b)) {
+        // Two blocks become one; some keep a dead-end court where the street was.
+        merged.add(one);
+        merged.add(other);
+        const from = rng.next() < 0.5 ? edge.a : edge.b;
+        if (rng.next() < grown.fabric.court && lengthOf(edge) > 4 * grown.shortestStreet && (open[from] as number) > 1) {
+          edge.kind = 'court';
+          edge.from = from;
+          shut(from === edge.a ? edge.b : edge.a);
+        } else {
+          edge.kind = 'none';
+          shut(edge.a);
+          shut(edge.b);
+        }
+      } else if (both && rng.next() < grown.fabric.lane) edge.kind = 'lane';
+    }
+  }
+
+  // ---- Blocks ------------------------------------------------------------------------------------------
+  const halfOf = (edge: Edge) => (edge.kind === 'court' ? widths.lane : widthOf(edge)) / 2;
+  /** The clear ground round a corner: enough for the widest roadway that ends there. */
+  const clearAt = (corner: number) =>
+    Math.max(
+      0,
+      ...(ways[corner] as Way[])
+        .map((way) => edgeById(way.edge))
+        .filter((edge) => edge.bridge || (edge.kind !== 'none' && edge.kind !== 'wall'))
+        .map((edge) => (edge.bridge ? widths.bridge : widths.arterial) / 2),
+      wallCorners.has(corner) ? grown.wall.width / 2 : 0,
+    ) + roadside;
+  const blockOf = (cell: Cell): Block => {
+    if (cell.block) return cell.block;
+    const sides: BlockSide[] = cell.corners.map((corner, index) => {
+      const edge = edges[cell.edges[index] as number] as Edge;
+      const a = corners[corner] as Point;
+      const b = corners[cell.corners[(index + 1) % cell.corners.length] as number] as Point;
+      if (edge.kind === 'wall') return { a, b, inset: grown.wall.width / 2 + (cell.inside ? grown.wall.clearStrip : roadside) };
+      if (edge.kind === 'none') return { a, b, inset: 0 };
+      // A boundary too near the water to pass is no street, but the block keeps clear of it all the same.
+      if (!passable(edge)) return { a, b, inset: halfOf(edge) + roadside };
+      if (edge.kind === 'court') return { a, b, inset: halfOf(edge) + roadside, street: edge.id, part: edge.from === corner ? [0, 0.5] : [0.5, 1] };
+      return { a, b, inset: halfOf(edge) + roadside, street: edge.id };
+    });
+    let block = makeBlock(sides);
+    if (block.polygon.length >= 3) {
+      // Each corner is cut back far enough to clear the roadways that meet there.
+      const cutBack = (polygon: Point[]) =>
+        cell.corners.reduce((left, corner) => {
+          if (left.length < 3) return left;
+          const at = corners[corner] as Point;
+          const away = distance(at, cell.centre) || 1;
+          const normal: Point = [(cell.centre[0] - at[0]) / away, (cell.centre[1] - at[1]) / away];
+          return clip(left, { at: [at[0] + normal[0] * clearAt(corner), at[1] + normal[1] * clearAt(corner)], normal });
+        }, polygon);
+      const polygon = cutBack(block.polygon);
+      const tracks = block.tracks.flatMap((track): Track[] => {
+        const ground = cutBack(track.ground);
+        const on = ground.filter((point) => Math.abs((point[0] - track.origin[0]) * track.back[0] + (point[1] - track.origin[1]) * track.back[1]) < 1e-6).map((point) => (point[0] - track.origin[0]) * track.along[0] + (point[1] - track.origin[1]) * track.along[1]);
+        if (ground.length < 3 || on.length < 2) return [];
+        const from = Math.max(track.from, Math.min(...on));
+        const to = Math.min(track.to, Math.max(...on));
+        return to - from < 1 ? [] : [{ ...track, ground, from, to, cursor: from }];
+      });
+      block = { polygon: polygon.length >= 3 ? polygon : [], tracks: polygon.length >= 3 ? tracks : [] };
+    }
+    cell.block = block;
+    return block;
   };
 
-  // ---- Lots to place ---------------------------------------------------------------------
+  const groundAt = (corner: number) => (around[corner] as number[]).flatMap((id) => (edges[id] as Edge).cells).filter(isGround);
+
+  // ---- Lots to place -------------------------------------------------------------------------------------
   const placed: Placed[] = [];
   const districtIndex = new Map(city.districts.map((district, index) => [district.id, index]));
   const buildingsOf: Building[][] = city.districts.map(() => []);
   for (const building of city.buildings) (buildingsOf[districtIndex.get(building.districtId) as number] as Building[]).push(building);
   const held = new Set<string>(plazaBuilding ? [plazaBuilding.id] : []);
+  const lotRng = stepRng(seed, 'grown-lots');
+  const leanMost = (grown.lots.lean * Math.PI) / 180;
   /** Blocks that are used whether or not a district takes them: those with a gatehouse. */
   const reserved = new Set<number>();
-  // Each gatehouse stands just inside its gate, at the end of the street its gate is on.
-  for (const { gate, cell: block, side } of gateLots) {
-    const gatehouse = gate.gate as Building;
+  // Each gatehouse stands just inside its gate, at the end of the street that passes through it.
+  for (const [corner, gatehouse] of gates) {
     held.add(gatehouse.id);
-    const tracks = prepare(block);
+    const at = corners[corner] as Point;
     const size = lotSizeOf(gatehouse.type, pack);
-    const far = block.far as number;
-    const near = far - size.frontage;
-    placed.push({ building: gatehouse, cell: block, track: side, near, far, from: 0, to: 0, depth: size.depth, gatehouse: true });
-    block.radii.push(near, far);
-    reserved.add(block.id);
-    // It takes the top of the strip along a main road; on a lesser street, the end of the frontages it stands across.
-    const sign = side === 'left' ? 1 : -1;
-    const back = [near, far].map((radius) => sideBearing(block, side, radius) + (sign * size.depth) / radius);
-    const strip = tracks[side];
-    if (strip) strip.to = Math.min(strip.to, near);
-    else {
-      for (const track of [tracks.outer, near < (block.near as number) + halfDepth ? tracks.inner : undefined]) {
-        if (!track) continue;
-        if (side === 'left') track.cursor = Math.max(track.cursor, ...back);
-        else track.to = Math.min(track.to, ...back);
-      }
+    // On the gate's own street where a block inside the wall has frontage enough there; otherwise on whatever
+    // frontage of a block at the gate comes nearest it.
+    let done = false;
+    const gateStreets = new Set((ways[corner] as Way[]).map((way) => way.edge));
+    const options = [...new Set(groundAt(corner))]
+      .filter((id) => (cells[id] as Cell).inside)
+      .flatMap((id) => blockOf(cells[id] as Cell).tracks.map((track) => ({ cell: cells[id] as Cell, track, away: Math.min(distance(frontage(track, track.from), at), distance(frontage(track, track.to), at)) + (gateStreets.has(track.street) && track.to - track.from >= size.frontage ? 0 : 1000) })))
+      .sort((one, other) => one.away - other.away);
+    for (const { cell, track } of options) {
+      const width = Math.min(size.frontage, track.to - track.from);
+      if (width < grown.lots.leastFrontage) continue;
+      // The end of the frontage nearer the gate.
+      const atStart = distance(frontage(track, track.from), at) < distance(frontage(track, track.to), at);
+      const from = atStart ? track.from : track.to - width;
+      const cut = cutLot(track, from, from + width, size.depth, 0, 0);
+      if (cut.area < size.frontage * size.depth * 0.3) continue;
+      if (atStart) track.cursor = track.from = from + width;
+      else track.to = from;
+      placed.push({ building: gatehouse, cell, polygon: cut.polygon, track, cut, street: track.street, door: frontage(track, from + width / 2), gatehouse: true });
+      reserved.add(cell.id);
+      done = true;
+      break;
     }
+    if (!done) fail(`the gate at bearing ${Math.round((bearingOf(at) * 180) / Math.PI)} has no ground inside the wall for its gatehouse`);
   }
   const spreadCivic = spreadCivicTypes(pack);
   /** Where the spread civic buildings placed so far stand, by type, for keeping the next apart from them. */
   const civic = new Map<string, Point[]>();
 
-  // ---- Districts ------------------------------------------------------------------------
+  // ---- Districts ---------------------------------------------------------------------------------------------
+  // Blocks are neighbours across any boundary but the water, and across a bridge that a road uses.
+  for (const edge of edges) {
+    const [one, other] = edge.cells;
+    if (one === undefined || other === undefined || !isGround(one) || !isGround(other)) continue;
+    (cells[one] as Cell).neighbours.push(other);
+    (cells[other] as Cell).neighbours.push(one);
+    (cells[one] as Cell).touching.push(other);
+    (cells[other] as Cell).touching.push(one);
+  }
+  for (const bridge of bridges) {
+    if (!usedByRoad.has(bridge.id)) continue;
+    for (const one of groundAt(bridge.a)) {
+      for (const other of groundAt(bridge.b)) {
+        if ((cells[one] as Cell).neighbours.includes(other)) continue;
+        (cells[one] as Cell).neighbours.push(other);
+        (cells[other] as Cell).neighbours.push(one);
+      }
+    }
+  }
   const owner = new Int32Array(cells.length).fill(-1);
   const luck = new Float64Array(cells.length);
   {
     const rng = stepRng(seed, 'grown-districts');
     for (let cell = 0; cell < cells.length; cell++) luck[cell] = rng.next();
   }
-  // What ground costs: its distance from the centre, counted for less beside a main road and beside the water, and
-  // varying a little by chance, which gives the town a ragged edge that reaches out along its roads.
-  const mainRoads = exitBearings.map((_, index) => rings.filter((ring) => !ring.band).map((ring) => at((ring.inner + ring.outer) / 2, arterialBearing(index, (ring.inner + ring.outer) / 2))));
+  // What ground costs: its distance from the centre, counted for less beside a road and beside the water, and
+  // varying a little by chance, which gives the town a ragged edge that reaches out along its roads and its banks.
+  const roadLines = roads.map((road) => road.corners.map((corner) => corners[corner] as Point));
   const cost = new Float64Array(cells.length);
   cells.forEach((cell, index) => {
-    const fromCentre = distance([0, 0], cell.centre);
-    const toRoad = Math.min(Infinity, ...mainRoads.filter((road) => road.length > 1).map((road) => distanceToPolyline(cell.centre, road)));
-    const toWater = Math.min(riverLine ? distanceToPolyline(cell.centre, riverLine) : Infinity, shore !== undefined ? Math.max(0, shore - dot(cell.centre, seaward as Point)) : Infinity);
-    const pull = Math.max(grown.outline.arterialPull * Math.exp(-toRoad / grown.outline.reach), grown.outline.waterPull * Math.exp(-toWater / grown.outline.reach));
+    if (!isGround(index)) return;
+    const fromCentre = Math.hypot(cell.centre[0], cell.centre[1]);
+    const toRoad = Math.min(Infinity, ...roadLines.filter((line) => line.length > 1).map((line) => distanceToPolyline(cell.centre, line)));
+    const pull = Math.max(grown.outline.arterialPull * Math.exp(-toRoad / grown.outline.reach), grown.outline.waterPull * Math.exp(-Math.max(0, dryBy(cell.centre)) / grown.outline.reach));
     cost[index] = fromCentre * (1 - pull) + (luck[index] as number) * grown.outline.ragged;
   });
-  const isFree = (cell: number) => owner[cell] === -1 && !(cells[cell] as Cell).wet && !(cells[cell] as Cell).barred;
-  const border = new Set((rings[rings.length - 1] as Ring).cells);
-  /** Free blocks joined to the edge of the lattice: the land a district can still grow into without being boxed in. */
-  const openCells = (): Uint8Array => {
-    const open = new Uint8Array(cells.length);
-    const queue: number[] = [];
-    const walledIn = enclosesAll && band ? new Set((rings[band.index - 1] as Ring).cells) : border;
-    for (const cell of walledIn) {
-      if (isFree(cell)) {
-        open[cell] = 1;
-        queue.push(cell);
+  // Only ground that can be walked to from the centre is built on: the far bank only where a road's bridge leads.
+  const reachable = new Uint8Array(cells.length);
+  {
+    const open = (edge: Edge) => (edge.bridge ? usedByRoad.has(edge.id) : edge.kind !== 'none' && edge.kind !== 'court' && edge.kind !== 'wall');
+    const walked = new Set<number>(starts);
+    const queue = [...starts];
+    for (let at = 0; at < queue.length; at++) {
+      for (const way of ways[queue[at] as number] as Way[]) {
+        const edge = edgeById(way.edge);
+        if (walked.has(way.to) || !open(edge) || (wallCorners.has(way.to) && !gates.has(way.to))) continue;
+        walked.add(way.to);
+        queue.push(way.to);
       }
     }
-    for (let next = 0; next < queue.length; next++) {
-      for (const beside of (cells[queue[next] as number] as Cell).neighbours) {
-        if (open[beside] === 0 && isFree(beside)) {
-          open[beside] = 1;
-          queue.push(beside);
-        }
-      }
-    }
-    return open;
-  };
+    // A block can be walked to if a street along one of its sides can.
+    for (const cell of cells) if (cell.edges.some((id) => open(edges[id] as Edge) && passable(edges[id] as Edge) && walked.has((edges[id] as Edge).a) && walked.has((edges[id] as Edge).b))) reachable[cell.id] = 1;
+  }
+  const isFree = (cell: number) => owner[cell] === -1 && reachable[cell] === 1 && isGround(cell) && !(cells[cell] as Cell).barred;
   const best = (among: Iterable<number>, score: (cell: number) => number): number | undefined => {
     let found: number | undefined;
     let foundScore = Infinity;
     for (const cell of among) {
       const value = score(cell);
-      if (value < foundScore || (value === foundScore && found !== undefined && (luck[cell] as number) < (luck[found] as number))) {
+      if (value < foundScore) {
         found = cell;
         foundScore = value;
       }
     }
     return found;
   };
-  const allCells = cells.map((cell) => cell.id);
-  const lotRng = stepRng(seed, 'grown-lots');
   const cellsOf: number[][] = city.districts.map(() => []);
-  const middleOf = (lot: Pick<Placed, 'near' | 'far' | 'from' | 'to' | 'track' | 'cell' | 'depth'>): Point =>
-    lot.track === 'left' || lot.track === 'right' ? at((lot.near + lot.far) / 2, sideBearing(lot.cell, lot.track, (lot.near + lot.far) / 2) + ((lot.track === 'left' ? 1 : -1) * lot.depth) / (lot.near + lot.far)) : at((lot.near + lot.far) / 2, (lot.from + lot.to) / 2);
-  /** The bearing of the front of a lot that stands along a main road, at a distance from the centre. */
-  function sideBearing(cell: Cell, side: 'left' | 'right', radius: number): number {
-    const radial = side === 'left' ? cell.left : cell.right;
-    const clear = (half(radial.arterial !== undefined ? widths.arterial : widths.lane) + roadside) / radius;
-    return side === 'left' ? bearingAt(cell.ring, radial, radius) + clear : bearingAt(cell.ring, radial, radius) + cell.shift - clear;
+  if (plazaCell && plazaBuilding) {
+    // The plaza is ground of its building's district.
+    owner[plazaCell.id] = districtIndex.get(plazaBuilding.districtId) as number;
+    (cellsOf[owner[plazaCell.id] as number] as number[]).push(plazaCell.id);
   }
+  /** Free blocks beside the town as it stands: where the next district may begin. */
+  const besideTown = (): number[] => {
+    const found = new Set<number>();
+    cells.forEach((cell, index) => {
+      if ((owner[index] as number) < 0) return;
+      for (const next of cell.neighbours) if (isFree(next)) found.add(next);
+    });
+    return [...found].sort((a, b) => a - b);
+  };
 
-  /** Grows one district outward from a first block, packing its lots as it goes. */
-  const placeDistrict = (district: number, pickFirst: (open: Uint8Array) => number | undefined) => {
+  const groundOf = cells.map((cell) => polygonArea(outlineOf(cell)));
+  /** For each free block, how much free ground it is joined to, itself included: a district begun there can have no more. */
+  const roomAt = (): Float64Array => {
+    const room = new Float64Array(cells.length);
+    const seen = new Uint8Array(cells.length);
+    for (const cell of cells) {
+      if (seen[cell.id] || !isFree(cell.id)) continue;
+      const part = [cell.id];
+      seen[cell.id] = 1;
+      let area = 0;
+      for (let at = 0; at < part.length; at++) {
+        area += groundOf[part[at] as number] as number;
+        for (const next of (cells[part[at] as number] as Cell).touching) {
+          if (seen[next] || !isFree(next)) continue;
+          seen[next] = 1;
+          part.push(next);
+        }
+      }
+      for (const id of part) room[id] = area;
+    }
+    return room;
+  };
+  /** Whether a block has room about it for the district being placed. */
+  let roomy: (cell: number) => boolean = () => true;
+
+  /** Grows one district outward from a first block, cutting its lots as it goes. */
+  const placeDistrict = (district: number, pickFirst: (candidates: number[]) => number | undefined) => {
     const buildings = (buildingsOf[district] as Building[]).filter((building) => !held.has(building.id));
-    if (buildings.length === 0 && !(buildingsOf[district] as Building[]).some((building) => building === plazaBuilding)) return;
-    const open = openCells();
-    const firstCell = pickFirst(open);
-    if (firstCell === undefined) throw new TooSmall();
+    if (buildings.length === 0) return;
+    const kind = (city.districts[district] as District).kind;
+    const filled = grown.lots.filled.includes(kind);
+    const gapChance = grown.lots.gaps[kind] ?? 0;
     const blocks: Cell[] = [];
     const frontier = new Map<number, number>();
     const addBlock = (id: number, depth: number): Cell => {
@@ -783,96 +813,148 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       (cellsOf[district] as number[]).push(id);
       frontier.delete(id);
       const cell = cells[id] as Cell;
-      for (const next of cell.neighbours) {
-        if (isFree(next) && open[next] === 1 && !frontier.has(next)) frontier.set(next, depth + 1);
-      }
+      // A district is one piece of ground: it grows across boundaries, never over a bridge.
+      for (const next of cell.touching) if (isFree(next) && !frontier.has(next)) frontier.set(next, depth + 1);
       blocks.push(cell);
-      prepare(cell);
+      blockOf(cell);
       return cell;
     };
-    /** The next block: the cheapest ground, counting how far the district has already spread from where it began. */
+    // The ground of the plaza, where the district has it, is where it begins.
+    for (const id of cellsOf[district] as number[]) for (const next of (cells[id] as Cell).touching) if (isFree(next)) frontier.set(next, 1);
     const grow = (): Cell => {
       const cell = best(frontier.keys(), (candidate) => (frontier.get(candidate) as number) * grown.outline.compact + (cost[candidate] as number));
-      if (cell === undefined) throw new TooSmall();
+      if (cell === undefined) throw new TooSmall(3);
       return addBlock(cell, frontier.get(cell) as number);
     };
+    type Fit = { track: Track; cut: Cut; lean: number };
     /** Where a building would stand in a block, on the frontage with most room left; nothing if it fits on none. */
-    const fit = (cell: Cell, building: Building): Placed | undefined => {
-      const tracks = cell.tracks ?? {};
-      const { frontage, depth } = lotSizeOf(building.type, pack);
-      const area = frontage * depth;
-      const near = cell.near as number;
-      const far = cell.far as number;
-      if (depth > (far - near) / 2 + EPSILON) {
-        // A lot deeper than half the block runs from street to street and takes both frontages.
-        if (!tracks.inner || !tracks.outer) return undefined;
-        const from = Math.max(tracks.inner.cursor, tracks.outer.cursor);
-        const to = from + area / ((far - near) * ((near + far) / 2));
-        return to <= tracks.outer.to + 1e-9 ? { building, cell, track: 'through', near, far, from, to, depth: far - near } : undefined;
-      }
-      let found: Placed | undefined;
-      let fullest = Infinity;
-      const offer = (lot: Placed, track: Track) => {
+    const fit = (cell: Cell, building: Building, spread: number): Fit | undefined => {
+      if (cell.whole) return undefined;
+      const { frontage: typical, depth } = lotSizeOf(building.type, pack);
+      const wanted = typical * depth * spread;
+      const deepest = depth * grown.lots.depth.max;
+      let found: Fit | undefined;
+      let emptiest = Infinity;
+      for (const track of (cell.block as Block).tracks) {
+        const room = track.to - track.cursor;
+        if (room < grown.lots.leastFrontage) continue;
         const used = (track.cursor - track.from) / (track.to - track.from);
-        if (used < fullest) {
-          fullest = used;
-          found = lot;
+        if (used >= emptiest) continue;
+        // A first cut at the typical frontage shows how deep the block lets the lot run; the frontage is then set to give the lot its area.
+        let width = Math.min(room, Math.max(grown.lots.leastFrontage, typical * spread));
+        let cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, 0);
+        for (let pass = 0; pass < 3 && cut.area > 0; pass++) {
+          const next = Math.min(room, Math.max(grown.lots.leastFrontage, (width * wanted) / cut.area));
+          if (Math.abs(next - width) < 0.05) break;
+          width = next;
+          cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, 0);
         }
-      };
-      for (const side of ['left', 'right'] as const) {
-        const track = tracks[side];
-        if (!track || depth > halfDepth + EPSILON || track.cursor + frontage > track.to + 1e-9) continue;
-        offer({ building, cell, track: side, near: track.cursor, far: track.cursor + frontage, from: 0, to: 0, depth }, track);
-      }
-      if (tracks.outer) {
-        const to = tracks.outer.cursor + area / (depth * (far - depth / 2));
-        if (to <= tracks.outer.to + 1e-9) offer({ building, cell, track: 'outer', near: far - depth, far, from: tracks.outer.cursor, to, depth }, tracks.outer);
-      }
-      if (tracks.inner) {
-        const to = tracks.inner.cursor + area / (depth * (near + depth / 2));
-        if (to <= tracks.inner.to + 1e-9) offer({ building, cell, track: 'inner', near, far: near + depth, from: tracks.inner.cursor, to, depth }, tracks.inner);
+        // What is left of the frontage, if too little for another lot, goes to this one.
+        const last = room - width < grown.lots.leastFrontage;
+        const lean = last ? 0 : (lotRng.next() * 2 - 1) * leanMost;
+        if (last) width = room;
+        cut = cutLot(track, track.cursor, track.cursor + width, deepest, track.lean, lean);
+        if (cut.area < wanted * 0.55 || cut.area > wanted * 1.8 || cut.depth < depth * grown.lots.depth.min * 0.6) continue;
+        found = { track, cut, lean };
+        emptiest = used;
       }
       return found;
     };
-    const take = (lot: Placed) => {
-      const tracks = lot.cell.tracks as NonNullable<Cell['tracks']>;
-      placed.push(lot);
-      lot.cell.radii.push(lot.near, lot.far);
-      if (lot.track === 'left' || lot.track === 'right') (tracks[lot.track] as Track).cursor = lot.far;
-      else {
-        lot.cell.bearings.push(lot.from, lot.to);
-        if (lot.track !== 'outer') (tracks.inner as Track).cursor = lot.to;
-        if (lot.track !== 'inner') (tracks.outer as Track).cursor = lot.to;
+    const take = (cell: Cell, building: Building, lot: Fit) => {
+      const { track, cut } = lot;
+      track.cursor = cut.to;
+      track.lean = lot.lean;
+      // In the outer districts a gap is sometimes left before the next lot.
+      if (!filled && lotRng.next() < gapChance) {
+        track.cursor = Math.min(track.to, track.cursor + grown.lots.gapWidth.min + lotRng.next() * (grown.lots.gapWidth.max - grown.lots.gapWidth.min));
+        track.lean = 0;
       }
+      placed.push({ building, cell, polygon: cut.polygon, track, cut, street: track.street, door: frontage(track, (cut.from + cut.to) / 2) });
+    };
+    /** A building with a block to itself: the first untouched block of about its size, growing the district to find one. */
+    const placeWhole = (building: Building) => {
+      const wanted = lotArea(building);
+      const suits = (cell: Cell, loosely: boolean) => {
+        const block = cell.block as Block;
+        if (cell.whole || block.polygon.length < 3 || block.tracks.length === 0 || block.tracks.some((track) => track.cursor > track.from) || reserved.has(cell.id)) return false;
+        const area = polygonArea(block.polygon);
+        return loosely ? area > wanted * 0.25 : area > wanted * 0.4 && area < wanted * 2.5;
+      };
+      let chosen = blocks.find((cell) => suits(cell, false));
+      for (let tries = 0; !chosen && tries < BLOCK_TRIES; tries++) {
+        const cell = grow();
+        if (suits(cell, tries > BLOCK_TRIES / 2)) chosen = cell;
+      }
+      if (!chosen) throw new TooSmall(4);
+      chosen.whole = true;
+      const block = chosen.block as Block;
+      const track = block.tracks.reduce((longest, entry) => (entry.to - entry.from > longest.to - longest.from ? entry : longest));
+      placed.push({ building, cell: chosen, polygon: block.polygon, street: track.street, door: frontage(track, (track.from + track.to) / 2) });
+    };
+    /**
+     * A whole side of a block for one building: all the ground of a street side that no lot has been cut from yet.
+     * For a building whose lot is too big to be cut from part of a side. The side whose ground is nearest the
+     * size wanted, among those of at least `least` times it.
+     */
+    const fitSide = (among: Cell[], building: Building, least: number): { cell: Cell; lot: Fit } | undefined => {
+      const wanted = lotArea(building);
+      let found: { cell: Cell; lot: Fit } | undefined;
+      let off = Infinity;
+      for (const cell of among) {
+        if (cell.whole) continue;
+        for (const track of (cell.block as Block).tracks) {
+          if (track.cursor > track.from + 1e-9 || track.to - track.from < grown.lots.leastFrontage) continue;
+          const cut = cutLot(track, track.from, track.to, Infinity, 0, 0);
+          if (cut.area < wanted * least || cut.area > wanted * 2.5) continue;
+          const miss = Math.abs(Math.log(cut.area / wanted));
+          if (miss < off) {
+            off = miss;
+            found = { cell, lot: { track, cut, lean: 0 } };
+          }
+        }
+      }
+      return found;
     };
     const place = (building: Building) => {
-      for (const block of blocks) {
-        const lot = fit(block, building);
-        if (lot) return take(lot);
+      if (lotArea(building) >= grown.lots.wholeBlock) return placeWhole(building);
+      const spread = 1 + (lotRng.next() * 2 - 1) * grown.lots.frontageSpread;
+      // A lot much deeper than a block lets a lot run takes a whole side of one.
+      const deep = lotSizeOf(building.type, pack).depth > grown.spacing.centre / 2 + 4;
+      if (deep) {
+        const side = fitSide(blocks, building, 0.35);
+        if (side) return take(side.cell, building, side.lot);
+      } else {
+        for (const block of blocks) {
+          const lot = fit(block, building, spread);
+          if (lot) return take(block, building, lot);
+        }
       }
-      // A new block nearly always has room; a block cut short by the water or a main road may not, so a few are tried.
-      for (let tries = 0; tries < 40; tries++) {
-        const lot = fit(grow(), building);
-        if (lot) return take(lot);
+      for (let tries = 0; tries < (deep ? BLOCK_TRIES / 4 : BLOCK_TRIES); tries++) {
+        const block = grow();
+        const lot = deep ? fitSide([block], building, 0.35)?.lot : fit(block, building, spread);
+        if (lot) return take(block, building, lot);
       }
-      throw new TooSmall();
+      // Whatever side is nearest its size, however far off, rather than no place at all.
+      const side = fitSide(blocks, building, 0.1);
+      if (side) return take(side.cell, building, side.lot);
+      throw new TooSmall(5);
     };
     /** A civic building that the pack spreads stands as far as it can from the others of its type, and at least the pack's distance where the district has room. */
     const placeApart = (building: Building) => {
       const others = civic.get(building.type) ?? [];
-      const choose = (among: Cell[]): { lot: Placed; away: number } | undefined => {
-        let chosen: { lot: Placed; away: number } | undefined;
-        for (const block of among) {
-          const lot = fit(block, building);
+      const choose = (among: Cell[]) => {
+        let chosen: { cell: Cell; lot: Fit; away: number; at: Point } | undefined;
+        for (const cell of among) {
+          const lot = fit(cell, building, 1);
           if (!lot) continue;
-          const here = middleOf(lot);
+          const here = polygonCentroid(lot.cut.polygon);
           const away = Math.min(Infinity, ...others.map((other) => distance(other, here)));
-          if (!chosen || away > chosen.away) chosen = { lot, away };
+          if (!chosen || away > chosen.away) chosen = { cell, lot, away, at: here };
         }
         return chosen;
       };
       let chosen = choose(blocks);
-      for (let grownBlocks = 0; grownBlocks < APART_BLOCKS && (!chosen || chosen.away < grown.civicSpacing); grownBlocks++) {
+      for (let more = 0; more < APART_BLOCKS && (!chosen || chosen.away < grown.civicSpacing); more++) {
         let block: Cell;
         try {
           block = grow();
@@ -884,192 +966,189 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         if (next && (!chosen || next.away > chosen.away)) chosen = next;
       }
       if (!chosen) return place(building);
-      take(chosen.lot);
-      civic.set(building.type, [...others, middleOf(chosen.lot)]);
+      take(chosen.cell, building, chosen.lot);
+      civic.set(building.type, [...others, chosen.at]);
     };
-    addBlock(firstCell, 0);
-    for (const { building, apart } of placementOrder(buildings, pack, lotRng, () => false)) {
-      if (apart && spreadCivic.has(building.type)) placeApart(building);
+    if (frontier.size === 0) {
+      // It begins where the free ground is enough for all of it, if anywhere is.
+      const room = roomAt();
+      const wanted = buildings.reduce((sum, building) => sum + lotArea(building), 0) / LOT_SHARE;
+      const all = owner.some((value) => value >= 0) ? besideTown() : cells.map((cell) => cell.id).filter(isFree);
+      const most = Math.max(0, ...all.map((cell) => room[cell] as number));
+      roomy = (cell) => (room[cell] as number) >= Math.min(wanted, most);
+      const first = pickFirst(all.filter(roomy));
+      if (first === undefined) throw new TooSmall(6);
+      addBlock(first, 0);
+    }
+    for (const { building, apart: keptApart } of placementOrder(buildings, pack, lotRng, () => false)) {
+      if (keptApart && spreadCivic.has(building.type)) placeApart(building);
       else place(building);
     }
+    // Blocks it grew over and put nothing in are given back, unless the district would fall apart without one.
+    const built = new Set(placed.map((lot) => lot.cell.id));
+    if (plazaCell) built.add(plazaCell.id);
+    const own = new Set(cellsOf[district] as number[]);
+    const whole = (): boolean => {
+      const first = [...own].find((id) => built.has(id));
+      if (first === undefined) return true;
+      const seen = new Set([first]);
+      const queue = [first];
+      for (let at = 0; at < queue.length; at++) {
+        for (const next of (cells[queue[at] as number] as Cell).touching) {
+          if (!own.has(next) || seen.has(next)) continue;
+          seen.add(next);
+          queue.push(next);
+        }
+      }
+      return [...own].every((id) => !built.has(id) || seen.has(id));
+    };
+    for (const id of [...(cellsOf[district] as number[])].reverse()) {
+      if (built.has(id)) continue;
+      own.delete(id);
+      if (whole()) owner[id] = -1;
+      else own.add(id);
+    }
+    cellsOf[district] = (cellsOf[district] as number[]).filter((id) => own.has(id));
   };
 
   const districtsPlaced = (placement: string) => city.districts.map((district, index) => ({ district, index })).filter(({ district }) => placementOf(district) === placement);
-  const cheapest = (open: Uint8Array) => best(allCells.filter((cell) => open[cell] === 1), (cell) => cost[cell] as number);
+  const cheapest = (candidates: number[]) => best(candidates, (cell) => cost[cell] as number);
   // The centre: the district with the plaza first, so that its ground lies round it.
   const central = districtsPlaced('centre').sort((a, b) => Number(b.district.id === plazaBuilding?.districtId) - Number(a.district.id === plazaBuilding?.districtId));
-  for (const { index } of central) placeDistrict(index, (open) => best(allCells.filter((cell) => open[cell] === 1), (cell) => distance([0, 0], (cells[cell] as Cell).centre)));
-  // Waterside districts: at the shore, or else beside the river.
+  for (const { index } of central) placeDistrict(index, (candidates) => best(candidates, (cell) => Math.hypot(...(cells[cell] as Cell).centre)));
+  // Waterside districts: at the shore, or else on the bank.
   for (const { index } of districtsPlaced('waterside')) {
-    placeDistrict(index, (open) => {
-      const candidates = allCells.filter((cell) => open[cell] === 1);
-      const gap = (cell: number) => {
-        const { polygon } = cells[cell] as Cell;
-        if (seaward && shore !== undefined) return shore - Math.max(...polygon.map((point) => dot(point, seaward)));
-        return riverLine ? distanceBetweenPolylines([...polygon, polygon[0] as Point], riverLine) - settings.riverWidth / 2 : Infinity;
-      };
-      if (!seaward && !riverLine) return cheapest(open);
-      const within = candidates.filter((cell) => gap(cell) <= settings.watersideReach);
-      return within.length > 0 ? best(within, (cell) => cost[cell] as number) : best(candidates, gap);
+    placeDistrict(index, (candidates) => {
+      if (!coast && !river) return cheapest(candidates);
+      const gap = (cell: number) => Math.min(...outlineOf(cells[cell] as Cell).map((point) => (coast ? coast.gap(point) : (river as River).gap(point))));
+      const within = candidates.filter((cell) => gap(cell) <= settings.watersideReach * 0.6);
+      // Beside the town if it has reached the water; otherwise the nearest ground to the town that is at the water.
+      if (within.length > 0) return cheapest(within);
+      const atWaterside = cells.map((cell) => cell.id).filter((cell) => isFree(cell) && roomy(cell) && gap(cell) <= settings.watersideReach * 0.6);
+      return atWaterside.length > 0 ? cheapest(atWaterside) : best(candidates, gap);
     });
   }
   for (const { index } of districtsPlaced('middle')) placeDistrict(index, cheapest);
   for (const { index } of districtsPlaced('edge')) placeDistrict(index, cheapest);
   if (placed.length !== city.buildings.length - (plazaBuilding ? 1 : 0)) fail(`${city.buildings.length - (plazaBuilding ? 1 : 0) - placed.length} buildings are in districts whose kind the pack no longer lists`);
 
-  // ---- Streets of one trade ---------------------------------------------------------------
-  // Which building holds which lot is settled last, and changes no lot: buildings whose lots are alike change
-  // places within a district, as on the grid. A gatehouse keeps its gate.
+  // ---- Streets of one trade ------------------------------------------------------------------------------
+  // Which building holds which lot is settled last, and changes no lot: buildings whose lots are of one size in
+  // the pack change places within a district, as on the grid. A gatehouse keeps its gate, and a building with a
+  // block to itself its block.
   {
-    const order = (lot: Placed) => (lot.track === 'inner' ? 0 : lot.track === 'outer' || lot.track === 'through' ? 1 : lot.track === 'left' ? 2 : 3);
-    const along = (lot: Placed) => (lot.track === 'left' || lot.track === 'right' ? lot.near : lot.from);
+    const trackOrder = new Map<Track, number>();
+    for (const lot of placed) if (lot.track && !trackOrder.has(lot.track)) trackOrder.set(lot.track, trackOrder.size);
     arrangeTrades(
-      placed.filter((lot) => !lot.gatehouse && lot.track !== 'through'),
+      placed.filter((lot) => !lot.gatehouse && lot.track && lot.cut),
       pack,
-      (a, b) => a.cell.ring.index + Number(order(a) === 1) - (b.cell.ring.index + Number(order(b) === 1)) || a.cell.id - b.cell.id || order(a) - order(b) || along(a) - along(b),
-      (a, b) => a.cell === b.cell && a.track === b.track && Math.abs((a.track === 'left' || a.track === 'right' ? a.far - b.near : a.to - b.from)) < 1e-9,
+      (a, b) => a.cell.id - b.cell.id || (trackOrder.get(a.track as Track) as number) - (trackOrder.get(b.track as Track) as number) || (a.cut as Cut).from - (b.cut as Cut).from,
+      (a, b) => a.track === b.track && Math.abs((a.cut as Cut).to - (b.cut as Cut).from) < 1e-9,
     );
   }
 
-  // ---- Bridges, and the ways through the lattice -------------------------------------------
-  const used = allCells.filter((cell) => (owner[cell] as number) >= 0 || reserved.has(cell));
-  const usedSet = new Set(used);
-  const outgoing: Array<Array<{ to: number; edge: number; length: number }>> = junctions.map(() => []);
-  const link = (edge: Edge) => {
-    (outgoing[edge.from] as Array<{ to: number; edge: number; length: number }>).push({ to: edge.to, edge: edge.id, length: edge.length });
-    (outgoing[edge.to] as Array<{ to: number; edge: number; length: number }>).push({ to: edge.from, edge: edge.id, length: edge.length });
-  };
-  for (const edge of edges) if (!edge.wet) link(edge);
-  // A bridge can stand wherever a ring street or a main road meets the river: it spans the run of wet pieces
-  // between the last dry junction on one bank and the first on the other.
-  const bridgeEdges = new Set<number>();
-  if (riverLine) {
-    const span = (run: Edge[]) => {
-      const from = (run[0] as Edge).from;
-      const to = (run[run.length - 1] as Edge).to;
-      if (from === to || wetJunction[from] === 1 || wetJunction[to] === 1) return;
-      const points = [(junctions[from] as { point: Point }).point, (junctions[to] as { point: Point }).point];
-      if (crossingsOfPolyline(points[0] as Point, points[1] as Point, riverLine as Point[]) === 0 || points.some(inSea)) return;
-      const bridge = addEdge({ from, to, points, kind: 'bridge', quay: false, ...(run[0]?.arterial !== undefined && { arterial: run[0].arterial }) });
-      bridgeEdges.add(bridge.id);
-      link(bridge);
-    };
-    const scan = (chain: Edge[], closed: boolean) => {
-      const wet = (edge: Edge) => nearRiver(edge.points);
-      const start = closed ? chain.findIndex((edge) => !wet(edge)) : 0;
-      if (start === -1) return;
-      let run: Edge[] = [];
-      for (let step = 0; step < chain.length; step++) {
-        const edge = chain[(start + step) % chain.length] as Edge;
-        if (wet(edge)) run.push(edge);
-        else if (run.length > 0) {
-          span(run);
-          run = [];
-        }
-      }
-    };
-    ringEdges.forEach((chain) => scan(chain, true));
-    exitBearings.forEach((_, index) => {
-      // A main road's pieces from the centre outward, each running outward.
-      const chain = rings.flatMap((ring) => ring.radials.filter((radial) => radial.arterial === index).flatMap((radial) => radialEdges.get(radial) ?? []));
-      scan(chain, false);
-    });
-  }
-  /** The cheapest way from any of the start junctions to the first that satisfies `done`, as edges. */
-  const route = (starts: Iterable<number>, done: (junction: number) => boolean, weigh: (edge: Edge) => number): number[] | undefined => {
-    const reached = new Map<number, number>();
-    const cameBy = new Map<number, [number, number]>();
-    const heap = new Heap();
-    for (const start of starts) {
-      reached.set(start, 0);
-      heap.push(0, start);
-    }
-    while (heap.size > 0) {
-      const [so, junction] = heap.pop();
-      if (so > (reached.get(junction) as number)) continue;
-      if (done(junction)) {
-        const way: number[] = [];
-        for (let back = junction; cameBy.has(back); back = (cameBy.get(back) as [number, number])[0]) way.push((cameBy.get(back) as [number, number])[1]);
-        return way.reverse();
-      }
-      for (const step of outgoing[junction] as Array<{ to: number; edge: number; length: number }>) {
-        const next = so + step.length * weigh(edges[step.edge] as Edge);
-        if (next < (reached.get(step.to) ?? Infinity)) {
-          reached.set(step.to, next);
-          cameBy.set(step.to, [junction, step.edge]);
-          heap.push(next, step.to);
-        }
-      }
-    }
-    return undefined;
-  };
-
-  // ---- Exits and the main roads to them ------------------------------------------------------
+  // ---- The streets that are kept ----------------------------------------------------------------------------
+  const used = cells.filter((cell) => (owner[cell.id] as number) >= 0 || reserved.has(cell.id));
+  const usedSet = new Set(used.map((cell) => cell.id));
   const streets = new Set<number>();
-  /** The exit each kept edge carries a route for. */
-  const carries = new Map<number, number>();
-  const exitDrafts: Array<{ point: Point; joins: number }> = [];
-  brief.routes.forEach((exit, index) => {
-    // The main road is followed out to the last ring that is built on beside it, and one ring more.
-    const pieces = rings.map((ring) => ring.radials.find((radial) => radial.arterial === index));
-    let last = 0;
-    rings.forEach((ring, at) => {
-      const radial = pieces[at];
-      if (radial && ring.cells.some((id) => usedSet.has(id) && ((cells[id] as Cell).left === radial || (cells[id] as Cell).right === radial))) last = at;
+  const isStreet = (edge: Edge) => edge.bridge === true || (edge.kind !== 'none' && edge.kind !== 'wall' && passable(edge));
+  for (const cell of used) for (const id of cell.edges) if (isStreet(edges[id] as Edge)) streets.add(id);
+  // Each road runs as far as the town does, and a main road on to its exit.
+  const exitDrafts: Array<{ point: Point; joins: number } | undefined> = brief.routes.map(() => undefined);
+  const outlines = used.map((cell) => outlineOf(cell));
+  const lotBoxes = placed.map((lot) => boxOf(lot.polygon, widths.arterial / 2));
+  const wallPieces = edges.filter((edge) => edge.kind === 'wall').map((edge): [Point, Point] => [corners[edge.a] as Point, corners[edge.b] as Point]);
+  const crossesTown = (from: Point, to: Point) =>
+    wallPieces.some(([a, b]) => piecesCross(from, to, a, b)) ||
+    outlines.some((outline) => outline.some((point, index) => piecesCross(from, to, point, outline[(index + 1) % outline.length] as Point))) ||
+    placed.some((lot, index) => {
+      const box = lotBoxes[index] as ReturnType<typeof boxOf>;
+      if (Math.max(from[0], to[0]) < box.minX || Math.min(from[0], to[0]) > box.maxX || Math.max(from[1], to[1]) < box.minY || Math.min(from[1], to[1]) > box.maxY) return false;
+      return distancePolygonToPolyline(lot.polygon, [from, to]) < widths.arterial / 2;
     });
-    const candidates: number[] = [];
-    for (let at = Math.min(last + 1, rings.length - 1); at >= 0; at--) {
-      const radial = pieces[at];
-      const edge = radial && (radialEdges.get(radial) ?? []).at(-1);
-      if (edge && wetJunction[edge.to] === 0 && (outgoing[edge.to] as unknown[]).length > 0) candidates.push(edge.to);
+  let roadsOut = 0;
+  for (const road of roads) {
+    let last = 0;
+    road.corners.forEach((corner, at) => {
+      if (groundAt(corner).some((id) => usedSet.has(id))) last = at;
+    });
+    if (road.exit === undefined) {
+      if (last === 0) continue;
+      roadsOut++;
+      for (const id of road.edges.slice(0, last)) streets.add(id);
+      continue;
     }
-    const from = plazaBuilding ? [onCircle(0, arterialBearing(index, circles[0] as number))] : [junctionAt('centre', () => at(0, 0))];
-    for (const joins of candidates) {
-      const way = route(from, (junction) => junction === joins, (edge) => (edge.arterial === index ? 1 : 4));
-      if (!way) continue;
-      const out = (junctions[joins] as { point: Point }).point;
-      // The exit lies beyond the last junction, at the brief's bearing; it moves aside a degree at a time only to keep out of the river.
-      for (let step = 0; step <= 2 * EXIT_TOLERANCE; step++) {
-        const offset = step % 2 === 1 ? (step + 1) / 2 : -step / 2;
-        if (Math.abs(offset) >= EXIT_TOLERANCE) continue;
-        const direction = bearingVector(exit.bearing + offset);
-        let reach = distance([0, 0], out) + pitch;
-        if (shore !== undefined && dot(direction, seaward as Point) > EPSILON) reach = Math.min(reach, (shore - inset) / dot(direction, seaward as Point));
-        const point: Point = [direction[0] * reach, direction[1] * reach];
-        if (distance(point, out) < widest || nearRiver([out, point]) || exitDrafts.some((other) => distance(other.point, point) < widest)) continue;
-        for (const edge of way) {
-          streets.add(edge);
-          if (!carries.has(edge)) carries.set(edge, index);
+    roadsOut++;
+    const exit = brief.routes[road.exit] as SettlementBrief['routes'][number];
+    // The exit lies beyond a junction at the town's edge, at the brief's bearing: first the road's own junctions
+    // from where the town ends, then any junction on the town's edge, nearest the bearing first. It moves aside a
+    // degree at a time only where no straight road can be laid to it without crossing the town or the water.
+    const onEdge = (corner: number) => (around[corner] as number[]).some((id) => (edges[id] as Edge).cells.some((cell) => !usedSet.has(cell))) && (around[corner] as number[]).some((id) => streets.has(id));
+    const ray = bearingVector(exit.bearing);
+    const aside = (corner: number) => Math.abs((corners[corner] as Point)[0] * ray[1] - (corners[corner] as Point)[1] * ray[0]) - 1e-3 * ((corners[corner] as Point)[0] * ray[0] + (corners[corner] as Point)[1] * ray[1]);
+    const others = corners.map((_, corner) => corner).filter((corner) => onEdge(corner) && (corners[corner] as Point)[0] * ray[0] + (corners[corner] as Point)[1] * ray[1] > 0).sort((a, b) => aside(a) - aside(b)).slice(0, 40);
+    const onward = road.corners.slice(last).map((joins, index) => ({ joins, upTo: last + index }));
+    const candidates: Array<{ joins: number; upTo?: number }> = [...onward.slice(0, 3), ...others.map((joins) => ({ joins })), ...onward.slice(3)];
+    let joined = false;
+    for (let step = 0; step <= 2 * EXIT_TOLERANCE && !joined; step++) {
+      const offset = step % 2 === 1 ? (step + 1) / 2 : -step / 2;
+      if (Math.abs(offset) >= EXIT_TOLERANCE) continue;
+      const direction = bearingVector(exit.bearing + offset);
+      for (const { joins, upTo } of candidates) {
+        const from = corners[joins] as Point;
+        let reach = Math.hypot(from[0], from[1]) + EXIT_REACH;
+        let point: Point = [direction[0] * reach, direction[1] * reach];
+        // Toward the sea, or across the river, the exit stands at the water's edge.
+        for (let back = 0; back < 60 && reach > 0 && dryBy(point) < widths.arterial / 2 + 1; back++) {
+          reach -= EXIT_REACH / 10;
+          point = [direction[0] * reach, direction[1] * reach];
         }
-        exitDrafts.push({ point, joins });
-        return;
+        const steps = Math.max(1, Math.ceil(distance(from, point) / 6));
+        const dryWay = Array.from({ length: steps + 1 }, (_, at): Point => [from[0] + ((point[0] - from[0]) * at) / steps, from[1] + ((point[1] - from[1]) * at) / steps]).every((spot) => dryBy(spot) >= widths.arterial / 2);
+        if (reach <= 0 || distance(from, point) < widths.arterial || distance(from, point) > 4 * EXIT_REACH || !dryWay || crossesTown(from, point) || exitDrafts.some((other) => other && distance(other.point, point) < widths.arterial)) continue;
+        for (const id of road.edges.slice(0, upTo ?? last)) streets.add(id);
+        exitDrafts[road.exit] = { point, joins };
+        joined = true;
+        break;
       }
     }
-    fail(`no road can reach the exit for ${exit.routeId} within ${EXIT_TOLERANCE} degrees of bearing ${exit.bearing} (exit ${index + 1} of ${brief.routes.length})`);
-  });
-
-  // ---- The streets that are kept ---------------------------------------------------------------
-  // Every used block has its streets round it, the plaza has the street round it, and whatever is left apart is joined.
-  for (const cell of used) for (const id of (cells[cell] as Cell).edges) if (!(edges[id] as Edge).wet) streets.add(id);
-  if (plazaBuilding) for (const edge of ringEdges[0] as Edge[]) if (!edge.wet) streets.add(edge.id);
-  // Every gate is a way through the wall, whether or not a main road uses it.
-  if (band) for (const radial of band.radials) if (radial.gate) for (const edge of radialEdges.get(radial) ?? []) streets.add(edge.id);
-  for (const { cell } of gateLots) for (const id of cell.edges) if (!(edges[id] as Edge).wet) streets.add(id);
+    if (!joined) throw new TooSmall(7);
+  }
+  // Every gate is a way through the wall.
+  for (const corner of gates.keys()) for (const way of ways[corner] as Way[]) if (isStreet(edgeById(way.edge)) && edgeById(way.edge).fixed) streets.add(way.edge);
+  // A town above the pack's size with building on both banks has a second bridge, well away from the first.
+  if (river && brief.population >= grown.river.secondBridgeAbove) {
+    const built = bridges.filter((bridge) => streets.has(bridge.id));
+    const onStreet = new Set([...streets].flatMap((id) => [edgeById(id).a, edgeById(id).b]));
+    const candidates = bridges.filter((bridge) => !streets.has(bridge.id) && onStreet.has(bridge.a) && onStreet.has(bridge.b));
+    if (built.length === 1 && candidates.length > 0) {
+      const first = corners[(built[0] as Edge).a] as Point;
+      const second = candidates.reduce((furthest, bridge) => (distance(corners[bridge.a] as Point, first) > distance(corners[furthest.a] as Point, first) ? bridge : furthest));
+      if (distance(corners[second.a] as Point, first) > 2 * grown.spacing.centre) streets.add(second.id);
+    }
+  }
+  // Whatever is left apart is joined to the rest.
   for (;;) {
     const touched = new Set<number>();
-    const linked = new Map<number, number[]>();
+    const link = new Map<number, number[]>();
     for (const id of streets) {
-      const { from, to } = edges[id] as Edge;
-      touched.add(from).add(to);
-      linked.set(from, [...(linked.get(from) ?? []), to]);
-      linked.set(to, [...(linked.get(to) ?? []), from]);
+      const edge = edgeById(id);
+      // A court leads nowhere: it is joined at the corner it is entered from, and joins nothing through itself.
+      if (edge.kind === 'court' && !edge.bridge) {
+        touched.add(edge.from as number);
+        continue;
+      }
+      const { a, b } = edge;
+      touched.add(a).add(b);
+      link.set(a, [...(link.get(a) ?? []), b]);
+      link.set(b, [...(link.get(b) ?? []), a]);
     }
-    if (touched.size === 0) break;
+    if (touched.size === 0) fail('the town has no streets');
     const start = Math.min(...touched);
     const main = new Set([start]);
     const queue = [start];
     for (let next = 0; next < queue.length; next++) {
-      for (const beside of linked.get(queue[next] as number) ?? []) {
+      for (const beside of link.get(queue[next] as number) ?? []) {
         if (!main.has(beside)) {
           main.add(beside);
           queue.push(beside);
@@ -1077,55 +1156,109 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       }
     }
     if (main.size === touched.size) break;
-    const way = route(main, (junction) => touched.has(junction) && !main.has(junction), () => 1);
-    if (!way) fail('part of the town cannot be joined to the rest by any street or bridge');
-    for (const edge of way as number[]) streets.add(edge);
+    // The shortest way from the main part to anything apart from it, along boundaries a street may take.
+    const reached = new Map<number, number>();
+    const cameBy = new Map<number, [number, number]>();
+    const heap = new Heap();
+    for (const corner of main) {
+      reached.set(corner, 0);
+      heap.push(0, corner);
+    }
+    let found: number | undefined;
+    while (heap.size > 0) {
+      const [so, corner] = heap.pop();
+      if (so > (reached.get(corner) as number)) continue;
+      if (touched.has(corner) && !main.has(corner)) {
+        found = corner;
+        break;
+      }
+      for (const way of ways[corner] as Way[]) {
+        const edge = edgeById(way.edge);
+        if (!isStreet(edge) && !(edge.kind === 'none' && edge.cells.every((id) => !usedSet.has(id)))) continue;
+        if (wallCorners.has(way.to) && !gates.has(way.to)) continue;
+        const next = so + distance(corners[corner] as Point, corners[way.to] as Point) * (edge.bridge ? 4 : 1);
+        if (next < (reached.get(way.to) ?? Infinity)) {
+          reached.set(way.to, next);
+          cameBy.set(way.to, [corner, way.edge]);
+          heap.push(next, way.to);
+        }
+      }
+    }
+    if (found === undefined) {
+      // Streets that nothing opens onto, and that lead nowhere, are left out; anything else apart is a fault.
+      const fronted = new Set(placed.map((lot) => lot.street));
+      const apartStreets = [...streets].filter((id) => !main.has(edgeById(id).kind === 'court' && !edgeById(id).bridge ? (edgeById(id).from as number) : edgeById(id).a));
+      if (apartStreets.length === 0 || apartStreets.some((id) => fronted.has(id))) fail('part of the town cannot be joined to the rest by any street or bridge');
+      for (const id of apartStreets) streets.delete(id);
+      continue;
+    }
+    for (let back = found as number; cameBy.has(back); back = (cameBy.get(back) as [number, number])[0]) {
+      const edge = edgeById((cameBy.get(back) as [number, number])[1]);
+      // A boundary that had been closed between two blocks nobody built on is opened again as a lane, and a court
+      // that is the only way through runs the whole length of its boundary.
+      if (edge.kind === 'none' || (edge.kind === 'court' && !edge.bridge)) edge.kind = 'lane';
+      streets.add(edge.id);
+    }
   }
 
-  // ---- Records ----------------------------------------------------------------------------------
-  const kept = [...streets].sort((a, b) => a - b).map((id) => edges[id] as Edge);
-  const keptJunctions = [...new Set(kept.flatMap((edge) => [edge.from, edge.to]))].sort((a, b) => a - b);
-  const junctionIds = new Map(keptJunctions.map((junction, index) => [junction, `junction-${number}-${pad(index + 1, 6)}`]));
+  // ---- Records ---------------------------------------------------------------------------------------------------
+  const kept = [...streets].sort((a, b) => a - b).map(edgeById);
+  /** Where a court ends: half way along its boundary. */
+  const courtEnd = (edge: Edge): Point => [((corners[edge.a] as Point)[0] + (corners[edge.b] as Point)[0]) / 2, ((corners[edge.a] as Point)[1] + (corners[edge.b] as Point)[1]) / 2];
+  const isCourt = (edge: Edge) => edge.kind === 'court' && !edge.bridge;
+  const junctionIds = new Map<string, string>();
+  const layoutJunctions: Junction[] = [];
   const degree = new Map<number, number>();
   const atBridge = new Set<number>();
   for (const edge of kept) {
-    for (const end of [edge.from, edge.to]) {
+    for (const end of isCourt(edge) ? [edge.from as number] : [edge.a, edge.b]) {
       degree.set(end, (degree.get(end) ?? 0) + 1);
-      if (edge.kind === 'bridge') atBridge.add(end);
+      if (edge.bridge) atBridge.add(end);
     }
   }
-  for (const draft of exitDrafts) degree.set(draft.joins, (degree.get(draft.joins) ?? 0) + 1);
-  const layoutJunctions: Junction[] = keptJunctions.map((junction) => ({
-    id: junctionIds.get(junction) as string,
-    position: (junctions[junction] as { point: Point }).point,
-    kind: (junctions[junction] as { kind?: JunctionKind }).kind ?? (atBridge.has(junction) ? 'bridge-end' : degree.get(junction) === 1 ? 'dead-end' : 'crossing'),
-  }));
+  for (const draft of exitDrafts) if (draft) degree.set(draft.joins, (degree.get(draft.joins) ?? 0) + 1);
+  const junctionFor = (key: string, position: Point, kind: JunctionKind): string => {
+    let id = junctionIds.get(key);
+    if (!id) {
+      id = `junction-${number}-${pad(layoutJunctions.length + 1, 6)}`;
+      junctionIds.set(key, id);
+      layoutJunctions.push({ id, position, kind });
+    }
+    return id;
+  };
+  const cornerJunction = (corner: number) => junctionFor(`c${corner}`, corners[corner] as Point, gates.has(corner) ? 'gate' : atBridge.has(corner) ? 'bridge-end' : degree.get(corner) === 1 ? 'dead-end' : 'crossing');
+  for (const corner of [...degree.keys()].sort((a, b) => a - b)) cornerJunction(corner);
   const segmentIds = new Map<number, string>();
+  const segmentPoints = new Map<number, Point[]>();
   const segments: Segment[] = kept.map((edge, index) => {
     const id = `segment-${number}-${pad(index + 1, 6)}`;
     segmentIds.set(edge.id, id);
-    const exit = carries.has(edge.id) ? (brief.routes[carries.get(edge.id) as number] as SettlementBrief['routes'][number]) : edge.arterial !== undefined ? (brief.routes[edge.arterial] as SettlementBrief['routes'][number]) : undefined;
-    const kind: SegmentKind = edge.quay ? 'arterial' : edge.kind;
+    const court = isCourt(edge);
+    const from = court ? (edge.from as number) : edge.a;
+    const points: Point[] = court ? [corners[from] as Point, courtEnd(edge)] : [corners[edge.a] as Point, corners[edge.b] as Point];
+    segmentPoints.set(edge.id, points);
+    const route = edge.exit === undefined ? undefined : (brief.routes[edge.exit] as SettlementBrief['routes'][number]);
+    const kind: SegmentKind = edge.bridge ? 'bridge' : edge.kind === 'arterial' || edge.quay ? 'arterial' : edge.kind === 'street' ? 'street' : 'lane';
     return {
       id,
-      fromJunctionId: junctionIds.get(edge.from) as string,
-      toJunctionId: junctionIds.get(edge.to) as string,
-      points: edge.points,
+      fromJunctionId: cornerJunction(from),
+      toJunctionId: court ? junctionFor(`court${edge.id}`, courtEnd(edge), 'dead-end') : cornerJunction(edge.b),
+      points,
       kind,
-      width: edge.quay ? widths.arterial : widths[edge.kind],
-      ...(exit?.name !== undefined && { name: exit.name }),
-      ...(exit && { routeId: exit.routeId }),
+      width: widthOf(edge),
+      ...(route?.name !== undefined && { name: route.name }),
+      ...(route && { routeId: route.routeId }),
     };
   });
   const exits: Exit[] = exitDrafts.map((draft, position) => {
     const exit = brief.routes[position] as SettlementBrief['routes'][number];
-    const junctionId = `junction-${number}-${pad(layoutJunctions.length + 1, 6)}`;
-    layoutJunctions.push({ id: junctionId, position: draft.point, kind: 'exit' });
+    const { point, joins } = draft as { point: Point; joins: number };
+    const junctionId = junctionFor(`exit${position}`, point, 'exit');
     segments.push({
       id: `segment-${number}-${pad(segments.length + 1, 6)}`,
-      fromJunctionId: junctionIds.get(draft.joins) as string,
+      fromJunctionId: cornerJunction(joins),
       toJunctionId: junctionId,
-      points: [(junctions[draft.joins] as { point: Point }).point, draft.point],
+      points: [corners[joins] as Point, point],
       kind: 'arterial',
       width: widths.arterial,
       ...(exit.name !== undefined && { name: exit.name }),
@@ -1133,149 +1266,155 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     });
     return { id: `exit-${number}-${pad(position + 1, 3)}`, junctionId, routeId: exit.routeId, ...(exit.name !== undefined && { name: exit.name }), kind: exit.kind, bearing: exit.bearing };
   });
-
   const waters: Water[] = [];
   const waterId = () => `water-${number}-${pad(waters.length + 1, 3)}`;
-  if (riverLine) waters.push({ id: waterId(), kind: 'river', centreLine: riverLine, width: settings.riverWidth });
-  if (shore !== undefined && seaward) {
-    const along: Point = [-seaward[1], seaward[0]];
-    const corner = (out: number, sideways: number): Point => [seaward[0] * out + along[0] * sideways, seaward[1] * out + along[1] * sideways];
-    const span = 2 * beyond;
-    waters.push({ id: waterId(), kind: 'sea', polygon: [corner(shore, -span), corner(shore, span), corner(shore + span, span), corner(shore + span, -span)] });
-  }
+  if (river) waters.push({ id: waterId(), kind: 'river', centreLine: river.line, width: river.width, widths: river.widths });
+  if (coast) waters.push({ id: waterId(), kind: 'sea', polygon: coast.polygon });
 
-  // The wall: its line round the town, broken where it meets water, with the gates that streets were kept through.
+  // The wall: the boundaries between what is inside and what is outside, joined end to end, with the gates on it.
   const walls: Wall[] = [];
-  if (band && wallRadius !== undefined) {
-    const gates = band.radials.filter((radial) => radial.gate && (radialEdges.get(radial) ?? []).every((edge) => streets.has(edge.id)));
-    const line = cuts(wallRadius, 0, TAU, band.radials.filter((radial) => radial.gate).map((radial) => turn(bearingAt(band as Ring, radial, wallRadius as number)))).slice(0, -1);
-    const points = line.map((bearing) => at(wallRadius as number, bearing));
-    const wet = points.map((point) => inSea(point) || (riverLine !== undefined && distanceToPolyline(point, riverLine) < settings.riverWidth / 2 + grown.wall.width / 2 + roadside));
-    const gateOf = (point: Point) => gates.find((radial) => distance((junctions[gateJunctions.get(radial) as number] as { point: Point }).point, point) < EPSILON);
-    const record = (stretch: Point[], closed: boolean) => {
-      if (stretch.length < 2) return;
+  if (walled) {
+    const wallEdges = edges.filter((edge) => edge.kind === 'wall' && !tooWet(corners[edge.a] as Point) && !tooWet(corners[edge.b] as Point));
+    const at = new Map<number, Edge[]>();
+    for (const edge of wallEdges) for (const corner of [edge.a, edge.b]) at.set(corner, [...(at.get(corner) ?? []), edge]);
+    const done = new Set<number>();
+    const follow = (start: number): number[] => {
+      const line = [start];
+      for (let corner = start; ; ) {
+        const next = (at.get(corner) ?? []).find((edge) => !done.has(edge.id));
+        if (!next) break;
+        done.add(next.id);
+        corner = next.a === corner ? next.b : next.a;
+        line.push(corner);
+      }
+      return line;
+    };
+    // Open stretches begin at an end; whatever is left after them is a closed ring.
+    const lines: number[][] = [];
+    const ends = [...at].filter(([, list]) => list.length === 1).map(([corner]) => corner).sort((a, b) => a - b);
+    for (const corner of [...ends, ...[...at.keys()].sort((a, b) => a - b)]) if ((at.get(corner) ?? []).some((edge) => !done.has(edge.id))) lines.push(follow(corner));
+    for (const line of lines) {
+      if (line.length < 2) continue;
+      const closed = line.length > 3 && line[0] === line[line.length - 1];
+      const own = closed ? line.slice(0, -1) : line;
       walls.push({
         id: `wall-${number}-${pad(walls.length + 1, 3)}`,
-        line: stretch,
+        line: own.map((corner) => corners[corner] as Point),
         closed,
         width: grown.wall.width,
-        gates: stretch.flatMap((point) => {
-          const radial = gateOf(point);
-          return radial ? [{ junctionId: junctionIds.get(gateJunctions.get(radial) as number) as string, buildingId: (radial.gate as Building).id, arterial: radial.arterial !== undefined }] : [];
-        }),
+        gates: own
+          .filter((corner, index) => gates.has(corner) && degree.has(corner) && own.indexOf(corner) === index)
+          .map((corner) => ({ junctionId: cornerJunction(corner), buildingId: (gates.get(corner) as Building).id, arterial: (ways[corner] as Way[]).some((way) => streets.has(way.edge) && edgeById(way.edge).kind === 'arterial') })),
       });
-    };
-    if (!wet.some(Boolean)) record(points, true);
-    else {
-      // Each dry stretch between two wet ones is a wall of its own.
-      const start = wet.findIndex(Boolean);
-      let stretch: Point[] = [];
-      for (let step = 1; step <= points.length; step++) {
-        const index = (start + step) % points.length;
-        if (!wet[index]) stretch.push(points[index] as Point);
-        else {
-          record(stretch, false);
-          stretch = [];
-        }
-      }
     }
-    const kept = new Set(walls.flatMap((wall) => wall.gates.map((gate) => gate.buildingId)));
-    const lost = gates.filter((radial) => !kept.has((radial.gate as Building).id));
-    if (lost.length > 0 || gates.length !== gatehouses.length) fail(`${gatehouses.length} gatehouses but ${kept.size} gates in the wall`);
+    const made = new Set(walls.flatMap((wall) => wall.gates.map((gate) => gate.buildingId))).size;
+    if (made !== gatehouses.length) fail(`${gatehouses.length} gatehouses but ${made} gates in the wall`);
   }
 
   // Lots are numbered as their buildings are.
   const buildingOrder = new Map(city.buildings.map((building, index) => [building.id, index]));
-  const circleEdge = (circle: number, bearing: number): Edge => {
-    const list = ringEdges[circle] as Edge[];
-    return list.find((edge) => after(bearing, (edge.span as [number, number])[0] - 1e-12) <= (edge.span as [number, number])[1] + 1e-12) ?? (list[0] as Edge);
-  };
-  /** A piece of a block between two distances and two bearings, as a polygon on the map, cut wherever the block's lots have corners. */
-  const piece = (cell: Cell, near: number, far: number, from: number, to: number): Point[] => [
-    ...cuts(near, from, to, cell.bearings).map((bearing) => at(near, bearing)),
-    ...steps(near, far, cell.radii).slice(1).map((radius) => at(radius, to)),
-    ...cuts(far, from, to, cell.bearings).reverse().slice(1).map((bearing) => at(far, bearing)),
-    ...steps(near, far, cell.radii).reverse().slice(1, -1).map((radius) => at(radius, from)),
-  ];
-  /** A piece of a strip along a main road: its front follows the road, and it is as deep at every point as the lot is. */
-  const stripPiece = (lot: Placed, deep: number): Point[] => {
-    const side = lot.track as 'left' | 'right';
-    const sign = side === 'left' ? 1 : -1;
-    const front = (radius: number) => sideBearing(lot.cell, side, radius);
-    const back = (radius: number) => front(radius) + (sign * deep) / radius;
-    const radii = steps(lot.near, lot.far, lot.cell.radii);
-    const end = (radius: number, forward: boolean) => {
-      const [a, b] = [Math.min(front(radius), back(radius)), Math.max(front(radius), back(radius))];
-      const points = cuts(radius, a, b, lot.cell.bearings).map((bearing) => at(radius, bearing));
-      return forward === sign > 0 ? points : points.reverse();
-    };
-    return [...radii.map((radius) => at(radius, front(radius))), ...end(lot.far, true).slice(1), ...radii.reverse().slice(1).map((radius) => at(radius, back(radius))), ...end(lot.near, false).slice(1, -1)];
-  };
   placed.sort((a, b) => (buildingOrder.get(a.building.id) as number) - (buildingOrder.get(b.building.id) as number));
-  // The breaks of each block are known only now that every lot is placed.
-  // A lot's building stands across its frontage, as deep as the pack's coverage of the lot: its back is a break too.
-  for (const lot of placed) {
-    const coverage = footprintCoverageOf(lot.building.type, pack);
-    if (lot.track !== 'left' && lot.track !== 'right') {
-      if (coverage > 0) lot.cell.radii.push(lot.track === 'inner' ? lot.near + lot.depth * coverage : lot.far - lot.depth * coverage);
-      continue;
+  const entranceOn = (street: number, door: Point) => ({ segmentId: segmentIds.get(street) as string, point: projectOnPolyline(segmentPoints.get(street) as Point[], door).point });
+  // Last, each lot is drawn back from any roadway, wall or bank that it still stands on: blocks keep clear of
+  // what runs along their own sides, but not always of what passes a corner.
+  const barriers: Array<{ a: Point; b: Point; half: number }> = [
+    ...segments.flatMap((segment) => segment.points.slice(1).map((point, index) => ({ a: segment.points[index] as Point, b: point, half: segment.width / 2 }))),
+    ...walls.flatMap((wall) => wall.line.map((point, index) => ({ a: point, b: wall.line[(index + 1) % wall.line.length] as Point, half: wall.width / 2 })).slice(0, wall.closed ? undefined : -1)),
+  ];
+  const TRIM_SQUARE = 60;
+  const filedBarriers = new Map<string, number[]>();
+  barriers.forEach((barrier, index) => {
+    const box = boxOf([barrier.a, barrier.b], barrier.half);
+    for (let x = Math.floor(box.minX / TRIM_SQUARE); x <= Math.floor(box.maxX / TRIM_SQUARE); x++) {
+      for (let y = Math.floor(box.minY / TRIM_SQUARE); y <= Math.floor(box.maxY / TRIM_SQUARE); y++) {
+        const key = `${x}:${y}`;
+        const list = filedBarriers.get(key);
+        if (list) list.push(index);
+        else filedBarriers.set(key, [index]);
+      }
     }
-    for (const radius of [lot.near, lot.far]) {
-      const front = sideBearing(lot.cell, lot.track, radius);
-      const back = ((lot.track === 'left' ? 1 : -1) * lot.depth) / radius;
-      lot.cell.bearings.push(front, front + back, front + back * coverage);
+  });
+  /** The boundaries a lot must be drawn back to; none for nearly every lot. */
+  const trimsOf = (polygon: Point[]): Array<{ at: Point; normal: Point }> => {
+    const planes: Array<{ at: Point; normal: Point }> = [];
+    let left = polygon;
+    const box = boxOf(polygon);
+    const near = new Set<number>();
+    for (let x = Math.floor(box.minX / TRIM_SQUARE); x <= Math.floor(box.maxX / TRIM_SQUARE); x++) for (let y = Math.floor(box.minY / TRIM_SQUARE); y <= Math.floor(box.maxY / TRIM_SQUARE); y++) for (const index of filedBarriers.get(`${x}:${y}`) ?? []) near.add(index);
+    for (const index of [...near].sort((one, other) => one - other)) {
+      const { a, b, half } = barriers[index] as { a: Point; b: Point; half: number };
+      if (left.length < 3 || distancePolygonToPolyline(left, [a, b]) >= half - 1e-9) continue;
+      const length = distance(a, b) || 1;
+      const middle = polygonCentroid(left);
+      let normal: Point = [-(b[1] - a[1]) / length, (b[0] - a[0]) / length];
+      if ((middle[0] - a[0]) * normal[0] + (middle[1] - a[1]) * normal[1] < 0) normal = [-normal[0], -normal[1]];
+      const plane = { at: [a[0] + normal[0] * (half + 0.05), a[1] + normal[1] * (half + 0.05)] as Point, normal };
+      planes.push(plane);
+      left = clip(left, plane);
     }
-  }
+    if (river) {
+      // Along its sides as well as at its corners: a bend can reach in between two corners.
+      const along = polygon.flatMap((point, index) => {
+        const next = polygon[(index + 1) % polygon.length] as Point;
+        const pieces = Math.max(1, Math.ceil(distance(point, next) / 3));
+        return Array.from({ length: pieces }, (_, at): Point => [point[0] + ((next[0] - point[0]) * at) / pieces, point[1] + ((next[1] - point[1]) * at) / pieces]);
+      });
+      for (const point of along) {
+        const found = river.nearest(point);
+        if (left.length < 3 || found.away - found.width / 2 > 0.2 || found.away === 0) continue;
+        const normal: Point = [(point[0] - found.point[0]) / found.away, (point[1] - found.point[1]) / found.away];
+        const plane = { at: [found.point[0] + normal[0] * (found.width / 2 + 0.5), found.point[1] + normal[1] * (found.width / 2 + 0.5)] as Point, normal };
+        planes.push(plane);
+        left = clip(left, plane);
+      }
+    }
+    return planes;
+  };
+  const trimmed = (polygon: Point[], planes: Array<{ at: Point; normal: Point }>) => planes.reduce((left, plane) => (left.length < 3 ? left : clip(left, plane)), polygon);
   let builtArea = 0;
   const lots: Lot[] = [];
-  const entranceOn = (edge: Edge, point: Point) => ({ segmentId: segmentIds.get(edge.id) as string, point: projectOnPolyline(edge.points, point).point });
+  const places: Place[] = [];
   const allLots: Array<Placed | 'plaza'> = [...placed];
   if (plazaBuilding) allLots.splice(buildingOrder.get(plazaBuilding.id) as number, 0, 'plaza');
-  const places: Place[] = [];
   allLots.forEach((lot, index) => {
     const id = `lot-${number}-${pad(index + 1, 6)}`;
     if (lot === 'plaza') {
-      // The plaza is the lot of its building: open ground, with the street all the way round it.
+      // The plaza is the lot of its building: open ground, with a street all the way round it.
       const building = plazaBuilding as Building;
-      const polygon = cuts(plazaRadius, 0, TAU, corners[0]).slice(0, -1).map((bearing) => at(plazaRadius, bearing));
-      const toward = exitBearings.length > 0 ? arterialBearing(0, circles[0] as number) + 0.3 : 0;
-      builtArea += polygonArea(polygon);
-      lots.push({ id, buildingId: building.id, polygon, districtId: building.districtId, entrance: entranceOn(circleEdge(0, toward), at(circles[0] as number, toward)), footprints: [] });
-      places.push({ id: `place-${number}-001`, kind: 'plaza', polygon, buildingId: building.id });
+      const block = blockOf(plazaCell as Cell);
+      if (block.tracks.length === 0) fail('the plaza has no street round it');
+      const track = block.tracks.reduce((longest, entry) => (entry.to - entry.from > longest.to - longest.from ? entry : longest));
+      const open = trimmed(block.polygon, trimsOf(block.polygon));
+      builtArea += polygonArea(open);
+      lots.push({ id, buildingId: building.id, polygon: open, districtId: building.districtId, entrance: entranceOn(track.street, frontage(track, (track.from + track.to) / 2)), footprints: [] });
+      places.push({ id: `place-${number}-001`, kind: 'plaza', polygon: open, buildingId: building.id });
       return;
     }
-    const { cell, building } = lot;
-    const coverage = footprintCoverageOf(building.type, pack);
-    let polygon: Point[];
-    let footprint: Point[] | undefined;
-    let entrance: Lot['entrance'];
-    if (lot.track === 'left' || lot.track === 'right') {
-      polygon = stripPiece(lot, lot.depth);
-      if (coverage > 0) footprint = stripPiece(lot, lot.depth * coverage);
-      const radial = lot.track === 'left' ? cell.left : cell.right;
-      const middle = (lot.near + lot.far) / 2;
-      entrance = entranceOn((radialEdges.get(radial) as Edge[])[0] as Edge, at(middle, bearingAt(cell.ring, radial, middle) + (lot.track === 'right' ? cell.shift : 0)));
-    } else {
-      polygon = piece(cell, lot.near, lot.far, lot.from, lot.to);
-      const inward = lot.track === 'inner';
-      if (coverage > 0) footprint = inward ? piece(cell, lot.near, lot.near + lot.depth * coverage, lot.from, lot.to) : piece(cell, lot.far - lot.depth * coverage, lot.far, lot.from, lot.to);
-      {
-        const circle = inward ? cell.ring.index : cell.ring.index + 1;
-        const bearing = (lot.from + lot.to) / 2;
-        entrance = entranceOn(circleEdge(circle, bearing), at(circles[circle] as number, bearing));
+    const coverage = footprintCoverageOf(lot.building.type, pack);
+    let footprint: Point[] = [];
+    if (coverage > 0) {
+      if (lot.track && lot.cut) footprint = frontOf(lot.track, lot.cut, coverage);
+      else {
+        // A building with a block to itself stands in the middle of it, covering the pack's share of the ground.
+        const middle = polygonCentroid(lot.polygon);
+        const scale = Math.sqrt(coverage);
+        footprint = lot.polygon.map(([x, y]): Point => [middle[0] + (x - middle[0]) * scale, middle[1] + (y - middle[1]) * scale]);
       }
     }
+    const planes = trimsOf(lot.polygon);
+    const polygon = trimmed(lot.polygon, planes);
+    if (polygon.length < 3) fail(`the lot of ${lot.building.id} stands wholly on a roadway, a wall or the water`);
+    if (planes.length > 0 && footprint.length >= 3) footprint = trimmed(footprint, planes);
     builtArea += polygonArea(polygon);
-    lots.push({ id, buildingId: building.id, polygon, districtId: building.districtId, entrance, footprints: footprint ? [footprint] : [] });
+    lots.push({ id, buildingId: lot.building.id, polygon, districtId: lot.building.districtId, entrance: entranceOn(lot.street, lot.door), footprints: footprint.length >= 3 ? [footprint] : [] });
   });
 
-  // A district's area is its blocks, and for the district of the plaza the ground of the plaza and its street too.
+  // A district's area is its blocks.
   let outlineArea = 0;
   const districtAreas = city.districts.flatMap((district: District, index) => {
     const own = [...(cellsOf[index] as number[])].sort((a, b) => a - b).map((id) => cells[id] as Cell);
     if (own.length === 0) return [];
-    const polygons = own.map((cell) => cell.polygon);
-    if (plazaBuilding?.districtId === district.id) polygons.push(cuts(circles[0] as number, 0, TAU, corners[0]).slice(0, -1).map((bearing) => at(circles[0] as number, bearing)));
+    const polygons = own.map((cell) => outlineOf(cell));
     for (const polygon of polygons) outlineArea += polygonArea(polygon);
     const middle: Point = [own.reduce((sum, cell) => sum + cell.centre[0], 0) / own.length, own.reduce((sum, cell) => sum + cell.centre[1], 0) / own.length];
     const label = own.reduce((nearest, cell) => (distance(cell.centre, middle) < distance(nearest.centre, middle) ? cell : nearest));
@@ -1299,6 +1438,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       bounds: boxOf(everyPoint),
       builtArea,
       residentsPerHectare: builtArea === 0 ? 0 : city.people.length / (builtArea / 10_000),
+      ringShare: ringShare(segments),
+      roadsOut,
       layoutVersion: LAYOUT_VERSION,
       generator: GROWN_GENERATOR,
       pack: { name: pack.pack.name, version: pack.pack.version },

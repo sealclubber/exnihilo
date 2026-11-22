@@ -24,9 +24,10 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
 /**
  * Raised whenever a layout for the same inputs would change. Version 4 places the civic buildings a pack spreads,
  * such as wells, on streets of their own within a district instead of side by side. Version 5 adds walls with
- * gates and open places to the format, and a second generator, `grown`.
+ * gates and open places to the format, and a second generator, `grown`. Version 6 lets a river's width vary along
+ * its length, and has the grown generator scatter blocks and leave streets between them.
  */
-export const LAYOUT_VERSION = 5;
+export const LAYOUT_VERSION = 6;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -92,7 +93,10 @@ export const WaterSchema = z.discriminatedUnion('kind', [
     kind: z.literal('river'),
     /** From upstream to downstream. */
     centreLine: polyline,
+    /** The width; where `widths` is given, the mean of them. */
     width: metres,
+    /** The width at each point of the centre line, for a river whose width varies along its length. */
+    widths: z.array(metres).optional(),
   }),
   z.strictObject({ id: WaterIdSchema, kind: z.literal('sea'), polygon }),
 ]);
@@ -172,6 +176,13 @@ export const LayoutSummarySchema = z.strictObject({
   /** The total area of the lots, in square metres. */
   builtArea: z.number().nonnegative(),
   residentsPerHectare: z.number().nonnegative(),
+  /**
+   * The share of street and lane length that runs round the centre or straight to it, within 20 degrees, leaving out
+   * the middle 30 metres. A town with no preferred direction has about 0.44; a town of rings and spokes nearly 1.
+   */
+  ringShare: z.number().min(0).max(1),
+  /** How many roads leave the centre: the main roads to the brief's exits, and local streets besides. */
+  roadsOut: count,
   layoutVersion: z.int().positive(),
   /** Which layout generator made this, so that generators can coexist. */
   generator: text,

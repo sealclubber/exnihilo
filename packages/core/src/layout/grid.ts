@@ -39,6 +39,7 @@ import {
 import { Heap } from './heap.ts';
 import { BEARING_TOLERANCE, checkLayout } from './invariants.ts';
 import { arrangeTrades, placementOrder } from './shared.ts';
+import { ringShare } from './measure.ts';
 import { type Exit, type Junction, type Layout, type Lot, type Segment, type SegmentKind, type Water, LAYOUT_VERSION } from './records.ts';
 
 /** The name this generator records in a layout's summary. */
@@ -803,6 +804,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, se
       bounds: boxOf(everyPoint),
       builtArea,
       residentsPerHectare: builtArea === 0 ? 0 : city.people.length / (builtArea / 10_000),
+      ringShare: ringShare(segments),
+      roadsOut: exits.length,
       layoutVersion: LAYOUT_VERSION,
       generator: GRID_GENERATOR,
       pack: { name: pack.pack.name, version: pack.pack.version },

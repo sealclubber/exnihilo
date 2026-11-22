@@ -32,6 +32,7 @@ import {
   sharedBoundaryLength,
   strictlyInside,
 } from './geometry.ts';
+import { riverWidthAt } from './measure.ts';
 import { type Layout, type Lot, type Segment, type Water, LAYOUT_VERSION } from './records.ts';
 
 /** An exit, or a river's end, must lie within this many degrees of the brief's bearing, seen from the centre. */
@@ -44,10 +45,35 @@ const VERGE = 3;
 const GATE_REACH = 0.01;
 const ORIGIN: Point = [0, 0];
 
+/**
+ * How far a shape is from a river's water: negative by as much as it reaches into it. The river's width may vary
+ * along its length, so each piece of its line is taken at the wider of its two ends. `closed` says the points are
+ * a polygon's and not a line's.
+ */
+export function gapToRiver(points: readonly Point[], river: Extract<Water, { kind: 'river' }>, closed: boolean): number {
+  const shape = closed ? [...points, points[0] as Point] : points;
+  const box = boxOf(shape);
+  let nearest = Infinity;
+  const widest = river.widths ? river.widths.reduce((most, width) => Math.max(most, width), 0) : river.width;
+  for (let at = 1; at < river.centreLine.length; at++) {
+    const a = river.centreLine[at - 1] as Point;
+    const b = river.centreLine[at] as Point;
+    // A piece too far from the shape's box to matter is passed over.
+    const reach = Math.max(nearest, 0) + widest / 2;
+    if (Math.max(a[0], b[0]) < box.minX - reach || Math.min(a[0], b[0]) > box.maxX + reach || Math.max(a[1], b[1]) < box.minY - reach || Math.min(a[1], b[1]) > box.maxY + reach) {
+      if (nearest !== Infinity) continue;
+    }
+    const half = Math.max(riverWidthAt(river, at - 1), riverWidthAt(river, at)) / 2;
+    const away = (closed ? distancePolygonToPolyline(points, [a, b]) : distanceBetweenPolylines(shape, [a, b])) - half;
+    if (away < nearest) nearest = away;
+  }
+  return nearest;
+}
+
 /** The distance from a polygon to a body of water. Zero when they meet. */
 export function distanceToWater(polygon: readonly Point[], water: Water): number {
   if (water.kind === 'sea') return distanceBetweenPolygons(polygon, water.polygon);
-  return Math.max(0, distancePolygonToPolyline(polygon, water.centreLine) - water.width / 2);
+  return Math.max(0, gapToRiver(polygon, water, true));
 }
 
 export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, pack: SettingPack): string[] {
@@ -208,7 +234,7 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       }
     }
     for (const water of waters) {
-      const wet = water.kind === 'sea' ? polygonsOverlap(lot.polygon, water.polygon) : distancePolygonToPolyline(lot.polygon, water.centreLine) < water.width / 2 - EPSILON;
+      const wet = water.kind === 'sea' ? polygonsOverlap(lot.polygon, water.polygon) : gapToRiver(lot.polygon, water, true) < -EPSILON;
       if (wet) problem(`${lot.id} overlaps ${water.id}, the ${water.kind}`);
     }
   }
@@ -266,7 +292,7 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     for (const water of waters) {
       const wet =
         water.kind === 'river'
-          ? distanceBetweenPolylines(segment.points, water.centreLine) < water.width / 2 + segment.width / 2 - EPSILON
+          ? gapToRiver(segment.points, water, false) < segment.width / 2 - EPSILON
           : segment.points.some((point) => strictlyInside(point, water.polygon)) ||
             segment.points.some((point, at) => at > 0 && crossingsOfPolyline(segment.points[at - 1] as Point, point, [...water.polygon, water.polygon[0] as Point]) > 0);
       if (wet) problem(`${segment.id}, which is not a bridge, enters ${water.id}, the ${water.kind}`);
@@ -407,6 +433,9 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
   }
   if (density < pack.layout.density.min || density > pack.layout.density.max) {
     problem(`there are ${density.toFixed(0)} residents per hectare of built area, outside the pack's limits of ${pack.layout.density.min} to ${pack.layout.density.max}`);
+  }
+  for (const water of waters) {
+    if (water.kind === 'river' && water.widths && water.widths.length !== water.centreLine.length) problem(`${water.id} has ${water.widths.length} widths for the ${water.centreLine.length} points of its line`);
   }
   if (summary.settlementId !== brief.id) problem(`the summary names ${summary.settlementId}, not ${brief.id}`);
   if (summary.layoutVersion !== LAYOUT_VERSION) problem(`the summary gives layout version ${summary.layoutVersion}, not ${LAYOUT_VERSION}`);
