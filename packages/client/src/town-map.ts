@@ -24,6 +24,8 @@ const WATER = '#a9cbe8';
 const INK = '#23272e';
 /** Open paved ground, such as a plaza: paler than a street and warmer than the land, with no district's tint. */
 const PAVED = '#ebe4d2';
+/** A green: open ground inside the town that belongs to no building. */
+const GREEN = '#dfe8cf';
 /** A town wall: the darkest line on the map, so that it reads as the one thing streets do not cross. */
 const WALL = '#4b443a';
 /** A wall is never drawn thinner than this many pixels, so that it can be seen with the whole town in view. */
@@ -180,6 +182,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
   /** Water, open places and walls are built once per layout, in map coordinates, like the lots and the streets. */
   let waterPath = new Path2D();
   let placePath = new Path2D();
+  let greenPath = new Path2D();
   let walls: Array<{ width: number; standing: Path2D; gates: Path2D; gateCount: number }> = [];
   let districtNames = new Map<string, string>();
   /** Paths are built once per layout, in map coordinates, and redrawn under the view's transform. */
@@ -268,9 +271,12 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
     // An open place is paved ground with a thin edge.
     target.fillStyle = PAVED;
     target.fill(placePath);
+    target.fillStyle = GREEN;
+    target.fill(greenPath);
     target.strokeStyle = OUTLINE;
     target.lineWidth = hairline;
     target.stroke(placePath);
+    target.stroke(greenPath);
     // A lot is open ground, drawn faintly, with its buildings drawn solidly on it: a yard and a house can be told apart.
     for (const { colour, ground, built } of lotPaths) {
       target.globalAlpha = GROUND_ALPHA;
@@ -835,8 +841,9 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
       for (const water of next.waters) trace(waterPath, water.kind === 'sea' ? water.polygon : riverOutline(water), true);
       // An open place is the lot of its building: it is drawn as paved ground, not in its district's tint.
       placePath = new Path2D();
-      for (const place of next.places) trace(placePath, place.polygon, true);
-      const paved = new Set(next.places.map((place) => place.buildingId));
+      greenPath = new Path2D();
+      for (const place of next.places) trace(place.kind === 'plaza' ? placePath : greenPath, place.polygon, true);
+      const paved = new Set(next.places.flatMap((place) => (place.kind === 'plaza' ? [place.buildingId] : [])));
       // A gate's opening is as long as the widest street through it and the wall's own width besides.
       const junctions = new Map(next.junctions.map((junction) => [junction.id, junction.position]));
       const widest = new Map<string, number>();

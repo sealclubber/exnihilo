@@ -299,9 +299,10 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     if (junction.kind === 'gate' && !gateJunctions.has(junction.id)) problem(`${junction.id} is marked as a gate but no wall has it`);
   }
   for (const place of places) {
-    if (!buildingById.has(place.buildingId)) problem(`${place.id} belongs to ${place.buildingId}, which does not exist`);
+    const owner = place.kind === 'plaza' ? place.buildingId : undefined;
+    if (owner !== undefined && !buildingById.has(owner)) problem(`${place.id} belongs to ${owner}, which does not exist`);
     for (const lot of lots) {
-      if (lot.buildingId !== place.buildingId && polygonsOverlap(lot.polygon, place.polygon)) problem(`${lot.id} overlaps ${place.id}`);
+      if (lot.buildingId !== owner && polygonsOverlap(lot.polygon, place.polygon)) problem(`${lot.id} overlaps ${place.id}`);
     }
     for (const segment of segments) {
       if (distancePolygonToPolyline(place.polygon, segment.points) < segment.width / 2 - EPSILON) problem(`${place.id} overlaps the roadway of ${segment.id}`);
@@ -446,7 +447,7 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
   if (summary.counts.gates !== gateJunctions.size) problem(`the summary counts ${summary.counts.gates} gates but there are ${gateJunctions.size}`);
   // A wall and a plaza exactly where the brief flags them, when the generator makes them at all.
   if (walls.length > 0 && !brief.flags.walls) problem('the layout has a wall but the brief is not flagged for walls');
-  if (places.length > 0 && !brief.flags.plaza) problem('the layout has a plaza but the brief is not flagged for one');
+  if (places.some((place) => place.kind === 'plaza') && !brief.flags.plaza) problem('the layout has a plaza but the brief is not flagged for one');
   if (Math.abs(summary.builtArea - builtArea) > EPSILON * Math.max(builtArea, 1)) {
     problem(`the summary gives a built area of ${summary.builtArea} but the lots cover ${builtArea}`);
   }

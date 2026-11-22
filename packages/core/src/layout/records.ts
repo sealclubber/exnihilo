@@ -27,7 +27,7 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * gates and open places to the format, and a second generator, `grown`. Version 6 lets a river's width vary along
  * its length, and has the grown generator scatter blocks and leave streets between them.
  */
-export const LAYOUT_VERSION = 6;
+export const LAYOUT_VERSION = 7;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -39,6 +39,7 @@ export const ExitIdSchema = recordId('exit', 3);
 export const WaterIdSchema = recordId('water', 3);
 export const WallIdSchema = recordId('wall', 3);
 export const PlaceIdSchema = recordId('place', 3);
+export const BlockIdSchema = recordId('block', 6);
 
 const text = z.string().min(1);
 const count = z.int().nonnegative();
@@ -123,13 +124,14 @@ export const WallSchema = z.strictObject({
 });
 export type Wall = z.infer<typeof WallSchema>;
 
-/** An open place people can stand in, such as a plaza: a polygon, and the building it belongs to, whose lot it is. */
-export const PlaceSchema = z.strictObject({
-  id: PlaceIdSchema,
-  kind: z.literal('plaza'),
-  polygon,
-  buildingId: BuildingIdSchema,
-});
+/**
+ * An open place people can stand in: a plaza, which is the lot of the building it belongs to, or a green, open
+ * ground inside the town that belongs to no building.
+ */
+export const PlaceSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ id: PlaceIdSchema, kind: z.literal('plaza'), polygon, buildingId: BuildingIdSchema }),
+  z.strictObject({ id: PlaceIdSchema, kind: z.literal('green'), polygon }),
+]);
 export type Place = z.infer<typeof PlaceSchema>;
 
 export const LotSchema = z.strictObject({
@@ -155,6 +157,18 @@ export const DistrictAreaSchema = z.strictObject({
   labelPoint: PointSchema,
 });
 export type DistrictArea = z.infer<typeof DistrictAreaSchema>;
+
+/**
+ * A block: the ground between streets that lots are cut from, with the order the town grew over it. `growthRank` is
+ * 0 for the first ground built on and 1 for the last. A block belongs to a district unless it is a green.
+ */
+export const BlockSchema = z.strictObject({
+  id: BlockIdSchema,
+  polygon,
+  districtId: DistrictIdSchema.optional(),
+  growthRank: z.number().min(0).max(1),
+});
+export type Block = z.infer<typeof BlockSchema>;
 
 export const LayoutSummarySchema = z.strictObject({
   settlementId: SettlementIdSchema,
@@ -201,6 +215,8 @@ export const LayoutSchema = z.strictObject({
   /** Empty for most towns. */
   walls: z.array(WallSchema),
   places: z.array(PlaceSchema),
+  /** The blocks of a generator that has them; the grid has none. */
+  blocks: z.array(BlockSchema).optional(),
   summary: LayoutSummarySchema,
 });
 export type Layout = z.infer<typeof LayoutSchema>;

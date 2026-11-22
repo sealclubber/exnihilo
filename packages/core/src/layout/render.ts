@@ -17,6 +17,7 @@ const WATER = '#a9cbe8';
 const INK = '#23272e';
 const WALL = '#3b3530';
 const PLAZA = '#efe6cf';
+const GREEN = '#dfe8cf';
 const STREETS: Record<SegmentKind, string> = { arterial: '#d8c6a4', street: '#dcd8ce', lane: '#e6e3da', bridge: '#9a8f7d' };
 const DISTRICTS = ['#e6b8af', '#f9cb9c', '#ffe599', '#b6d7a8', '#a2c4c9', '#a4c2f4', '#b4a7d6', '#d5a6bd', '#d9d2c5', '#c9daf8', '#d0e0c0', '#ead1dc'];
 /** Streets are drawn in this order, so that the main roads lie on top. */
@@ -60,8 +61,8 @@ export function renderLayoutSvg(layout: Layout, options: RenderOptions = {}): st
     lines.push(`<path d="${area.polygons.map((polygon) => path(polygon, true)).join('')}" fill="${tint.get(area.districtId)}" fill-opacity="0.22"/>`);
   }
   // Places, then streets by kind, round at every join and end so that bends and junctions have no gaps.
-  const placeOf = new Set(layout.places.map((place) => place.buildingId));
-  for (const place of layout.places) lines.push(`<path d="${path(place.polygon, true)}" fill="${PLAZA}" stroke="${INK}" stroke-opacity="0.35" stroke-width="0.6"/>`);
+  const placeOf = new Set(layout.places.flatMap((place) => (place.kind === 'plaza' ? [place.buildingId] : [])));
+  for (const place of layout.places) lines.push(`<path d="${path(place.polygon, true)}" fill="${place.kind === 'plaza' ? PLAZA : GREEN}" stroke="${INK}" stroke-opacity="0.35" stroke-width="0.6"/>`);
   for (const kind of ORDER) {
     const drawn = layout.segments.filter((segment) => segment.kind === kind);
     if (drawn.length === 0) continue;

@@ -123,20 +123,23 @@ function outlines(seeds: readonly Seed[], bound: number): Array<Point[] | undefi
 }
 
 /**
- * Builds the fabric of a set of seeds within a disc: evens the scatter out once, by moving every seed that is not
- * fixed to the middle of its cell, then takes the cells, their corners and the edges between them. Edges shorter
+ * Builds the fabric of a set of seeds within a disc: evens the scatter out once unless `relax` is false, by moving
+ * every seed that is not fixed to the middle of its cell, then takes the cells, their corners and the edges between them. Edges shorter
  * than `shortest` are closed up, their two ends becoming one corner. `blocked` says where no seed may be moved to.
  */
-export function weave(seeds: readonly Seed[], radius: number, shortest: number, blocked: (point: Point) => boolean): Fabric {
+export function weave(seeds: readonly Seed[], radius: number, shortest: number, blocked: (point: Point) => boolean, relax = true): Fabric {
   const bound = radius * 1.25;
-  // One pass only: more makes honeycomb.
-  const first = outlines(seeds, bound);
-  const evened = seeds.map((seed, index): Seed => {
-    const polygon = first[index];
-    if (seed.fixed || !polygon || polygonArea(polygon) <= 0) return seed;
-    const middle = polygonCentroid(polygon);
-    return blocked(middle) ? seed : { ...seed, point: middle };
-  });
+  // One pass only: more makes honeycomb. Seeds laid in a pattern of their own are not evened out at all.
+  let evened: readonly Seed[] = seeds;
+  if (relax) {
+    const first = outlines(seeds, bound);
+    evened = seeds.map((seed, index): Seed => {
+      const polygon = first[index];
+      if (seed.fixed || !polygon || polygonArea(polygon) <= 0) return seed;
+      const middle = polygonCentroid(polygon);
+      return blocked(middle) ? seed : { ...seed, point: middle };
+    });
+  }
   const polygons = outlines(evened, bound);
 
   // Corners that two cells give at the same place are one corner.

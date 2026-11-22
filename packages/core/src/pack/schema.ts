@@ -350,30 +350,76 @@ export type LayoutGenerator = z.infer<typeof LayoutGeneratorSchema>;
  * The numbers of the `grown` generator: a town of blocks scattered over its ground, with the streets the gaps
  * between them, on water that has no straight edge.
  */
+const span = z.strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() });
 const GrownSettingsSchema = z.strictObject({
-  /** How far apart blocks are seeded: in the middle of town, and at its edge. Blocks are small in the old core and larger outside. */
-  spacing: z.strictObject({ centre: metres, edge: metres }),
-  /** A gap between blocks shorter than this is closed up: its two ends become one junction. */
-  shortestStreet: metres,
-  /** A town has at least this many roads leaving its centre: where the brief's exits are fewer, local streets are added in the widest gaps. */
-  roadsOut: wholeNumber,
-  /** How much more a main road counts a stretch that leads away from where it is going, and how much its line is eased afterwards (0 not at all, 1 fully). */
-  wander: z.strictObject({ aside: z.number().nonnegative(), ease: probability }),
-  /** Of the gaps between blocks: the share closed so that two blocks become one, the share of those that keep a dead-end court, and the share of the rest that are lanes. */
-  fabric: z.strictObject({ merge: probability, court: probability, lane: probability }),
+  /**
+   * Highways: every route of the brief, laid before anything else. `wander` is how far a highway strays aside from
+   * a straight line, in metres; two exits within `through` degrees of opposite make one road through the centre;
+   * a highway runs on `beyond` metres past the last of the town before its exit.
+   */
+  highways: z.strictObject({ wander: z.number().nonnegative(), through: z.number().nonnegative(), beyond: metres }),
+  /**
+   * Arterials branch off each highway on alternating sides, `spacing` metres apart, along a stretch `span` times the
+   * square root of the town's ground either side of the centre. One near the centre is `reach` times that root long,
+   * and each is `fall` metres shorter for every metre further along, times a share drawn from `spread`. It leaves
+   * at a right angle turned by up to about `turn` degrees, leans along the highway by up to `lean`, strays aside by
+   * `wander` metres, and is `width` metres wide. None is shorter than `shortest` metres.
+   */
+  arterials: z.strictObject({
+    width: metres,
+    spacing: span,
+    span: z.number().positive(),
+    reach: z.number().positive(),
+    fall: z.number().nonnegative(),
+    spread: span,
+    turn: z.number().nonnegative(),
+    lean: z.number().nonnegative(),
+    wander: z.number().nonnegative(),
+    shortest: metres,
+  }),
+  /**
+   * The cost of ground, which decides the order it is built on: its distance from the nearest highway, plus `along`
+   * for every metre along the highway from the centre, plus `arterial` for every metre from the nearest arterial
+   * (counted up to `arterialCap`), plus slow noise `noise.depth` metres deep over `noise.length` metres. Ground across
+   * the water from its nearest road costs `water` metres more.
+   */
+  ground: z.strictObject({ along: z.number().nonnegative(), arterial: z.number().nonnegative(), arterialCap: metres, noise: z.strictObject({ depth: z.number().nonnegative(), length: metres }), water: z.number().nonnegative() }),
+  /** Patches of town that share a grain: `spacing` metres apart, each turned from its nearest road by up to about `turn` degrees. */
+  patches: z.strictObject({ spacing: metres, turn: z.number().nonnegative() }),
+  /**
+   * Blocks are seeded as brickwork in their patch's grain: rows `depth` metres apart, seeds `length` metres apart
+   * along a row, each patch's sizes times a share drawn from `depthSpread` and `lengthSpread`. Every other row is
+   * moved half a length along, and a further `rowShift` of a length by chance; each seed moves by chance up to
+   * about `jitter.along` of a length and `jitter.across` of a depth. Blocks of the oldest ground are `oldScale` times
+   * the size of the newest.
+   */
+  blocks: z.strictObject({ depth: metres, length: metres, depthSpread: span, lengthSpread: span, rowShift: probability, jitter: z.strictObject({ along: probability, across: probability }), oldScale: z.number().positive() }),
+  /**
+   * Seeds near a road: none is laid within `clear` metres of a road or `waterClear` of the water; instead, pairs
+   * stand `offset` metres either side of every road, `spacing` metres apart along it, so that each road falls on
+   * the boundary between blocks. Of two seeds nearer than `nearest` metres, the later is dropped.
+   */
+  roadSeeds: z.strictObject({ clear: metres, waterClear: metres, offset: metres, spacing: span, nearest: metres }),
+  /**
+   * Streets. At a junction the two streets that continue each other within `through` degrees of straight are one
+   * street passing through. Over `rounds` rounds each junction moves `pull` of the way toward the middle of the two
+   * junctions either side of it on such a street. A street shorter than `shortest` metres is closed up. A street
+   * that passes fewer than `laneBelow` junctions is a lane. A block's corners are cut back by `corner` metres.
+   */
+  streets: z.strictObject({ through: z.number().nonnegative(), rounds: wholeNumber, pull: probability, shortest: metres, laneBelow: wholeNumber, corner: z.number().nonnegative() }),
   /** The clear ground left between a roadway and the lots along it. */
   roadside: z.number().nonnegative(),
-  /** The share of a town's ground that its lots are expected to cover: how much ground is scattered with blocks to begin with, and how much a wall encloses. */
+  /** The share of a town's ground, streets included, that its lots are expected to cover, for judging how much ground it needs. */
   lotShare: probability,
-  /** How far beyond the last junction of its road an exit stands. */
+  /** How far beyond the last junction of its highway an exit stands. */
   exitReach: metres,
   /**
-   * How the town reaches out. Ground is cheaper to take the nearer it is to a main road and to the water:
-   * `arterialPull` and `waterPull` are the share by which the distance from the centre counts for less right beside
-   * one, `reach` the distance over which that fades, `compact` how strongly a district keeps to itself, in metres
-   * per block away from where it began, and `ragged` how much the cost varies by chance, in metres.
+   * Districts are pieces of town grown from a block each; a block joins the nearest, where crossing a highway, an
+   * arterial or the water counts as so many metres more.
    */
-  outline: z.strictObject({ arterialPull: probability, waterPull: probability, reach: metres, compact: z.number().nonnegative(), ragged: z.number().nonnegative() }),
+  districts: z.strictObject({ penalty: z.strictObject({ highway: z.number().nonnegative(), arterial: z.number().nonnegative(), water: z.number().nonnegative() }) }),
+  /** A block left with no lots inside the town is a green; there are at most this many. */
+  greens: wholeNumber,
   /** Civic buildings of a spread type stand at least this far from another of their type, where the district has room. */
   civicSpacing: metres,
   /**
@@ -383,10 +429,10 @@ const GrownSettingsSchema = z.strictObject({
   plaza: z.strictObject({ perResident: z.number().nonnegative(), min: metres, max: metres, building: id }),
   /**
    * The wall of a town flagged for one: its width, the clear strip kept inside it, the share of the town's ground it
-   * encloses, the number of residents below which it encloses everything, how far its line strays from a circle
-   * as a share of its radius, and the building type that stands at each gate.
+   * encloses (the oldest), the number of residents below which it encloses everything, how many metres its line
+   * is smoothed over, and the building type that stands at each gate.
    */
-  wall: z.strictObject({ width: metres, clearStrip: z.number().nonnegative(), share: probability, enclosesAllBelow: wholeNumber, wobble: probability, gatehouse: id }),
+  wall: z.strictObject({ width: metres, clearStrip: z.number().nonnegative(), share: probability, enclosesAllBelow: wholeNumber, smoothing: z.number().nonnegative(), gatehouse: id }),
   /**
    * A river: the length of its meanders as a multiple of its width, their swing aside as a share of that length,
    * the share by which its width varies along it, the length of the pieces its line is cut into, and the number
@@ -401,24 +447,27 @@ const GrownSettingsSchema = z.strictObject({
     pieceLength: metres,
   }),
   /**
-   * Lots. A building type's lot size is a typical size: each lot's frontage is drawn within `frontageSpread` of
-   * it, never below `leastFrontage` nor above `widest` times it, and its depth is what its block allows, up to
-   * `deepest` times the pack's; its frontage is then set so that its area comes between the two shares in `area`
-   * of the pack's. Side boundaries lean by up to `lean` degrees. A building whose lot is at least `wholeBlock`
-   * square metres takes a block to itself where no side of a block has room for it. In the district kinds listed under `filled`, lots fill a block's
-   * frontage wall to wall; elsewhere a gap is left after a lot with the chance in `gaps`, by kind of district.
+   * Lots. A block is cut along its length into two rows back to back, or one where it is shallower than `rows`
+   * metres, the line between them `split` of the way across; each row into strips across it, their sides askew by
+   * about `skew` metres. A strip's frontage is the type's drawn within `frontageSpread` of it, then set so its area
+   * comes between the shares in `area` of the pack's size, never below `leastFrontage` nor above `widest` times the
+   * type's. A building whose lot is `wholeBlock` square metres or more takes a block to itself. Blocks whose
+   * growth rank is below `oldBelow` are filled wall to wall, as are those of the district kinds in `filled`;
+   * elsewhere a gap of `gapWidth` metres follows a lot with the chance in `gaps`, by kind of district.
    */
   lots: z.strictObject({
+    rows: metres,
+    split: span,
+    skew: z.number().nonnegative(),
     frontageSpread: probability,
     leastFrontage: metres,
     widest: z.number().positive(),
-    deepest: z.number().positive(),
     area: z.strictObject({ min: z.number().positive(), max: z.number().positive() }),
-    lean: z.number().nonnegative(),
     wholeBlock: metres,
+    oldBelow: probability,
     filled: z.array(id),
     gaps: z.record(id, probability),
-    gapWidth: z.strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() }),
+    gapWidth: span,
   }),
 });
 export type GrownSettings = z.infer<typeof GrownSettingsSchema>;
