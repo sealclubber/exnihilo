@@ -86,6 +86,9 @@ lots:
   town-hall: {frontage: 24, depth: 22}
   guild-hall: {frontage: 16, depth: 22}
   adventurers-guild: {frontage: 14, depth: 22}
+  # Lodging and the visitors' quarter
+  inn: {frontage: 16, depth: 22}
+  gaming-house: {frontage: 12, depth: 22}
 
 # Footprints: the outline of the building on each lot. The generator draws one
 # rectangle across the lot's street frontage; `coverage` is how far back it

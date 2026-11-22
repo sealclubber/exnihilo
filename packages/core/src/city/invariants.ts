@@ -23,6 +23,7 @@ export function checkCity(city: City, brief: SettlementBrief, pack: SettingPack)
   const workplaces = new Map(pack.workplaces.map((type) => [type.id, type]));
   const dwellings = new Map(pack.dwellings.map((type) => [type.id, type]));
   const landmarks = new Set(pack.landmarks.map((type) => type.id));
+  const landmarkTypes = new Map(pack.landmarks.map((type) => [type.id, type]));
   const kinds = new Set(pack.districts.kinds.map((kind) => kind.id));
   const tiers = new Set(pack.pack.statusTiers.map((tier) => tier.id));
 
@@ -201,7 +202,16 @@ export function checkCity(city: City, brief: SettlementBrief, pack: SettingPack)
         }
       }
     }
-    const room = dwelling ? dwelling.households : workplace?.proprietorLivesIn ? 1 : 0;
+    // A landmark whose keeper lives in houses the household of someone who holds its first post there.
+    const keptBy = landmarkTypes.get(building.type);
+    if (keptBy?.proprietorLivesIn) {
+      for (const id of building.householdIds) {
+        const keeper = householdById.get(id)?.memberIds.map((member) => personById.get(member)).find((member) => member?.workplaceId === building.id && member.occupationId === keptBy.posts[0]?.occupation);
+        if (!keeper) problem(`${building.id} (${building.type}) houses ${id}, none of whom keeps it`);
+        else if (keeper.apprentice) problem(`${building.id} (${building.type}) has the apprentice ${keeper.id} as its keeper`);
+      }
+    }
+    const room = dwelling ? dwelling.households : workplace?.proprietorLivesIn || keptBy?.proprietorLivesIn ? 1 : 0;
     if (building.householdIds.length > room) {
       problem(`${building.id} (${building.type}) holds ${building.householdIds.length} households, over its capacity of ${room}`);
     }

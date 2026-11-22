@@ -2,6 +2,10 @@
  * Phase 6B.5: how a town is divided into districts. Everyday buildings in
  * every district, housing near work, each tier where it prefers to live, and
  * trades gathered along streets. Buildings are moved, never made.
+ *
+ * These tests hold exact figures for Badanos as it was generated before phase 6C gave settlements inns, a gaming
+ * house and a visitors' quarter, so they run on the pack with those taken out (`medievalPackBefore6C`), which
+ * `baselines/city-v4.json` proves gives the same cities. What phase 6C moved is in `visitors.test.ts`.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -23,7 +27,7 @@ import {
   geometry,
   parsePack,
 } from '../src/index.ts';
-import { BEFORE_6B5, lomiaWorld, medievalPack, medievalPackBefore6B5, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, lomiaWorld, medievalPackBefore6C as medievalPack, medievalPackBefore6B5, rawMedievalPackBefore6C as rawMedievalPack, settlement } from './pack.ts';
 
 const pack = medievalPack();
 const before = medievalPackBefore6B5();
@@ -114,7 +118,7 @@ describe('the medieval pack\'s districts', () => {
     expect(Object.keys(tierLists).sort()).toEqual(pack.pack.statusTiers.map((tier) => tier.id).sort());
     expect(pack.districts.housingNearWork).toMatchObject({ share: 0.35, kinds: { upper: 0 } });
     expect(pack.pack.homeAndWorkLabel).toBe('{workplace} and home');
-    expect([GENERATOR_VERSION, LAYOUT_VERSION, LIFE_VERSION]).toEqual([4, 4, 4]);
+    expect([GENERATOR_VERSION, LAYOUT_VERSION, LIFE_VERSION]).toEqual([5, 4, 4]);
   });
 });
 

@@ -1,11 +1,15 @@
 /**
  * Phase 6B: civic buildings that a settlement has by its size.
+ *
+ * These tests hold exact figures for Badanos as it was generated before phase 6C gave settlements inns, a gaming
+ * house and a visitors' quarter, so they run on the pack with those taken out (`medievalPackBefore6C`), which
+ * `baselines/city-v4.json` proves gives the same cities. What phase 6C moved is in `visitors.test.ts`.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { type City, type Landmark, type SettingPack, GENERATOR_VERSION, allOccupations, checkCity, generateCity, generateLayout, parsePack, placeFlagsOf, resolveCount } from '../src/index.ts';
-import { BEFORE_6B5, lomiaWorld, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
+import { BEFORE_6B5, lomiaWorld, medievalPackBefore6C as medievalPack, medievalPackBefore6B, rawMedievalPackBefore6C as rawMedievalPack, settlement } from './pack.ts';
 
 const SLOW = 180_000;
 const pack = medievalPack();
@@ -37,7 +41,7 @@ describe('the medieval pack\'s civic buildings', () => {
       expect(pack.layout.lots[landmark.id], landmark.id).toBeDefined();
       for (const post of landmark.posts) expect(allOccupations(pack).find((occupation) => occupation.id === post.occupation)!.workplace).toBe(landmark.id);
     }
-    expect(GENERATOR_VERSION).toBe(4);
+    expect(GENERATOR_VERSION).toBe(5);
   });
 });
 

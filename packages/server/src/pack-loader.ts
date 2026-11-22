@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'yaml';
-import { type SettingPack, PACK_FILES, PackError, parsePack } from '@worldsim/core';
+import { type SettingPack, OPTIONAL_PACK_FILES, PACK_FILES, PackError, parsePack } from '@worldsim/core';
 
 /** Reads the YAML files of a pack without checking what they hold. */
 export function readPackFiles(folder: string): Record<string, unknown> {
@@ -16,6 +16,8 @@ export function readPackFiles(folder: string): Record<string, unknown> {
     try {
       text = readFileSync(path, 'utf8');
     } catch {
+      // A file the pack may leave out is simply absent.
+      if (OPTIONAL_PACK_FILES.includes(file)) continue;
       throw new PackError([`${path} cannot be read; a pack needs the files ${PACK_FILES.map((name) => `${name}.yaml`).join(', ')}`]);
     }
     try {

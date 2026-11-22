@@ -1,0 +1,268 @@
+# People who do not live here: travellers, who come by the roads and the sea
+# and leave again, and vagrants, who live on the streets. Neither is a
+# resident: they are in no household, hold no job, and are never counted in
+# the population.
+#
+# Nothing about them is stored or stepped. Who arrives on a day, and each
+# party's whole visit, is worked out from the settlement, the day and a seed;
+# so is where every vagrant sleeps.
+#
+# EVERY NUMBER, NAME AND KIND BELOW IS A PLACEHOLDER, for review. The rates
+# are meant to be ones that can be defended for a town of that size on that
+# road; none was set to make a street busy.
+#
+# draw      how much a settlement attracts visitors who have no business there
+#   conditions   what each flag and status adds: capital, port, citadel,
+#                walls, plaza, temple, shantyTown, provinceSeat
+#   population   {perThousand, max}: so much for every thousand residents
+#   specialties  {perTag, maxTags}: so much for each specialty tag
+#   floor        below this the settlement draws no such visitors at all
+#
+# visits    what outsiders do in town, in the forms a resident's visit has
+#           (visits.yaml): `destinations` and `durationMinutes` for one stop,
+#           `stops` for a chain, or `stroll`; with `when`, and optionally
+#           `nearest`, `outside` and `where`. Opening hours apply to them as
+#           to anyone.
+#
+# kinds     the kinds of traveller
+#   arrivals       parties arriving in a day, on average: the sum of `base`,
+#                  `perThousandResidents` for every thousand residents,
+#                  `perExit` for each route exit by kind of route (road,
+#                  trail, sea-route) and `perDraw` for each point of draw
+#                  where the draw reaches its floor; times the multiplier in
+#                  `weekdays` for the day of the week, where it has one. A
+#                  party also enters by an exit with the `perExit` weights.
+#   partySize      {min, max} people, who keep together the whole visit
+#   nights         {min, max}. A party that stays none does not lodge: it
+#                  makes its visits one after another on the way through,
+#                  whatever their windows, and leaves.
+#   arrivalHours   the hours of the day in which a party arrives
+#   departureHours the hours of its last morning in which a party that
+#                  lodged sets out
+#   ages, maleShare  who they are
+#   lodging        building types the party lodges at: it takes one of those
+#                  the settlement has. With none of them it does not stay.
+#   leaves         by which exit: `same` as it came by, `other` where the
+#                  settlement has more than one, or `any`
+#   visits         which of the visits above it makes: `chance` each day, and
+#                  optionally `times: {min, max}` a day
+#
+# vagrants  people with no household and no dwelling
+#   minPopulation  a settlement with fewer residents has none
+#   share          how many, as a share of the residents
+#   sleepsAt       where one may sleep: `lane`, `bridge-end`, or `edge`, a
+#                  street built on one side only, as at the town's edge
+#   haunts         how many sleeping places each has
+#   spotDays       {min, max}: for how many days running one is kept
+#   visits         as for a kind of traveller. Everything a vagrant does is
+#                  out on a street: a stroll, or a visit with `outside: true`
+#                  and `where: street`.
+
+draw:
+  conditions:
+    capital: 10
+    port: 4
+    temple: 4
+    citadel: 3
+    provinceSeat: 3
+    plaza: 2
+    walls: 1
+  population: {perThousand: 0.25, max: 12}
+  specialties: {perTag: 0.5, maxTags: 3}
+  floor: 5
+
+visits:
+  - id: trading
+    name: Doing business
+    when: {from: "09:00", to: "16:00"}
+    durationMinutes: {min: 30, max: 120}
+    destinations: [market-square, market-stall, merchants-house, warehouse, general-shop, counting-house, guild-hall]
+
+  - id: provisions
+    name: Buying provisions
+    when: {from: "08:00", to: "17:00"}
+    durationMinutes: {min: 10, max: 30}
+    destinations: [general-shop, market-stall, market-square, bakery]
+
+  - id: evening-out
+    name: An evening at a tavern
+    when: {from: "18:00", to: "21:00"}
+    durationMinutes: {min: 45, max: 150}
+    destinations: [tavern]
+
+  # Looking at what the town has to show, from the street in front of it.
+  - id: sights
+    name: Seeing the sights
+    when: {from: "09:00", to: "17:00"}
+    durationMinutes: {min: 20, max: 60}
+    destinations: [temple, palace, citadel, market-square, docks, town-hall, guild-hall, chapel]
+    outside: true
+    where: street
+
+  - id: seeing-the-town
+    name: Walking about the town
+    when: {from: "10:00", to: "18:00"}
+    stroll: {minutes: {min: 20, max: 60}, pauseMinutes: {min: 5, max: 15}, favour: [market-square, docks]}
+
+  - id: entertainment
+    name: An evening's entertainment
+    when: {from: "18:00", to: "21:00"}
+    durationMinutes: {min: 60, max: 150}
+    destinations: [players-hall, gaming-house]
+
+  - id: guild-call
+    name: At the adventurers' guild
+    when: {from: "09:00", to: "16:00"}
+    durationMinutes: {min: 20, max: 90}
+    destinations: [adventurers-guild]
+
+  - id: rest-stop
+    name: A stop on the way through
+    when: {from: "06:00", to: "21:00"}
+    durationMinutes: {min: 20, max: 60}
+    destinations: [tavern]
+
+  - id: watering
+    name: Drawing water on the way through
+    when: {from: "06:00", to: "21:00"}
+    durationMinutes: {min: 5, max: 15}
+    destinations: [well]
+    nearest: true
+
+  # --- Vagrants: everything is out on a street.
+  - id: waiting-about
+    name: Waiting about outside
+    when: {from: "07:00", to: "20:00"}
+    durationMinutes: {min: 30, max: 120}
+    destinations: [chapel, temple, tavern]
+    outside: true
+    where: street
+
+  - id: at-the-well
+    name: By a well or the square
+    when: {from: "07:00", to: "19:00"}
+    durationMinutes: {min: 20, max: 90}
+    destinations: [well, market-square]
+    outside: true
+    where: street
+
+  - id: wandering
+    name: Wandering the streets
+    when: {from: "08:00", to: "20:00"}
+    stroll: {minutes: {min: 15, max: 60}, pauseMinutes: {min: 5, max: 30}}
+
+kinds:
+  # People with something to sell or to buy: carters and pedlars from the
+  # places round about, and traders from further off. More on Marketday.
+  - id: merchant
+    name: Merchant
+    arrivals:
+      perThousandResidents: 0.5
+      perExit: {road: 2, trail: 0.1, sea-route: 3}
+      weekdays: {Marketday: 1.5, Restday: 0.3}
+    partySize: {min: 1, max: 3}
+    nights: {min: 1, max: 3}
+    arrivalHours: {from: "09:00", to: "18:00"}
+    departureHours: {from: "06:00", to: "09:00"}
+    ages: {min: 20, max: 60}
+    maleShare: 0.8
+    lodging: [inn]
+    leaves: any
+    visits:
+      - {visit: trading, chance: 0.9, times: {min: 1, max: 2}}
+      - {visit: provisions, chance: 0.3}
+      - {visit: evening-out, chance: 0.5}
+
+  # People with no business here, come to see the place. They depend on the
+  # draw: a settlement below its floor gets none.
+  - id: tourist
+    name: Tourist
+    arrivals:
+      perDraw: 0.3
+    partySize: {min: 1, max: 4}
+    nights: {min: 1, max: 4}
+    arrivalHours: {from: "10:00", to: "18:00"}
+    departureHours: {from: "07:00", to: "10:00"}
+    ages: {min: 18, max: 65}
+    maleShare: 0.55
+    lodging: [inn]
+    leaves: same
+    visits:
+      - {visit: sights, chance: 0.9, times: {min: 1, max: 3}}
+      - {visit: seeing-the-town, chance: 0.6}
+      - {visit: entertainment, chance: 0.4}
+      - {visit: evening-out, chance: 0.3}
+      - {visit: provisions, chance: 0.2}
+
+  # They lodge at the adventurers' guild hall or an inn, and spend their time
+  # there and in taverns.
+  - id: adventurer
+    name: Adventurer
+    arrivals:
+      base: 0.02
+      perThousandResidents: 0.08
+      perExit: {road: 0.1, trail: 0.03, sea-route: 0.1}
+    partySize: {min: 2, max: 5}
+    nights: {min: 1, max: 4}
+    arrivalHours: {from: "10:00", to: "20:00"}
+    departureHours: {from: "06:00", to: "10:00"}
+    ages: {min: 18, max: 45}
+    maleShare: 0.7
+    lodging: [adventurers-guild, inn]
+    leaves: any
+    visits:
+      - {visit: guild-call, chance: 0.8}
+      - {visit: evening-out, chance: 0.7}
+      - {visit: provisions, chance: 0.4}
+
+  - id: mercenary
+    name: Mercenary
+    arrivals:
+      base: 0.02
+      perThousandResidents: 0.04
+      perExit: {road: 0.1, sea-route: 0.1}
+    partySize: {min: 2, max: 6}
+    nights: {min: 1, max: 3}
+    arrivalHours: {from: "10:00", to: "20:00"}
+    departureHours: {from: "06:00", to: "10:00"}
+    ages: {min: 18, max: 50}
+    maleShare: 0.9
+    lodging: [adventurers-guild, inn]
+    leaves: any
+    visits:
+      - {visit: guild-call, chance: 0.6}
+      - {visit: evening-out, chance: 0.8}
+
+  # On their way somewhere else. About half stop for the night; the rest stop
+  # for a drink or for water and go on, by another exit where there is one.
+  - id: passing-through
+    name: Passing through
+    arrivals:
+      perThousandResidents: 0.1
+      perExit: {road: 3, trail: 0.25, sea-route: 1}
+    partySize: {min: 1, max: 4}
+    nights: {min: 0, max: 1}
+    arrivalHours: {from: "07:00", to: "19:00"}
+    departureHours: {from: "06:00", to: "08:00"}
+    ages: {min: 16, max: 60}
+    maleShare: 0.65
+    lodging: [inn]
+    leaves: other
+    visits:
+      - {visit: rest-stop, chance: 0.6}
+      - {visit: watering, chance: 0.3}
+      - {visit: provisions, chance: 0.3}
+
+vagrants:
+  name: Vagrant
+  minPopulation: 1000
+  share: 0.003
+  ages: {min: 14, max: 70}
+  maleShare: 0.65
+  sleepsAt: [lane, bridge-end, edge]
+  haunts: 3
+  spotDays: {min: 3, max: 10}
+  visits:
+    - {visit: waiting-about, chance: 0.8, times: {min: 1, max: 3}}
+    - {visit: at-the-well, chance: 0.5, times: {min: 1, max: 2}}
+    - {visit: wandering, chance: 0.6, times: {min: 1, max: 2}}

@@ -4,6 +4,8 @@
 #                 worker takes the colour of their occupation's category
 #   keepingHouse  people who keep house
 #   notWorking    people who do not work: children, elders, the unable
+#   travellers    optional: a colour for each kind of traveller, by its ID
+#   vagrants      optional: the colour of people who live on the streets
 #   occupations   optional: a colour for a single occupation, which then takes
 #                 priority over its category's. For example:
 #                   occupations: {watchman: "#b3261e"}
@@ -22,3 +24,14 @@ categories:
 keepingHouse: "#6f6a5f"
 notWorking: "#a39c8d"
 occupations: {}
+
+# Outsiders (phase 6C): one colour for each kind of traveller in
+# travellers.yaml, and one for people who live on the streets. Placeholders,
+# chosen to be told apart from the nine above.
+travellers:
+  merchant: "#d4a017"
+  tourist: "#3aa0d8"
+  adventurer: "#e2711d"
+  mercenary: "#7a2f2f"
+  passing-through: "#5b6b7a"
+vagrants: "#4a4038"

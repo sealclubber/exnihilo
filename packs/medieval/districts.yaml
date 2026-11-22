@@ -10,6 +10,12 @@
 #             waterside (by the sea or the river, where the town has either)
 #   statuses  the status tiers whose dwellings the kind takes, for a tier
 #             that has no list of its own under `tierDistricts`
+#   whenDraw  instead of `weight` or `when`: the kind adds exactly one district
+#             to settlements whose draw (travellers.yaml) reaches this number
+#   types     optional: building types that belong to the kind. Where the
+#             settlement has a district of it they stand there, whatever their
+#             own entry prefers; where it has none they go where their own
+#             entry says, which for the types below is the centre.
 #   names     patterns; {settlement} is the settlement's name and any other
 #             {key} is filled from `words`
 
@@ -57,6 +63,19 @@ kinds:
     weight: 2
     statuses: [modest, comfortable]
     names: ["Old Town", "{settlement} Cross", "High Street", "{age} Market", "{direction} Market", "{feature} Market"]
+
+  # The visitors' quarter: only in a settlement with draw enough, beside the
+  # centre. Nobody is housed here but the households that live in its inns.
+  # PLACEHOLDERS, for review: the threshold, the names, and the types, which
+  # are a small neutral set (inns, the players' hall as a playhouse, a gaming
+  # house). To add a type of your own, list it here.
+  - id: visitors
+    placement: middle
+    name: Visitors' quarter
+    whenDraw: 22
+    statuses: []
+    types: [inn, players-hall, gaming-house]
+    names: ["Visitors' Quarter", "Travellers' Rest", "{settlement} Inns"]
 
   - id: craft
     placement: middle

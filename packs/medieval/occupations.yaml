@@ -40,8 +40,11 @@
 #     (species.yaml) hold every other job.
 #   - apprenticeUntil is 0 on unskilled jobs; every other job uses the
 #     pack-wide age.
-#   - Shifts: bakers and millers work early; tavern staff, musicians and
-#     players work evenings; watchmen are split between the day, evening
+#   - Inns and the gaming house (phase 6C): an innkeeper is 25 or older, an
+#     inn servant or a chambermaid 14 or older; which jobs an inn has is a first
+#     guess.
+#   - Shifts: bakers and millers work early; tavern staff, innkeepers, the
+#     gaming house, musicians and players work evenings; watchmen are split between the day, evening
 #     and night watches; clergy keep their own hours.
 #     The watch, the taverns and the clergy also work on rest days.
 #   - No occupation sets `sexes`. The syntax, on an example that is not in use:
@@ -53,7 +56,9 @@
 - {id: butcher, name: Butcher, category: food, workplace: butchery, weight: 8, status: modest}
 - {id: brewer, name: Brewer, category: food, workplace: brewery, weight: 7, status: modest}
 - {id: tavern-keeper, name: Tavern keeper, category: food, workplace: tavern, weight: 5, status: modest, shift: evening}
-- {id: innkeeper, name: Innkeeper, category: food, workplace: tavern, weight: 2, status: comfortable, minPopulation: 500, shift: evening}
+# An innkeeper keeps an inn (landmarks.yaml) and lives in it. Until phase 6C
+# innkeepers worked in taverns, by weight; they are now a fixed post.
+- {id: innkeeper, name: Innkeeper, category: food, workplace: inn, weight: 0, status: comfortable, minAge: 25, shift: evening}
 - {id: tapster, name: Tapster, category: food, workplace: tavern, weight: 7, status: poor, apprenticeUntil: 0, shift: evening}
 - {id: cook, name: Cook, category: food, workplace: tavern, weight: 7, status: poor, shift: evening}
 - {id: grocer, name: Grocer, category: food, workplace: general-shop, weight: 6, status: modest}
@@ -101,6 +106,8 @@
 - {id: palace-official, name: Palace official, category: services, workplace: palace, weight: 0, status: wealthy, minAge: 30}
 - {id: harbourmaster, name: Harbourmaster, category: services, workplace: docks, weight: 0, status: comfortable, minAge: 30}
 # Posts of the civic buildings a settlement has by its size (landmarks.yaml).
+- {id: inn-servant, name: Inn servant, category: services, workplace: inn, weight: 0, status: poor, minAge: 14, apprenticeUntil: 0}
+- {id: chambermaid, name: Chambermaid, category: services, workplace: inn, weight: 0, status: poor, minAge: 14, apprenticeUntil: 0}
 - {id: bath-keeper, name: Bath keeper, category: services, workplace: bathhouse, weight: 0, status: modest, minAge: 25}
 - {id: bath-attendant, name: Bath attendant, category: services, workplace: bathhouse, weight: 0, status: poor, apprenticeUntil: 0}
 - {id: infirmarer, name: Infirmarer, category: services, workplace: infirmary, weight: 0, status: comfortable, minAge: 30}
@@ -141,6 +148,8 @@
 - {id: vintner, name: Vintner, category: luxury, workplace: fine-shop, weight: 3, status: comfortable}
 - {id: musician, name: Musician, category: luxury, workplace: players-hall, weight: 5, status: poor, shift: evening}
 - {id: player, name: Player, category: luxury, workplace: players-hall, weight: 3, status: poor, minPopulation: 3000, shift: evening}
+- {id: gaming-keeper, name: Gaming house keeper, category: luxury, workplace: gaming-house, weight: 0, status: modest, minAge: 25, shift: evening}
+- {id: table-keeper, name: Table keeper, category: luxury, workplace: gaming-house, weight: 0, status: poor, minAge: 18, apprenticeUntil: 0, shift: evening}
 - {id: painter, name: Painter, category: luxury, workplace: studio, weight: 2, status: modest}
 
 # --- Trade: general ---------------------------------------------------------

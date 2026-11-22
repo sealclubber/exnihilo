@@ -90,7 +90,7 @@ const atWork = (life: SettlementLife, people: City['people'], time: number) => p
 describe('versions', () => {
   it('raises the life version and leaves the other two alone', () => {
     expect(LIFE_VERSION).toBe(4);
-    expect(GENERATOR_VERSION).toBe(4);
+    expect(GENERATOR_VERSION).toBe(5);
     expect(LAYOUT_VERSION).toBe(4);
   });
 });

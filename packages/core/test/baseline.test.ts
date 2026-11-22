@@ -9,11 +9,15 @@
  * which gives a settlement civic buildings by its size. Their staff are fixed
  * posts, so occupation counts inside a category moved, once and on purpose;
  * the file's note says what moved and why.
+ *
+ * These tests hold exact figures for Badanos as it was generated before phase 6C gave settlements inns, a gaming
+ * house and a visitors' quarter, so they run on the pack with those taken out (`medievalPackBefore6C`), which
+ * `baselines/city-v4.json` proves gives the same cities. What phase 6C moved is in `visitors.test.ts`.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { generateCity } from '../src/index.ts';
-import { medievalPack, medievalPackBefore6B, settlement } from './pack.ts';
+import { medievalPackBefore6C as medievalPack, medievalPackBefore6B, settlement } from './pack.ts';
 
 const read = (name: string) => JSON.parse(readFileSync(new URL(`./baselines/${name}`, import.meta.url), 'utf8'));
 const first = read('badanos-counts.json');

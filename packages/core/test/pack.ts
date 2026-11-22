@@ -36,6 +36,7 @@ export function settlement(id: string) {
  * of life version 3. Tests that hold fingerprints from before use it.
  */
 export function stripPhase6B(raw: any): void {
+  stripPhase6C(raw);
   // Civic buildings, their posts and their lots.
   const civic = raw.landmarks.filter((landmark: any) => landmark.when === undefined);
   const posts = new Set(civic.flatMap((landmark: any) => landmark.posts.map((post: any) => post.occupation)));
@@ -68,6 +69,7 @@ export function stripPhase6B(raw: any): void {
  * generator as well: which building holds which lot is the one thing the pack does not decide.
  */
 export function stripPhase6B5(raw: any): void {
+  stripPhase6C(raw);
   for (const type of raw.workplaces) delete type.spread;
   delete raw.districts.tierDistricts;
   delete raw.districts.housingNearWork;
@@ -97,4 +99,45 @@ export function medievalPackBefore6B(): SettingPack {
     before6B = parsePack(raw);
   }
   return before6B;
+}
+
+/**
+ * Takes out of a raw pack what phase 6C added: the travellers file, inns and the gaming house with their posts
+ * and lots, the visitors' quarter, and the outsiders' colours; and puts innkeepers back in the taverns, where
+ * they worked by weight. A city made from the result is the one generator version 4 made. Safe to call twice.
+ */
+export function stripPhase6C(raw: any): void {
+  delete raw.travellers;
+  for (const id of ['inn', 'gaming-house']) {
+    const landmark = raw.landmarks.find((entry: any) => entry.id === id);
+    if (!landmark) continue;
+    const posts = new Set(landmark.posts.map((post: any) => post.occupation));
+    raw.landmarks = raw.landmarks.filter((entry: any) => entry !== landmark);
+    raw.occupations = raw.occupations.filter((occupation: any) => !posts.has(occupation.id) || occupation.id === 'innkeeper');
+    delete raw.layout.lots[id];
+  }
+  const innkeeper = raw.occupations.find((occupation: any) => occupation.id === 'innkeeper');
+  if (innkeeper) Object.assign(innkeeper, { workplace: 'tavern', weight: 2, minPopulation: 500 }), delete innkeeper.minAge;
+  raw.districts.kinds = raw.districts.kinds.filter((kind: any) => kind.whenDraw === undefined);
+  for (const kind of raw.districts.kinds) delete kind.types;
+  delete raw.display.travellers;
+  delete raw.display.vagrants;
+}
+
+let before6C: SettingPack | undefined;
+/** The medieval pack with what phase 6C added taken out. Shared, so do not change it. */
+export function medievalPackBefore6C(): SettingPack {
+  if (!before6C) {
+    const raw = rawMedievalPack();
+    stripPhase6C(raw);
+    before6C = parsePack(raw);
+  }
+  return before6C;
+}
+
+/** A fresh, unchecked copy of the medieval pack's files with what phase 6C added taken out, for tests that edit a pack as it was. */
+export function rawMedievalPackBefore6C(): any {
+  const raw = rawMedievalPack();
+  stripPhase6C(raw);
+  return raw;
 }

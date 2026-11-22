@@ -28,6 +28,7 @@ import {
   CATEGORY_IDS,
   apprenticeUntil,
 } from '../pack/schema.ts';
+import { drawOf, expectedTravellers } from '../outsiders/draw.ts';
 import type { SettlementBrief } from '../schema.ts';
 import { checkCity } from './invariants.ts';
 import { type NameGeneratorFactory, nameBaseNames } from './names.ts';
@@ -35,7 +36,7 @@ import { type Rng, apportion, shuffle, stepRng, weightedPicker } from './random.
 import type { Building, City, CitySummary, District, Household, HouseholdRole, Person } from './records.ts';
 
 /** Raised whenever the generator's output for the same inputs would change. */
-export const GENERATOR_VERSION = 4;
+export const GENERATOR_VERSION = 5;
 
 /** A person has at most this many parents; it bounds how many elders one adult can be the child of. */
 const PARENTS_PER_PERSON = 2;
@@ -64,10 +65,14 @@ export function speciesOf(brief: SettlementBrief, pack: SettingPack): string {
   return pack.cultures.cultures[brief.culture.name] ?? pack.cultures.default;
 }
 
-/** Resolves a count that is either fixed or grows with the population. */
-export function resolveCount(spec: CountSpec, population: number): number {
+/**
+ * Resolves a count that is fixed, grows with the population, or follows the number of travellers expected to
+ * arrive in a day. A count by travellers is nothing where none are expected, whatever its least.
+ */
+export function resolveCount(spec: CountSpec, population: number, travellers = 0): number {
   if ('fixed' in spec) return spec.fixed;
-  const scaled = Math.round('perResidents' in spec ? population / spec.perResidents : (population / 1000) * spec.perThousand);
+  if ('perTravellers' in spec && !(travellers > 0)) return 0;
+  const scaled = Math.round('perTravellers' in spec ? travellers / spec.perTravellers : 'perResidents' in spec ? population / spec.perResidents : (population / 1000) * spec.perThousand);
   return Math.min(Math.max(scaled, spec.min ?? 0), spec.max ?? Infinity);
 }
 
@@ -83,6 +88,9 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   const tierIds = pack.pack.statusTiers.map((tier) => tier.id);
   const tierIndex = new Map(tierIds.map((tier, index) => [tier, index]));
   const landmarkById = new Map(pack.landmarks.map((landmark) => [landmark.id, landmark]));
+  // What the brief says of the people who come here: both are worked out from the brief and the pack alone.
+  const travellers = expectedTravellers(brief, pack);
+  const draw = drawOf(brief, pack);
   const fail = (message: string): never => {
     throw new CityGenerationError(`${brief.id} (${brief.name}): ${message}`);
   };
@@ -373,12 +381,12 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   for (const landmark of pack.landmarks) {
     if (landmark.when !== undefined && !conditions[landmark.when]) continue;
     if ((landmark.minPopulation ?? 0) > population) continue;
-    landmarkPlan.push({ landmark, buildings: resolveCount(landmark.count, population) });
+    landmarkPlan.push({ landmark, buildings: resolveCount(landmark.count, population, travellers) });
     for (const post of landmark.posts) {
       const index = occupationIndex.get(post.occupation) as number;
       const category = (occupations[index] as Occupation).category;
       // A post takes a slot from its own category. A category that has run out grants fewer posts.
-      const granted = Math.min(resolveCount(post.count, population), ordinary[category]);
+      const granted = Math.min(resolveCount(post.count, population, travellers), ordinary[category]);
       ordinary[category] -= granted;
       slots[index]! += granted;
     }
@@ -615,7 +623,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     building: Building;
     workers: number[];
     /** The kind of district the building asks for, or the status tier whose districts it belongs in. */
-    wants: { kind: string } | { tier: string } | { spread: string };
+    wants: { kind: string; else?: BuildingDraft['wants'] } | { tier: string } | { spread: string };
     residents: number;
   }
   const drafts: BuildingDraft[] = [];
@@ -657,6 +665,12 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   };
   /** The household that lives in a workplace, by household index. */
   const livesAtWork = new Map<number, BuildingDraft>();
+  /** The kind of district a building type belongs to, where the pack lists it under one: it stands there if the settlement has such a district. */
+  const belongsTo = new Map(pack.districts.kinds.flatMap((kind) => (kind.types ?? []).map((type) => [type, kind.id] as const)));
+  const wantsOf = (type: string, own: BuildingDraft['wants']): BuildingDraft['wants'] => {
+    const kind = belongsTo.get(type);
+    return kind === undefined ? own : { kind, else: own };
+  };
   {
     const workersByType = new Map<string, number[]>();
     for (const index of workers) {
@@ -672,9 +686,23 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       const made: BuildingDraft[] = [];
       // A landmark that has staff exists even if its count came to zero.
       for (let n = 0; n < Math.max(buildings, staffList.length > 0 ? 1 : 0); n++) {
-        made.push(newBuilding(landmark.id, 'landmark', landmark.spread || landmark.district === undefined ? { spread: landmark.id } : { kind: landmark.district }));
+        made.push(newBuilding(landmark.id, 'landmark', wantsOf(landmark.id, landmark.spread || landmark.district === undefined ? { spread: landmark.id } : { kind: landmark.district })));
       }
-      staffList.forEach((index, turn) => (made[turn % made.length] as BuildingDraft).workers.push(index));
+      if (!landmark.proprietorLivesIn) {
+        staffList.forEach((index, turn) => (made[turn % made.length] as BuildingDraft).workers.push(index));
+        continue;
+      }
+      // Where the keeper lives in, each post is dealt out in turn, so that every building has a keeper before any
+      // has two; the household of a building's first keeper lives there, unless it already lives at another.
+      landmark.posts.forEach((post, at) => {
+        const holders = staffList.filter((index) => occupationOf[index] === occupationIndex.get(post.occupation));
+        holders.forEach((index, turn) => {
+          const draft = made[turn % made.length] as BuildingDraft;
+          draft.workers.push(index);
+          const household = householdOf[index] as number;
+          if (at === 0 && turn < made.length && isApprentice[index] === 0 && !livesAtWork.has(household)) livesAtWork.set(household, draft);
+        });
+      });
     }
 
     for (const type of pack.workplaces as WorkplaceType[]) {
@@ -682,7 +710,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       if (!staffList) continue;
       const made: BuildingDraft[] = [];
       for (let n = 0; n < Math.ceil(staffList.length / type.capacity); n++) {
-        made.push(newBuilding(type.id, 'workplace', type.spread ? { spread: type.id } : { kind: type.district }));
+        made.push(newBuilding(type.id, 'workplace', wantsOf(type.id, type.spread ? { spread: type.id } : { kind: type.district })));
       }
       const emptiest = (): BuildingDraft => {
         let best = made[0] as BuildingDraft;
@@ -816,7 +844,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
   {
     const rng = stepRng(seed, 'districts');
     const kinds = pack.districts.kinds;
-    const byWeight = kinds.filter((kind) => kind.when === undefined);
+    const byWeight = kinds.filter((kind) => kind.when === undefined && kind.whenDraw === undefined);
     const first = byWeight[0] as (typeof kinds)[number];
     const wanted = Math.max(1, Math.round(population / pack.districts.residentsPerDistrict));
     // The first kind always gets one district; the rest are shared out by weight.
@@ -838,7 +866,9 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
     const open: number[] = [];
 
     for (const kind of kinds) {
-      const count = kind.when === undefined ? (extra[byWeight.indexOf(kind)] as number) + (kind === first ? 1 : 0) : conditions[kind.when] ? 1 : 0;
+      // A kind with a condition, or with a draw to reach, adds one district where it is met; the rest are shared out by weight.
+      const count =
+        kind.whenDraw !== undefined ? (draw.total >= kind.whenDraw ? 1 : 0) : kind.when === undefined ? (extra[byWeight.indexOf(kind)] as number) + (kind === first ? 1 : 0) : conditions[kind.when] ? 1 : 0;
       if (count === 0) continue;
       const candidates = shuffle(rng, [...new Set(kind.names.flatMap(expand))]);
       for (let n = 0, next = 0, round = 1; n < count; n++) {
@@ -856,7 +886,7 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
         districts.push({ id: `district-${number}-${pad(index + 1, 3)}`, name, kind: kind.id, buildingIds: [] });
         load.push(0);
         ofKind.set(kind.id, [...(ofKind.get(kind.id) ?? []), index]);
-        if (kind.when === undefined) open.push(index);
+        if (kind.when === undefined && kind.whenDraw === undefined) open.push(index);
       }
     }
 
@@ -946,6 +976,10 @@ export function generateCity(brief: SettlementBrief, pack: SettingPack, options:
       return moved;
     };
 
+    // A building that belongs to a kind of district the settlement lacks asks for what its own entry says instead.
+    for (const draft of drafts) {
+      while ('kind' in draft.wants && draft.wants.else && !ofKind.has(draft.wants.kind)) draft.wants = draft.wants.else;
+    }
     for (const draft of drafts) {
       // Buildings that are spread by population, and dwellings that may follow work, wait until more is known.
       if ('spread' in draft.wants || waiting.has(draft)) continue;

@@ -32,6 +32,7 @@ export { createWorkingHours, type WorkingHours } from './life/hours.ts';
 export { positionOnWander, clipWander, groundOf, makeWander, type Ground, type WanderHabit } from './life/wander.ts';
 export { createPlanChecker, type PlanChecker } from './life/invariants.ts';
 export { describeDay } from './life/report.ts';
+export { drawOf, arrivalRate, expectedTravellers, type Draw, type DrawTerm } from './outsiders/draw.ts';
 export * from './avatar/records.ts';
 export {
   AvatarError,

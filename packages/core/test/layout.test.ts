@@ -60,9 +60,9 @@ beforeAll(() => {
 });
 
 describe('Badanos', () => {
-  it('has 1,829 lots, one for each building', () => {
-    expect(badanos.city.buildings).toHaveLength(1829);
-    expect(badanos.layout.lots).toHaveLength(1829);
+  it('has 1,825 lots, one for each building', () => {
+    expect(badanos.city.buildings).toHaveLength(1825);
+    expect(badanos.layout.lots).toHaveLength(1825);
     expect(badanos.layout.lots.map((lot) => lot.buildingId)).toEqual(badanos.city.buildings.map((building) => building.id));
     expect(badanos.layout.lots[122]!.id).toBe('lot-641-000123');
   });
@@ -133,7 +133,7 @@ describe('Badanos', () => {
     const { summary, lots, segments, junctions } = badanos.layout;
     expect(summary).toMatchObject({
       settlementId: 'settlement-641',
-      counts: { lots: 1829, exits: 2, waters: 1, segments: segments.length, junctions: junctions.length, districtAreas: 6 },
+      counts: { lots: 1825, exits: 2, waters: 1, segments: segments.length, junctions: junctions.length, districtAreas: 6 },
       layoutVersion: LAYOUT_VERSION,
       generator: GRID_GENERATOR,
       pack: { name: 'medieval', version: pack.pack.version },
@@ -352,8 +352,8 @@ describe('determinism and isolation', () => {
   });
 
   it('leaves the city generator at version 2', () => {
-    expect(GENERATOR_VERSION).toBe(4);
-    expect(badanos.city.summary.generatorVersion).toBe(4);
+    expect(GENERATOR_VERSION).toBe(5);
+    expect(badanos.city.summary.generatorVersion).toBe(5);
     expect(LAYOUT_VERSION).toBe(4);
   });
 
@@ -361,7 +361,7 @@ describe('determinism and isolation', () => {
     const other = generateLayout(badanos.city, badanos.brief, pack, { seed: 12345 });
     expect(other.summary.seed).toBe(12345);
     expect(JSON.stringify(other.lots)).not.toBe(JSON.stringify(badanos.layout.lots));
-    expect(other.lots).toHaveLength(1829);
+    expect(other.lots).toHaveLength(1825);
     expect(checkLayout(other, badanos.city, badanos.brief, pack)).toEqual([]);
     // The brief's facts do not move with the seed.
     expect(other.exits).toEqual(badanos.layout.exits.map((exit, index) => ({ ...exit, junctionId: other.exits[index]!.junctionId })));
@@ -461,7 +461,7 @@ describe('pack edits take effect', () => {
     const wide = town('settlement-641', edited((raw) => (raw.layout.riverWidth = 40)));
     expect(riverOf(wide.layout).width).toBe(40);
     expect(riverOf(badanos.layout).width).toBe(14);
-    expect(wide.layout.lots).toHaveLength(1829);
+    expect(wide.layout.lots).toHaveLength(1825);
     // The bridges are longer for it.
     const span = (layout: Layout) => Math.min(...layout.segments.filter((segment) => segment.kind === 'bridge').map((segment) => polylineLength(segment.points)));
     expect(span(wide.layout)).toBeGreaterThanOrEqual(span(badanos.layout));

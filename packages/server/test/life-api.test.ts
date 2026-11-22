@@ -68,9 +68,13 @@ describe('GET /api/pack', () => {
 
   it('serves the colour of each role, from the pack', async () => {
     const { body } = await get<PackLabels>('/api/pack');
-    expect(body.roleColours).toEqual({ ...pack.display.categories, 'keeping-house': pack.display.keepingHouse, 'not-working': pack.display.notWorking });
+    const residents = { ...pack.display.categories, 'keeping-house': pack.display.keepingHouse, 'not-working': pack.display.notWorking };
+    // Since phase 6C: a colour for each kind of traveller, and one for vagrants, under keys no occupation can have.
+    const outsiders = { ...Object.fromEntries(Object.entries(pack.display.travellers!).map(([kind, colour]) => [`traveller:${kind}`, colour])), vagrant: pack.display.vagrants };
+    expect(body.roleColours).toEqual({ ...residents, ...outsiders });
     expect(body.roleColours.military).toBe('#c62828');
-    expect(new Set(Object.values(body.roleColours)).size).toBe(9);
+    expect(new Set(Object.values(residents)).size).toBe(9);
+    expect(new Set(Object.values(body.roleColours)).size).toBe(9 + pack.travellers!.kinds.length + 1);
   });
 
   it('gives an occupation with a colour of its own a role of its own', async () => {

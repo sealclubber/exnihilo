@@ -8,7 +8,7 @@ describe('the medieval pack', () => {
 
   it('loads and names itself', () => {
     expect(pack.pack.name).toBe('medieval');
-    expect(pack.pack.version).toBe('0.9.0');
+    expect(pack.pack.version).toBe('0.10.0');
   });
 
   it('has the seven categories with the base shares', () => {
@@ -127,6 +127,7 @@ describe('the medieval pack', () => {
     }
     expect(Object.fromEntries(pack.districts.kinds.map((kind) => [kind.id, kind.placement]))).toEqual({
       centre: 'centre',
+      visitors: 'middle',
       craft: 'middle',
       common: 'middle',
       upper: 'middle',
@@ -297,7 +298,7 @@ describe('pack validation', () => {
     ['a repeated visit with its times the wrong way round', (raw) => (raw.visits.visits.find((entry: any) => entry.id === 'water').timesPerDay = { min: 3, max: 1 }), /visits: "water" has a least number of times a day above its most/],
     ['people on the street with no reach given', (raw) => delete raw.visits.streetReach, /visits: "play-morning" puts people on the street, so visits needs a streetReach/],
     ['a visit on the street that is not outside', (raw) => delete raw.visits.visits.find((entry: any) => entry.id === 'doorstep').outside, /visits: "doorstep" is on the street, so it must be marked outside/],
-    ['a landmark with nothing to say which settlements have it', (raw) => { const hall = raw.landmarks.find((entry: any) => entry.id === 'town-hall'); delete hall.minPopulation; }, /landmarks: "town-hall" needs a "when", a minPopulation or spread: true/],
+    ['a landmark with nothing to say which settlements have it', (raw) => { const hall = raw.landmarks.find((entry: any) => entry.id === 'town-hall'); delete hall.minPopulation; }, /landmarks: "town-hall" needs a "when", a minPopulation, spread: true or a count by travellers/],
     ['a landmark with no district and no spread', (raw) => delete raw.landmarks.find((entry: any) => entry.id === 'granary').district, /landmarks: "granary" needs a district to prefer, or spread: true/],
     ['a tier list naming a district kind the pack lacks', (raw) => raw.districts.tierDistricts.wealthy.push('citadel-ward'), /districts: tierDistricts lists the district kind "citadel-ward" for "wealthy", which does not exist/],
     ['a tier list for a tier the pack lacks', (raw) => (raw.districts.tierDistricts.royal = ['upper']), /districts: tierDistricts names the status tier "royal"/],

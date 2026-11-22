@@ -7,7 +7,7 @@
  * Reading the files from disk is the server's job.
  */
 import { z } from 'zod';
-import { SizeGroupSchema } from '../schema.ts';
+import { RouteKindSchema, SizeGroupSchema } from '../schema.ts';
 
 /** The seven workforce categories. These, and the conditions below, are what the code knows. */
 export const CATEGORY_IDS = ['food', 'utilities', 'services', 'construction', 'military', 'luxury', 'trade'] as const;
@@ -39,8 +39,11 @@ export const PACK_FILES = [
   'avatar',
   'display',
   'rounds',
+  'travellers',
 ] as const;
 export type PackFile = (typeof PACK_FILES)[number];
+/** Files a pack may leave out. Without one, the pack behaves as it did before the file existed. */
+export const OPTIONAL_PACK_FILES: readonly PackFile[] = ['travellers'];
 
 const id = z.string().regex(/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/, 'must be a lower-case ID such as "master-builder"');
 const text = z.string().min(1);
@@ -186,6 +189,8 @@ const CountSchema = z.union([
   z.strictObject({ perThousand: z.number().positive(), min: wholeNumber.optional(), max: wholeNumber.optional() }),
   /** One for every so many residents. */
   z.strictObject({ perResidents: z.number().positive(), min: wholeNumber.optional(), max: wholeNumber.optional() }),
+  /** One for every so many travellers expected to arrive in a day, by the rules of the pack's travellers file; none where none are expected. */
+  z.strictObject({ perTravellers: z.number().positive(), min: wholeNumber.optional(), max: wholeNumber.optional() }),
 ]);
 export type CountSpec = z.infer<typeof CountSchema>;
 
@@ -204,6 +209,11 @@ const LandmarkSchema = z.strictObject({
   count: CountSchema,
   /** Fixed posts, shared out among the buildings. */
   posts: z.array(z.strictObject({ occupation: id, count: CountSchema })),
+  /**
+   * The household of whoever holds the first post listed lives in the building, as a proprietor's does in a
+   * workplace. Each building then gets one holder of each post in turn before any gets a second.
+   */
+  proprietorLivesIn: z.boolean().optional(),
   ...placeFlags,
 });
 export type Landmark = z.infer<typeof LandmarkSchema>;
@@ -293,6 +303,14 @@ const DistrictKindSchema = z.strictObject({
   weight: weight.optional(),
   /** A kind with a condition adds exactly one district to settlements that meet it. */
   when: ConditionSchema.optional(),
+  /** Instead of a weight or a condition: the kind adds exactly one district to settlements whose draw (travellers file) reaches this. */
+  whenDraw: z.number().positive().optional(),
+  /**
+   * Building types that belong to this kind: where the settlement has a district of it they stand there, whatever
+   * district their own entry prefers and whether or not they are spread; where it has none they go where their own
+   * entry says.
+   */
+  types: z.array(id).optional(),
   /** The status tiers whose dwellings this kind takes. */
   statuses: z.array(id),
   /** Name patterns. {settlement} and any {key} of `words` are filled in. */
@@ -377,6 +395,10 @@ const DisplaySchema = z.strictObject({
   notWorking: colour,
   /** Single occupations with a colour of their own, which takes priority over their category's. */
   occupations: z.record(id, colour).optional(),
+  /** A colour for each kind of traveller, by the kind's ID in the travellers file. */
+  travellers: z.record(id, colour).optional(),
+  /** The colour of people who live on the streets. */
+  vagrants: colour.optional(),
 });
 export type Display = z.infer<typeof DisplaySchema>;
 
@@ -484,6 +506,112 @@ const VisitsSchema = z.strictObject({
   visits: z.array(VisitSchema),
 });
 
+const minuteRange = z.strictObject({ min: minutes, max: minutes });
+const countRange = z.strictObject({ min: wholeNumber, max: wholeNumber });
+
+/**
+ * Something an outsider does in town: one stop, a chain of stops, or a stroll. It has the forms a resident's
+ * visit has, without the parts that say which residents make it.
+ */
+const OutsiderVisitSchema = z.strictObject({
+  id,
+  name: text,
+  /** The window of the day in which it starts. */
+  when: z.strictObject({ from: clockTime, to: clockTime }),
+  durationMinutes: minuteRange.optional(),
+  destinations: z.array(id).min(1).optional(),
+  nearest: z.boolean().optional(),
+  stops: z.array(VisitStopSchema).optional(),
+  stroll: z.strictObject({ minutes: minuteRange, pauseMinutes: minuteRange, favour: z.array(id).optional() }).optional(),
+  outside: z.boolean().optional(),
+  where: z.enum(['ground', 'street']).optional(),
+});
+export type OutsiderVisit = z.infer<typeof OutsiderVisitSchema>;
+
+/** The stops of an outsider's visit, in order. A stroll has none. */
+export function outsiderStopsOf(visit: OutsiderVisit): VisitStop[] {
+  if (visit.stops) return visit.stops;
+  if (visit.destinations && visit.durationMinutes) return [{ destinations: visit.destinations, durationMinutes: visit.durationMinutes, ...(visit.nearest && { nearest: true }) }];
+  return [];
+}
+
+/** Which of the file's visits a kind of outsider makes, how likely each day, and how many times. */
+const OutsiderVisitsSchema = z.array(z.strictObject({ visit: id, chance: probability, times: z.strictObject({ min: z.int().positive(), max: z.int().positive() }).optional() }));
+
+const TravellerKindSchema = z.strictObject({
+  id,
+  name: text,
+  /**
+   * How many parties arrive in a day, on average: the sum of these terms, times the multiplier of the day of
+   * the week. The number on a given day is drawn around that average.
+   */
+  arrivals: z.strictObject({
+    /** In any settlement. */
+    base: weight.optional(),
+    /** For every thousand residents. */
+    perThousandResidents: weight.optional(),
+    /** For each route exit, by the kind of route. A party also enters by an exit with these weights. */
+    perExit: z.partialRecord(RouteKindSchema, weight).optional(),
+    /** For each point of the settlement's draw, where the draw reaches its floor. */
+    perDraw: weight.optional(),
+    /** Multipliers by day of the week, by the calendar's names. A day left out has 1. */
+    weekdays: z.record(text, weight).optional(),
+  }),
+  partySize: z.strictObject({ min: z.int().positive(), max: z.int().positive() }),
+  /** How many nights a party stays. One that stays none does not lodge: it makes its visits on the way through and leaves. */
+  nights: countRange,
+  /** The hours of the day in which a party arrives, and those of its last morning in which one that lodged sets out. */
+  arrivalHours: z.strictObject({ from: clockTime, to: clockTime }),
+  departureHours: z.strictObject({ from: clockTime, to: clockTime }),
+  ages: range,
+  maleShare: probability,
+  /** Building types a party lodges at. It takes one of those the settlement has; with none of them it does not stay the night. */
+  lodging: z.array(id).optional(),
+  /** By which exit a party leaves: the one it came by, another where there is one, or any. */
+  leaves: z.enum(['same', 'other', 'any']),
+  visits: OutsiderVisitsSchema,
+});
+export type TravellerKind = z.infer<typeof TravellerKindSchema>;
+
+/** Where on the street graph someone with no dwelling may sleep. */
+export const SleepingPlaceSchema = z.enum(['lane', 'bridge-end', 'edge']);
+export type SleepingPlace = z.infer<typeof SleepingPlaceSchema>;
+
+const VagrantsSchema = z.strictObject({
+  name: text,
+  /** A settlement with fewer residents has none. */
+  minPopulation: wholeNumber,
+  /** How many there are, as a share of the residents. They are not residents and are not counted among them. */
+  share: probability,
+  ages: range,
+  maleShare: probability,
+  /** The kinds of place one sleeps at: a lane, the end of a bridge, or a street at the town's edge, which is one built on one side only. */
+  sleepsAt: z.array(SleepingPlaceSchema).min(1),
+  /** How many places each has to sleep, and for how many days running one is kept before another may be chosen. */
+  haunts: z.int().positive(),
+  spotDays: z.strictObject({ min: z.int().positive(), max: z.int().positive() }),
+  visits: OutsiderVisitsSchema,
+});
+export type VagrantRules = z.infer<typeof VagrantsSchema>;
+
+const TravellersSchema = z.strictObject({
+  /** A settlement's draw: how much it attracts visitors who have no business there. */
+  draw: z.strictObject({
+    /** What each flag and status adds. */
+    conditions: z.partialRecord(ConditionSchema, weight),
+    /** For sheer size: so much for every thousand residents, up to a most. */
+    population: z.strictObject({ perThousand: weight, max: weight.optional() }),
+    /** For what the settlement is known for: so much for each specialty tag the pack does not ignore, up to a number of tags. */
+    specialties: z.strictObject({ perTag: weight, maxTags: wholeNumber }),
+    /** Below this a settlement draws no such visitors at all. */
+    floor: weight,
+  }),
+  visits: z.array(OutsiderVisitSchema),
+  kinds: z.array(TravellerKindSchema),
+  vagrants: VagrantsSchema.optional(),
+});
+export type TravellerRules = z.infer<typeof TravellersSchema>;
+
 const RawPackSchema = z.strictObject({
   pack: ManifestSchema,
   categories: z.array(CategorySchema),
@@ -504,6 +632,7 @@ const RawPackSchema = z.strictObject({
   rounds: z.record(id, RoundSchema),
   shifts: z.strictObject({ default: id, shifts: z.record(id, ShiftSchema) }),
   visits: VisitsSchema,
+  travellers: TravellersSchema.optional(),
 });
 
 export type SettingPack = z.infer<typeof RawPackSchema>;
@@ -554,9 +683,20 @@ export function roleOf(person: { occupationId?: string | undefined; workforceSta
   return pack.display.occupations?.[occupation.id] !== undefined ? occupation.id : occupation.category;
 }
 
-/** The colour of each role, by the keys `roleOf` gives. */
+/** The role a traveller of a kind is shown in, and the role of a vagrant. Neither can be an occupation's or a category's ID. */
+export const travellerRole = (kindId: string) => `traveller:${kindId}`;
+export const VAGRANT_ROLE = 'vagrant';
+
+/** The colour of each role, by the keys `roleOf` gives, and those of outsiders. */
 export function roleColours(pack: SettingPack): Record<string, string> {
-  return { ...pack.display.categories, 'keeping-house': pack.display.keepingHouse, 'not-working': pack.display.notWorking, ...pack.display.occupations };
+  return {
+    ...pack.display.categories,
+    'keeping-house': pack.display.keepingHouse,
+    'not-working': pack.display.notWorking,
+    ...pack.display.occupations,
+    ...Object.fromEntries(Object.entries(pack.display.travellers ?? {}).map(([kind, shade]) => [travellerRole(kind), shade])),
+    ...(pack.display.vagrants !== undefined && { [VAGRANT_ROLE]: pack.display.vagrants }),
+  };
 }
 
 /** The destination that means a person's own dwelling, whatever its type. */
@@ -679,8 +819,12 @@ function crossCheck(pack: SettingPack): string[] {
   for (const landmark of pack.landmarks) {
     if (landmark.district !== undefined) needKind(landmark.district, `landmarks: "${landmark.id}"`);
     else if (!landmark.spread) problems.push(`landmarks: "${landmark.id}" needs a district to prefer, or spread: true`);
-    if (landmark.when === undefined && landmark.minPopulation === undefined && !landmark.spread) {
-      problems.push(`landmarks: "${landmark.id}" needs a "when", a minPopulation or spread: true, to say which settlements have it`);
+    if (landmark.when === undefined && landmark.minPopulation === undefined && !landmark.spread && !('perTravellers' in landmark.count)) {
+      problems.push(`landmarks: "${landmark.id}" needs a "when", a minPopulation, spread: true or a count by travellers, to say which settlements have it`);
+    }
+    if (landmark.proprietorLivesIn && landmark.posts.length === 0) problems.push(`landmarks: "${landmark.id}" has proprietorLivesIn but no post whose holder could live there`);
+    for (const spec of [landmark.count, ...landmark.posts.map((post) => post.count)]) {
+      if ('perTravellers' in spec && !pack.travellers) problems.push(`landmarks: "${landmark.id}" is counted by travellers, so the pack needs a travellers file`);
     }
     for (const post of landmark.posts) {
       const occupation = occupationById.get(post.occupation);
@@ -938,7 +1082,7 @@ function crossCheck(pack: SettingPack): string[] {
     problems.push(`districts: the kind "${repeated}" is defined more than once`);
   }
   const first = pack.districts.kinds[0];
-  if (first && (first.when !== undefined || !first.weight)) {
+  if (first && (first.when !== undefined || first.whenDraw !== undefined || !first.weight)) {
     problems.push('districts: the first kind must have a weight and no condition, because every settlement gets one');
   }
   const kindIds = new Set(pack.districts.kinds.map((kind) => kind.id));
@@ -955,10 +1099,18 @@ function crossCheck(pack: SettingPack): string[] {
   if (pack.pack.homeAndWorkLabel !== undefined && !pack.pack.homeAndWorkLabel.includes('{workplace}')) {
     problems.push(`pack: homeAndWorkLabel "${pack.pack.homeAndWorkLabel}" must contain {workplace}`);
   }
+  const kindOfType = new Map<string, string>();
   for (const kind of pack.districts.kinds) {
     const where = `districts: "${kind.id}"`;
-    if (kind.when === undefined && kind.weight === undefined) problems.push(`${where} needs either a weight or a condition`);
-    if (kind.when !== undefined && kind.weight !== undefined) problems.push(`${where} has both a weight and a condition`);
+    const says = [kind.weight !== undefined, kind.when !== undefined, kind.whenDraw !== undefined].filter(Boolean).length;
+    if (says === 0) problems.push(`${where} needs either a weight or a condition`);
+    if (says > 1) problems.push(`${where} has more than one of a weight, a condition and a draw to reach`);
+    if (kind.whenDraw !== undefined && !pack.travellers) problems.push(`${where} depends on the settlement's draw, so the pack needs a travellers file`);
+    for (const type of kind.types ?? []) {
+      if (!buildingTypes.has(type)) problems.push(`${where} lists the building type "${type}", which does not exist`);
+      if (kindOfType.has(type)) problems.push(`${where} lists the building type "${type}", which "${kindOfType.get(type)}" lists too`);
+      kindOfType.set(type, kind.id);
+    }
     for (const tier of kind.statuses) needTier(tier, where);
     for (const pattern of kind.names) {
       for (const [, key] of pattern.matchAll(/\{([^}]*)\}/g)) {
@@ -966,6 +1118,69 @@ function crossCheck(pack: SettingPack): string[] {
           problems.push(`${where} has the name pattern "${pattern}", but districts.words has no "${key}"`);
         }
       }
+    }
+  }
+
+  // Travellers and vagrants
+  const outsiders = pack.travellers;
+  for (const kindId of Object.keys(pack.display.travellers ?? {})) {
+    if (!outsiders?.kinds.some((kind) => kind.id === kindId)) problems.push(`display: travellers gives a colour to "${kindId}", which is not a kind of traveller`);
+  }
+  if (outsiders) {
+    const outsiderVisits = new Map(outsiders.visits.map((visit) => [visit.id, visit]));
+    for (const repeated of duplicates([...pack.visits.visits.map((visit) => visit.id), ...outsiders.visits.map((visit) => visit.id)])) {
+      problems.push(`travellers: the visit "${repeated}" is defined more than once, here or in visits`);
+    }
+    for (const visit of outsiders.visits) {
+      const where = `travellers: the visit "${visit.id}"`;
+      const forms = [visit.destinations !== undefined || visit.durationMinutes !== undefined, visit.stops !== undefined, visit.stroll !== undefined].filter(Boolean).length;
+      if (visit.stops !== undefined && visit.stops.length === 0) problems.push(`${where} is a chain with no stops`);
+      else if (forms !== 1) problems.push(`${where} must be exactly one of: a stop (destinations and durationMinutes), a chain (stops), or a stroll`);
+      else if ((visit.destinations === undefined) !== (visit.durationMinutes === undefined)) problems.push(`${where} needs both destinations and durationMinutes`);
+      for (const stop of outsiderStopsOf(visit)) {
+        for (const type of stop.destinations) if (!buildingTypes.has(type)) problems.push(`${where} names the building type "${type}", which does not exist`);
+        if (stop.durationMinutes.min > stop.durationMinutes.max) problems.push(`${where} has a shortest duration above its longest`);
+      }
+      for (const type of visit.stroll?.favour ?? []) if (!buildingTypes.has(type)) problems.push(`${where} favours the building type "${type}", which does not exist`);
+      if (visit.stroll && (visit.stroll.minutes.min > visit.stroll.minutes.max || visit.stroll.pauseMinutes.min > visit.stroll.pauseMinutes.max)) problems.push(`${where} has a shortest time above its longest`);
+      if (visit.where === 'street' && !visit.outside) problems.push(`${where} is on the street, so it must be marked outside`);
+      if ((visit.where === 'street' || visit.stroll) && pack.visits.streetReach === undefined) problems.push(`${where} puts people on the street, so visits needs a streetReach`);
+      if (visit.when.from > visit.when.to) problems.push(`${where} has a window that ends before it starts`);
+    }
+    const checkVisits = (where: string, list: ReadonlyArray<{ visit: string; times?: { min: number; max: number } | undefined }>) => {
+      for (const entry of list) {
+        if (!outsiderVisits.has(entry.visit)) problems.push(`${where} names the visit "${entry.visit}", which travellers does not define`);
+        if (entry.times && entry.times.min > entry.times.max) problems.push(`${where} makes "${entry.visit}" a least number of times above its most`);
+      }
+      for (const repeated of duplicates(list.map((entry) => entry.visit))) problems.push(`${where} lists the visit "${repeated}" more than once`);
+    };
+    for (const repeated of duplicates(outsiders.kinds.map((kind) => kind.id))) problems.push(`travellers: the kind "${repeated}" is defined more than once`);
+    for (const kind of outsiders.kinds) {
+      const where = `travellers: "${kind.id}"`;
+      for (const type of kind.lodging ?? []) if (!buildingTypes.has(type)) problems.push(`${where} lodges at the building type "${type}", which does not exist`);
+      checkVisits(where, kind.visits);
+      for (const weekday of Object.keys(kind.arrivals.weekdays ?? {})) {
+        if (!weekdayNames.includes(weekday)) problems.push(`${where} names the weekday "${weekday}", which the calendar does not have (it has ${weekdayNames.join(', ')})`);
+      }
+      if (kind.partySize.min > kind.partySize.max) problems.push(`${where} has a smallest party above its largest`);
+      if (kind.nights.min > kind.nights.max) problems.push(`${where} has a shortest stay above its longest`);
+      if (kind.ages.max > Math.min(...Object.values(pack.species).map((species) => species.ages.maxAge))) problems.push(`${where} has ages above the maximum age of a species`);
+      if (kind.arrivalHours.from > kind.arrivalHours.to || kind.departureHours.from > kind.departureHours.to) problems.push(`${where} has hours that end before they start`);
+      if (kind.nights.max > 0 && (kind.lodging ?? []).length === 0) problems.push(`${where} can stay the night, so it needs somewhere to lodge`);
+    }
+    const vagrants = outsiders.vagrants;
+    if (vagrants) {
+      const where = 'travellers: vagrants';
+      checkVisits(where, vagrants.visits);
+      // Someone with no dwelling is never indoors: everything they do is out on a street.
+      for (const entry of vagrants.visits) {
+        const visit = outsiderVisits.get(entry.visit);
+        if (visit && !visit.stroll && visit.where !== 'street') problems.push(`${where} makes the visit "${visit.id}", which is not a stroll and not spent out on the street (outside: true, where: street)`);
+        if (visit?.stroll?.favour?.length) problems.push(`${where} makes the stroll "${visit.id}", which goes by way of buildings; a vagrant's stroll keeps to the streets`);
+      }
+      if (vagrants.spotDays.min > vagrants.spotDays.max) problems.push(`${where} has a shortest run of days above its longest`);
+      if (vagrants.ages.max > Math.min(...Object.values(pack.species).map((species) => species.ages.maxAge))) problems.push(`${where} has ages above the maximum age of a species`);
+      if (pack.visits.streetReach === undefined) problems.push(`${where} live on the street, so visits needs a streetReach`);
     }
   }
 

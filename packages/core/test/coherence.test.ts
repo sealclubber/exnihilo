@@ -2,6 +2,10 @@
  * Phase 2.5: a generated city hangs together. Parents are old enough, kinship
  * is explicit, the pack decides who may hold which job, families share a
  * workplace, and servants work in the homes of the households that employ them.
+ *
+ * These tests hold exact figures for Badanos as it was generated before phase 6C gave settlements inns, a gaming
+ * house and a visitors' quarter, so they run on the pack with those taken out (`medievalPackBefore6C`), which
+ * `baselines/city-v4.json` proves gives the same cities. What phase 6C moved is in `visitors.test.ts`.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -16,7 +20,7 @@ import {
   generateCity,
   parsePack,
 } from '../src/index.ts';
-import { medievalPack, rawMedievalPack, settlement } from './pack.ts';
+import { medievalPackBefore6C as medievalPack, rawMedievalPackBefore6C as rawMedievalPack, settlement } from './pack.ts';
 
 const pack = medievalPack();
 const occupationOf = (id: string, from: SettingPack = pack) => allOccupations(from).find((entry) => entry.id === id)!;
@@ -37,10 +41,10 @@ const edited = (edit: (raw: any) => void): SettingPack => {
 const occupationIn = (raw: any, id: string) => raw.occupations.find((entry: any) => entry.id === id);
 
 describe('versions', () => {
-  it('is generator version 4 with pack 0.9.0', () => {
-    expect(GENERATOR_VERSION).toBe(4);
-    expect(badanos.summary.generatorVersion).toBe(4);
-    expect(badanos.summary.pack).toEqual({ name: 'medieval', version: '0.9.0' });
+  it('is generator version 5 with pack 0.10.0', () => {
+    expect(GENERATOR_VERSION).toBe(5);
+    expect(badanos.summary.generatorVersion).toBe(5);
+    expect(badanos.summary.pack).toEqual({ name: 'medieval', version: '0.10.0' });
   });
 });
 

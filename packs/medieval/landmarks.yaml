@@ -11,10 +11,17 @@
 #   count     how many buildings: {fixed: n}, {perThousand: x, min: a, max: b}
 #             or {perResidents: n, min: a, max: b}: one for every n residents.
 #             Both grow with the settlement's population.
+#             {perTravellers: n, min: a, max: b} is one for every n travellers
+#             expected to arrive in a day by the rules in travellers.yaml; a
+#             settlement that expects none has none, whatever `min` says.
 #   posts     may be empty, for a building nobody staffs
 #   posts     jobs that exist because the landmark does. Each takes a slot from
 #             its occupation's category, and is shared out among the buildings.
 #             The occupation must name this landmark as its workplace.
+#   proprietorLivesIn  optional. true: the household of whoever holds the
+#             first post listed lives in the building, as a proprietor's does
+#             in a workplace. Each building gets one holder of each post in
+#             turn before any gets a second.
 #   openAir, alwaysOpen  optional, as in workplaces.yaml. The market square is
 #             both: a public place out of doors. The docks are open-air.
 
@@ -164,3 +171,33 @@
   posts:
     - {occupation: guild-registrar, count: {fixed: 1}}
     - {occupation: guild-steward, count: {perResidents: 6000, min: 1}}
+
+# --- Lodging and the visitors' quarter (phase 6C) --------------------------
+# PLACEHOLDERS, for review: the user will add their own types and names for
+# the visitors' quarter. To add one, define the building type here or in
+# workplaces.yaml, give it a lot in layout.yaml, and list it under the
+# `visitors` kind's `types` in districts.yaml.
+
+# Where travellers lodge. A settlement has one for every so many travellers
+# its rules expect in a day, and at least one wherever any are expected. The
+# innkeeper's household lives in it, and it never shuts: a guest comes and
+# goes at any hour.
+- id: inn
+  name: Inn
+  district: centre
+  alwaysOpen: true
+  proprietorLivesIn: true
+  count: {perTravellers: 12, min: 1}
+  posts:
+    - {occupation: innkeeper, count: {perTravellers: 12, min: 1}}
+    - {occupation: inn-servant, count: {perTravellers: 15}}
+    - {occupation: chambermaid, count: {perTravellers: 10}}
+
+- id: gaming-house
+  name: Gaming house
+  minPopulation: 5000
+  district: centre
+  count: {fixed: 1}
+  posts:
+    - {occupation: gaming-keeper, count: {fixed: 1}}
+    - {occupation: table-keeper, count: {perResidents: 10000, min: 1}}
