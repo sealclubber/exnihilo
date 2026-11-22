@@ -560,7 +560,7 @@ const TravellerKindSchema = z.strictObject({
   partySize: z.strictObject({ min: z.int().positive(), max: z.int().positive() }),
   /** How many nights a party stays. One that stays none does not lodge: it makes its visits on the way through and leaves. */
   nights: countRange,
-  /** The hours of the day in which a party arrives, and those of its last morning in which one that lodged sets out. */
+  /** The hours of the day in which a party arrives, and those of its last day in which one that lodged sets out. */
   arrivalHours: z.strictObject({ from: clockTime, to: clockTime }),
   departureHours: z.strictObject({ from: clockTime, to: clockTime }),
   ages: range,

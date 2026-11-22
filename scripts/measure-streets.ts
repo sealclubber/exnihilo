@@ -3,6 +3,9 @@
  * figures. Used to record the baseline before phase 6C and to repeat the measurement after it.
  *
  * Usage: node scripts/measure-streets.ts <out.json> [--outsiders]
+ *
+ * The six work days measured are days 1 to 6. With --outsiders the brief is given to daily life, so travellers
+ * and vagrants are counted with the residents; without it the town is its residents alone.
  */
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -22,12 +25,11 @@ for (const name of ['Badanos', 'Pombal', 'Vereceldo']) {
   const brief = world.settlements.find((entry) => entry.name === name)!;
   const city = generateCity(brief, pack);
   const layout = generateLayout(city, brief, pack);
-  const life = createLife({ city, layout, pack, ...(withOutsiders && { brief }) } as Parameters<typeof createLife>[0]);
+  const life = createLife({ city, layout, pack, ...(withOutsiders && { brief }) });
   const residents = city.people.length;
   const everyone = (day: number): string[] => {
     const ids = city.people.map((person) => person.id);
-    const outsiders = (life as any).outsiders?.inTown(day) as Array<{ id: string }> | undefined;
-    return outsiders ? [...ids, ...outsiders.map((entry) => entry.id)] : ids;
+    return life.outsiders ? [...ids, ...life.outsiders.inTown(day).map((entry) => entry.id)] : ids;
   };
   const kindAt = (id: string, time: number) => life.whereabouts(id, time).kind;
   const walking = (time: number, ids: string[]) => ids.filter((id) => kindAt(id, time) === 'travel').length;
@@ -38,14 +40,19 @@ for (const name of ['Badanos', 'Pombal', 'Vereceldo']) {
     let walkers = 0;
     let street = 0;
     let outside = 0;
+    let outsiders = 0;
     for (const id of people) {
       const where = life.whereabouts(id, time);
+      if (where.kind === 'away') continue;
+      const seen = where.kind === 'travel' || where.kind === 'street' || where.outside === true;
       if (where.kind === 'travel') walkers++;
       else if (where.kind === 'street') street++;
-      else if ('outside' in where && where.outside) outside++;
+      else if (where.outside) outside++;
+      if (seen && where.outsider) outsiders++;
     }
-    return { hour, walking: walkers, onAStreet: street, outsideAtABuilding: outside };
+    return { hour, walking: walkers, onAStreet: street, outsideAtABuilding: outside, ...(withOutsiders && { ofWhomOutsiders: outsiders }) };
   });
+  const travellers = life.outsiders ? WORK_DAYS.map((day) => life.outsiders!.inTown(day).filter((entry) => entry.group === 'traveller').length) : undefined;
   const middays = WORK_DAYS.map((day) => walking(at(day, 12, 30), everyone(day)));
   const finder = createPathFinder(layout);
   const rng = createRng(100);
@@ -59,6 +66,7 @@ for (const name of ['Badanos', 'Pombal', 'Vereceldo']) {
     settlementId: brief.id,
     residents,
     buildings: city.buildings.length,
+    ...(life.outsiders && { travellersInTownOnWorkDays: travellers, vagrants: life.outsiders.vagrants().length, draw: life.outsiders.draw.total }),
     onTheStreetsByHour: byHour,
     targets: {
       walkingAt1230: { meanOfSixWorkDays: middays.reduce((sum, count) => sum + count, 0) / middays.length, byDay: middays },

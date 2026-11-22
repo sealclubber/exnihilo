@@ -19,8 +19,20 @@ import {
   type PathFinder,
   type AvatarTown,
   type BuildingTypes,
+  type Anyone,
   type Occupation,
+  type OutsiderDetail,
+  type OutsidersToday,
+  type Outsider,
   type Seen,
+  type SettlementDraw,
+  type Traveller,
+  VAGRANT_ROLE,
+  dayOf,
+  drawOf,
+  expectedTravellers,
+  isOutsiderId,
+  travellerRole,
   type SettlementLife,
   type Person,
   type SettingPack,
@@ -101,11 +113,77 @@ export class CityView {
 
   /** The settlement's daily life: plans and whereabouts, derived on demand and never stored. */
   get life(): SettlementLife {
-    return (this.livedLife ??= createLife({ city: this.city, layout: this.layout, pack: this.pack }));
+    return (this.livedLife ??= createLife({ city: this.city, layout: this.layout, pack: this.pack, brief: this.brief }));
+  }
+
+  /** An outsider of this town by ID: a traveller, whenever they came, or a vagrant. */
+  outsider(id: string): Outsider | undefined {
+    return isOutsiderId(id) ? this.life.outsiders?.outsider(id) : undefined;
+  }
+
+  /** A resident or an outsider by ID. */
+  anyone(id: string): Anyone | undefined {
+    return this.people.get(id) ?? this.outsider(id);
+  }
+
+  /** Where a traveller is from, as text: the settlement their route leads from, or the route itself. */
+  private static from(traveller: Traveller): string {
+    return traveller.origin.settlement?.name ?? traveller.origin.routeName ?? traveller.origin.routeId;
+  }
+
+  /** The outsiders in town on a day. */
+  outsidersOn(day: number): OutsidersToday {
+    const inTown = this.life.outsiders?.inTown(day) ?? [];
+    const travellers = inTown.filter((outsider) => outsider.group === 'traveller');
+    const byKind: Record<string, number> = {};
+    for (const traveller of travellers) byKind[traveller.kindId] = (byKind[traveller.kindId] ?? 0) + 1;
+    return { day, travellers, byKind, vagrants: inTown.filter((outsider) => outsider.group === 'vagrant'), buildings: this.buildingTypes(travellers.map((traveller) => traveller.lodgingId)) };
+  }
+
+  /** The travellers who lodge at a building on a day. */
+  guestsOf(buildingId: string, day: number): Traveller[] {
+    return (this.life.outsiders?.inTown(day) ?? []).filter((outsider): outsider is Traveller => outsider.group === 'traveller' && outsider.lodgingId === buildingId);
+  }
+
+  /** One outsider at a moment, with their party and their plan for the day. */
+  outsiderDetail(id: string, time: number): OutsiderDetail | undefined {
+    const outsider = this.outsider(id);
+    const outsiders = this.life.outsiders;
+    if (!outsider || !outsiders) return undefined;
+    const party = outsider.group === 'traveller' ? outsiders.party(outsider.partyId) : undefined;
+    const whereabouts = this.life.whereabouts(id, time);
+    const plan = this.life.plan(id, dayOf(time));
+    const named = plan.activities.flatMap((activity) => (activity.kind === 'travel' ? [activity.fromBuildingId, activity.toBuildingId] : activity.kind === 'street' ? [] : [activity.buildingId]));
+    return {
+      time,
+      outsider,
+      ...(party && { party, companions: party.memberIds.map((member) => outsiders.outsider(member) as Traveller) }),
+      whereabouts,
+      plan,
+      buildings: this.buildingTypes([...named, outsider.group === 'traveller' ? outsider.lodgingId : undefined]),
+    };
+  }
+
+  /** The settlement's draw with its terms, the travellers its rules expect, and whether it has a visitors' quarter. */
+  get draw(): SettlementDraw {
+    const draw = drawOf(this.brief, this.pack);
+    const quarter = this.pack.districts.kinds.find((kind) => kind.whenDraw !== undefined);
+    return {
+      draw,
+      expectedTravellers: expectedTravellers(this.brief, this.pack),
+      ...(quarter?.whenDraw !== undefined && { quarterAt: quarter.whenDraw }),
+      hasQuarter: quarter !== undefined && this.city.districts.some((district) => district.kind === quarter.id),
+    };
   }
 
   /** What a viewer needs to draw and name a resident it can see: their name, and the role that gives them their colour. */
   seen(personId: string): Seen {
+    // An outsider is named, and coloured by the kind of traveller they are; they are not kept, as they come and go.
+    const outsider = this.outsider(personId);
+    if (outsider) {
+      const name = `${outsider.givenName} ${outsider.familyName}`;
+      return outsider.group === 'vagrant' ? { name, role: VAGRANT_ROLE } : { name, role: travellerRole(outsider.kindId), kindId: outsider.kindId, origin: CityView.from(outsider) };
+    }
     let seen = this.seenAs.get(personId);
     if (!seen) {
       const person = this.people.get(personId) as Person;

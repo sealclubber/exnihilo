@@ -26,5 +26,5 @@ export function describeSettlementDay(request: DayRequest): string {
   if (!brief) throw new Error(`no settlement has the ID "${request.settlementId}"; IDs look like settlement-641`);
   const city = generateCity(brief, pack);
   const layout = generateLayout(city, brief, pack);
-  return describeDay(createLife({ city, layout, pack }), request.day, { layout, pack, settlementName: brief.name });
+  return describeDay(createLife({ city, layout, pack, brief }), request.day, { layout, pack, settlementName: brief.name });
 }

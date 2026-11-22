@@ -364,7 +364,7 @@ describe('unchanged behaviour', () => {
       const plans = before.life.plansForDay(Number(day)).map((plan) => ({ ...plan, activities: plan.activities.map(({ wander: _wander, ...rest }: any) => rest) }));
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);
     }
-    expect(LIFE_VERSION).toBe(4);
+    expect(LIFE_VERSION).toBe(5);
     expect(GENERATOR_VERSION).toBe(5);
   });
 });

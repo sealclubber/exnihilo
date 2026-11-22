@@ -21,6 +21,8 @@ import {
   LifeError,
   type ImportReport,
   type OccupantsNow,
+  type OutsiderDetail,
+  type OutsidersToday,
   type PersonNow,
   type PersonPlan,
   type Region,
@@ -28,7 +30,10 @@ import {
   dayOf,
   type SettingPack,
   type SettlementBrief,
+  type SettlementDraw,
   type World,
+  drawOf,
+  expectedTravellers,
   packLabels,
 } from '@worldsim/core';
 import { type CityFilters, type CityView, type PageRequest, CityCache, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './cities.ts';
@@ -205,7 +210,7 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
             settlementId,
             buildingId: seen.buildingId,
             buildingType: view.buildingTypes([seen.buildingId])[seen.buildingId] as string,
-            occupants: seen.occupants.map((occupant) => ({ ...occupant, person: view.person(occupant.personId)! })),
+            occupants: seen.occupants.map((occupant) => ({ ...occupant, person: view.anyone(occupant.personId)! })),
           }
         : {
             where: 'street',
@@ -213,7 +218,7 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
             settlementId,
             point: seen.point,
             radius: seen.radius,
-            nearby: seen.nearby.map((entry) => ({ ...entry, person: view.person(entry.personId)! })),
+            nearby: seen.nearby.map((entry) => ({ ...entry, person: view.anyone(entry.personId)! })),
             buildings: view.buildingTypes(seen.nearby.flatMap((entry) => (entry.kind === 'walking' ? [entry.fromBuildingId, entry.toBuildingId] : [entry.buildingId]))),
           };
     return reply.send(body);
@@ -236,6 +241,21 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     const brief = briefs.get(request.params.id);
     if (!brief) return send(reply, 404, `no settlement has the ID "${request.params.id}"`);
     return reply.send(brief);
+  });
+
+  // Why visitors come here: the draw with its terms, worked out from the brief and the pack.
+  app.get<{ Params: { id: string } }>('/api/settlements/:id/draw', (request, reply) => {
+    const brief = briefs.get(request.params.id);
+    if (!brief) return send(reply, 404, `no settlement has the ID "${request.params.id}"`);
+    const quarter = pack.districts.kinds.find((kind) => kind.whenDraw !== undefined);
+    const draw = drawOf(brief, pack);
+    const body: SettlementDraw = {
+      draw,
+      expectedTravellers: expectedTravellers(brief, pack),
+      ...(quarter?.whenDraw !== undefined && { quarterAt: quarter.whenDraw }),
+      hasQuarter: quarter?.whenDraw !== undefined && draw.total >= quarter.whenDraw,
+    };
+    return reply.send(body);
   });
 
   // Cities are generated when first asked for. Each handler below receives the city already made.
@@ -335,20 +355,32 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     if (typeof day === 'string' || !Number.isInteger(day)) return 'day must be a whole number';
     const plan = view.life.plan(record, day);
     const named = plan.activities.flatMap((activity) => (activity.kind === 'travel' ? [activity.fromBuildingId, activity.toBuildingId] : activity.kind === 'street' ? [] : [activity.buildingId]));
-    return { person: view.person(record)!, plan, buildings: view.buildingTypes(named) };
+    return { person: view.anyone(record)!, plan, buildings: view.buildingTypes(named) };
   });
   life('/people/:record/now', (view, query, record): PersonNow | string => {
     const time = timeOf(query);
     if (typeof time === 'string') return time;
     const whereabouts = view.life.whereabouts(record, time);
-    const named = whereabouts.kind === 'travel' ? [whereabouts.fromBuildingId, whereabouts.toBuildingId] : whereabouts.kind === 'street' ? [] : [whereabouts.buildingId];
-    return { time, person: view.person(record)!, whereabouts, buildings: view.buildingTypes(named) };
+    const named = whereabouts.kind === 'travel' ? [whereabouts.fromBuildingId, whereabouts.toBuildingId] : whereabouts.kind === 'street' || whereabouts.kind === 'away' ? [] : [whereabouts.buildingId];
+    return { time, person: view.anyone(record)!, whereabouts, buildings: view.buildingTypes(named) };
   });
   life('/buildings/:record/occupants', (view, query, record): OccupantsNow | string => {
     const time = timeOf(query);
     if (typeof time === 'string') return time;
-    const occupants = view.life.occupants(record, time).map((occupant) => ({ ...occupant, person: view.person(occupant.personId)! }));
-    return { time, buildingId: record, open: view.life.isOpen(record, time), hours: view.life.openingHours(record, dayOf(time)), occupants };
+    const occupants = view.life.occupants(record, time).map((occupant) => ({ ...occupant, person: view.anyone(occupant.personId)! }));
+    return { time, buildingId: record, open: view.life.isOpen(record, time), hours: view.life.openingHours(record, dayOf(time)), occupants, guests: view.guestsOf(record, dayOf(time)) };
+  });
+  // Outsiders: who is in town on a day, and one of them at a moment.
+  life('/outsiders', (view, query): OutsidersToday | string => {
+    const day = numberOf(query, 'day', dayOf(clock.read().gameTime));
+    return typeof day === 'string' || !Number.isInteger(day) ? 'day must be a whole number' : view.outsidersOn(day);
+  });
+  life('/outsiders/:record', (view, query, record): OutsiderDetail | string => {
+    const time = timeOf(query);
+    if (typeof time === 'string') return time;
+    const detail = view.outsiderDetail(record, time);
+    if (!detail) throw new LifeError(`there is no outsider with the ID "${record}"`);
+    return detail;
   });
   life('/households/:record/now', (view, query, record): HouseholdNow | string => {
     const time = timeOf(query);

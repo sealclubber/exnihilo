@@ -91,7 +91,7 @@ describe('the medieval pack\'s rounds, errands and walks', () => {
     });
     expect(pack.rounds.patrol).toMatchObject({ range: 'town', at: 'street' });
     expect(pack.rounds.deliveries!.at).toEqual(expect.arrayContaining(['carters-yard', 'warehouse', 'market-stall']));
-    expect(LIFE_VERSION).toBe(4);
+    expect(LIFE_VERSION).toBe(5);
   });
 
   it('has errands that chain and repeat, strolls, and children and elders out on the street', () => {
@@ -475,7 +475,7 @@ describe('strolls and the street in front of home', () => {
 describe('the targets, in Badanos on a work day', () => {
   const baseline = { walkingAt1230: 31, walkingAt0750: 867, tripsPerResident: 1.21 };
 
-  it('has about 2% of residents walking at 12:30 on a work day, and no fewer than before at the morning peak', () => {
+  it('has at least 2% of residents walking at 12:30 on a work day, and no fewer than before at the morning peak', () => {
     // The figure sits close to its line, and at one instant it moves by a tenth from day to day and with any
     // change to where buildings stand, so it is taken as the mean of the week's six work days. With a baker and a
     // tavern in every district, and more people living near their work, walks are a little shorter than they were.
@@ -483,10 +483,10 @@ describe('the targets, in Badanos on a work day', () => {
     const midday = middays.reduce((sum, count) => sum + count, 0) / middays.length;
     const morning = walking(badanos, at(WORK_DAY, 7, 50));
     console.log(`Badanos: ${midday.toFixed(0)} walking at 12:30 on a work day, on average (${((midday / 9607) * 100).toFixed(1)}%; day by day ${middays.join(', ')}; it was ${baseline.walkingAt1230}), and ${morning} at 07:50 on day 1 (it was ${baseline.walkingAt0750})`);
-    // Phase 6B's target was 2%, and until phase 6C it was met at 203 (2.1%). Layout version 4 stands a district's
-    // wells on streets of their own instead of side by side, so the nearest well is nearer and the many walks to
-    // fetch water are shorter: 189 on average (1.97%), a little under the line. Reported, not tuned: see the README.
-    expect(midday / badanos.city.people.length).toBeGreaterThanOrEqual(0.019);
+    // Phase 6C moved this a little twice: wells on streets of their own (layout version 4) make the walk to fetch
+    // water shorter, and inns and a gaming house (generator version 5) changed who works where. It was 203 and is
+    // 197 (2.05%), still on the right side of its line.
+    expect(midday / badanos.city.people.length).toBeGreaterThanOrEqual(0.02);
     expect(Math.min(...middays) / badanos.city.people.length).toBeGreaterThanOrEqual(0.018);
     expect(morning).toBeGreaterThanOrEqual(baseline.walkingAt0750);
   });

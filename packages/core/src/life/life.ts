@@ -24,12 +24,14 @@ import { boxOf, distance, pointAlongPolyline, polylineLength } from '../layout/g
 import { createPathFinder } from '../layout/path.ts';
 import type { Layout, StreetPosition } from '../layout/records.ts';
 import { type NamedShift, type Round, type SettingPack, type Species, type Visit, type VisitStop, HOME, allOccupations, placeFlagsOf, shiftLength, sleepLength, stopsOf } from '../pack/schema.ts';
-import type { Point } from '../schema.ts';
+import { type Outsiders, OutsidersError, createOutsiders } from '../outsiders/outsiders.ts';
+import type { Point, SettlementBrief } from '../schema.ts';
 import { deriveSeed } from '../seed.ts';
 import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay, weekdayOf } from './calendar.ts';
 import { createWorkingHours } from './hours.ts';
+import { tripDuration, walkingSpeed } from './walking.ts';
 import { type Ground, type WanderHabit, clipWander, groundOf, makeWander, positionOnWander, streetGround } from './wander.ts';
-import type { Activity, DayPlan, DaySummary, Nearby, Occupant, OpenSpan, OutsideStay, Region, Stay, StreetStop, Travel, Trip, TripPath, Wander, Whereabouts } from './records.ts';
+import { type Activity, type DayPlan, type DaySummary, type Nearby, type Occupant, type OpenSpan, type OutsideStay, type Region, type Stay, type StreetStop, type Travel, type Trip, type TripPath, type Wander, type Whereabouts, isOutsiderId } from './records.ts';
 
 export { dutyCount, restDaysUpTo } from './hours.ts';
 
@@ -46,12 +48,20 @@ export interface LifeInputs {
   pack: SettingPack;
   /** Left out, the city's own seed is used. */
   seed?: number;
+  /**
+   * The settlement's brief. With it, and a pack that has a travellers file, the town's outsiders are worked out
+   * too and are in every answer below beside the residents, marked `outsider`. No resident's plan reads them:
+   * the residents' plans are the same with the brief and without it.
+   */
+  brief?: SettlementBrief;
 }
 
 export interface SettlementLife {
-  /** One person's plan for one day. */
+  /** The town's outsiders, travellers and vagrants, where they are computed. */
+  outsiders?: Outsiders;
+  /** One person's plan for one day: a resident's, or an outsider's by their ID. */
   plan(personId: string, day: number): DayPlan;
-  /** Everyone's plan for one day, in person order. */
+  /** Every resident's plan for one day, in person order. */
   plansForDay(day: number): DayPlan[];
   /** Where a person is at a game time. */
   whereabouts(personId: string, time: number): Whereabouts;
@@ -78,17 +88,7 @@ export interface SettlementLife {
   segmentLoads(day: number): Array<{ segmentId: string; trips: number }>;
 }
 
-/** The walking speed of a person, in metres per second. */
-export function walkingSpeed(person: Pick<Person, 'age' | 'species'>, pack: SettingPack): number {
-  const bands = (pack.species[person.species] as Species).life.walkingSpeed;
-  const band = bands.find((entry) => entry.upToAge === undefined || person.age <= entry.upToAge);
-  return (band as (typeof bands)[number]).metresPerSecond;
-}
-
-/** How long a walk of a given length takes a person, in whole game seconds. */
-export function tripDuration(length: number, speed: number): number {
-  return Math.ceil(length / speed);
-}
+export { tripDuration, walkingSpeed } from './walking.ts';
 
 const DAYS_KEPT = 4;
 /** The shortest spell at the workplace between circuits of a round, and the longest the first spell of a shift is stretched by, in game seconds. */
@@ -727,12 +727,34 @@ export function createLife(inputs: LifeInputs): SettlementLife {
 
   const dayPlans = new Map<number, DayPlan[]>();
   const plansForDay = (day: number): DayPlan[] => dayPlans.get(day) ?? keep(dayPlans, day, city.people.map((_, index) => planOf(index, day)));
+  // ---- Outsiders ------------------------------------------------------------------------------
+  // Travellers and vagrants have plans of their own, made apart from the residents' and read by none of them.
+  // Every question below is answered for both.
+  const outsiders = inputs.brief && pack.travellers ? createOutsiders({ brief: inputs.brief, city, layout, pack, seed, finder, hours }) : undefined;
+  const outsiderPlan = (id: string, day: number): DayPlan => {
+    if (!outsiders) throw new LifeError(`there is no person with the ID "${id}"`);
+    try {
+      return outsiders.plan(id, day);
+    } catch (error) {
+      if (error instanceof OutsidersError) throw new LifeError(error.message);
+      throw error;
+    }
+  };
+  /** The plans of everyone in town on a day: the residents, then the outsiders. */
+  const everyPlan = (day: number): DayPlan[] => (outsiders ? [...plansForDay(day), ...outsiders.plansForDay(day)] : plansForDay(day));
+  /** What an outsider is doing at a moment, or nothing if they are not in town then. */
+  const underWay = (activities: Activity[], time: number): Activity | undefined => {
+    if (activities.length === 0) return undefined;
+    const activity = activityAt(activities, time);
+    return activity.start <= time && time < activity.end ? activity : undefined;
+  };
   const indexOfPerson = (personId: string): number => {
     const index = personIndex.get(personId);
     if (index === undefined) throw new LifeError(`there is no person with the ID "${personId}"`);
     return index;
   };
   const plan = (personId: string, day: number): DayPlan => {
+    if (isOutsiderId(personId)) return outsiderPlan(personId, day);
     const index = indexOfPerson(personId);
     return dayPlans.get(day)?.[index] ?? planOf(index, day);
   };
@@ -769,9 +791,9 @@ export function createLife(inputs: LifeInputs): SettlementLife {
   // For the nearby query: each day's walks and outside stays, sorted into stretches of the day,
   // so that a question about one moment looks only at the people who are out around then.
   interface Seen {
-    walks: Array<Array<{ personId: string; travel: Travel; box: Region }>>;
+    walks: Array<Array<{ personId: string; outsider?: true; travel: Travel; box: Region }>>;
     /** Everyone out of doors who is not walking: on a lot, in front of a building, or at a stop on a street. */
-    stays: Array<Array<{ personId: string; stay: Stay | StreetStop }>>;
+    stays: Array<Array<{ personId: string; outsider?: true; stay: Stay | StreetStop }>>;
   }
   const boxes = new WeakMap<TripPath, Region>();
   const boxOfPath = (path: TripPath): Region => {
@@ -802,14 +824,60 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       const last = Math.min(slots.length - 1, Math.floor((to - 1 - start) / size));
       for (let slot = Math.max(0, Math.floor((from - start) / size)); slot <= last; slot++) (slots[slot] as T[]).push(entry);
     };
-    for (const { personId, activities } of plansForDay(day)) {
+    for (const { personId, outsider, activities } of everyPlan(day)) {
+      const who = { personId, ...(outsider && { outsider }) };
       for (const activity of activities) {
         if (activity.end <= activity.start) continue;
-        if (activity.kind === 'travel') file(seen.walks, WALK_SLOT, activity.start, activity.end, { personId, travel: activity, box: boxOfPath(activity.path) });
-        else if (activity.kind === 'street' || activity.outside) file(seen.stays, STAY_SLOT, activity.start, activity.end, { personId, stay: activity });
+        if (activity.kind === 'travel') file(seen.walks, WALK_SLOT, activity.start, activity.end, { ...who, travel: activity, box: boxOfPath(activity.path) });
+        else if (activity.kind === 'street' || activity.outside) file(seen.stays, STAY_SLOT, activity.start, activity.end, { ...who, stay: activity });
       }
     }
     return keep(seenByDay, day, seen);
+  };
+
+  /** The outsiders' part of a day's summary, counted apart from the residents'. */
+  const outsidersOn = (day: number): NonNullable<DaySummary['outsiders']> => {
+    const start = startOfDay(day);
+    const seconds = { inTown: new Float64Array(24), sleep: new Float64Array(24), home: new Float64Array(24), visit: new Float64Array(24), travel: new Float64Array(24), outside: new Float64Array(24) };
+    let trips = 0;
+    for (const { activities } of (outsiders as Outsiders).plansForDay(day)) {
+      for (const activity of activities) {
+        if (activity.kind === 'travel' && activity.departAt >= start && activity.departAt < start + SECONDS_PER_DAY) trips++;
+        const what = activity.kind === 'street' ? activity.purpose : activity.kind;
+        for (let hour = Math.floor((activity.start - start) / 3600); hour < 24 && start + hour * 3600 < activity.end; hour++) {
+          const span = Math.min(activity.end, start + (hour + 1) * 3600) - Math.max(activity.start, start + hour * 3600);
+          if (span <= 0) continue;
+          seconds.inTown[hour]! += span;
+          if (what !== 'work') seconds[what][hour]! += span;
+          if (activity.kind === 'street' || (activity.kind !== 'travel' && activity.outside)) seconds.outside[hour]! += span;
+        }
+      }
+    }
+    const byKind: Record<string, number> = {};
+    let travellers = 0;
+    let vagrants = 0;
+    for (const outsider of (outsiders as Outsiders).inTown(day)) {
+      if (outsider.group === 'vagrant') vagrants++;
+      else {
+        travellers++;
+        byKind[outsider.kindId] = (byKind[outsider.kindId] ?? 0) + 1;
+      }
+    }
+    return {
+      travellers,
+      vagrants,
+      byKind,
+      hours: Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        inTown: (seconds.inTown[hour] as number) / 3600,
+        asleep: (seconds.sleep[hour] as number) / 3600,
+        atLodging: (seconds.home[hour] as number) / 3600,
+        visiting: (seconds.visit[hour] as number) / 3600,
+        travelling: (seconds.travel[hour] as number) / 3600,
+        outside: (seconds.outside[hour] as number) / 3600,
+      })),
+      trips,
+    };
   };
 
   const daysIn = (from: number, to: number): number[] => {
@@ -819,14 +887,19 @@ export function createLife(inputs: LifeInputs): SettlementLife {
   };
 
   return {
+    ...(outsiders && { outsiders }),
     plan,
     plansForDay,
 
     whereabouts(personId, time) {
-      const activity = activityAt(plan(personId, dayOf(time)).activities, time);
+      const { activities, outsider } = plan(personId, dayOf(time));
+      // A traveller is nowhere before arriving and after leaving.
+      const activity = outsider ? underWay(activities, time) : activityAt(activities, time);
+      if (!activity) return { personId, outsider: true, time, kind: 'away' };
       if (activity.kind === 'travel') {
         return {
           personId,
+          ...(outsider && { outsider }),
           time,
           kind: 'travel',
           ...positionOn(activity, time),
@@ -840,6 +913,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       if (activity.kind === 'street') {
         return {
           personId,
+          ...(outsider && { outsider }),
           time,
           kind: 'street',
           point: positionOnWander(activity.wander, time),
@@ -853,6 +927,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       }
       return {
         personId,
+        ...(outsider && { outsider }),
         time,
         kind: activity.kind,
         buildingId: activity.buildingId,
@@ -868,11 +943,12 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     occupants(buildingId, time) {
       if (!buildingType.has(buildingId)) throw new LifeError(`there is no building with the ID "${buildingId}"`);
       const inside: Occupant[] = [];
-      for (const { personId, activities } of plansForDay(dayOf(time))) {
-        const activity = activityAt(activities, time);
-        if (activity.kind !== 'travel' && activity.kind !== 'street' && activity.buildingId === buildingId) {
+      for (const { personId, outsider, activities } of everyPlan(dayOf(time))) {
+        const activity = outsider ? underWay(activities, time) : activityAt(activities, time);
+        if (activity && activity.kind !== 'travel' && activity.kind !== 'street' && activity.buildingId === buildingId) {
           inside.push({
             personId,
+            ...(outsider && { outsider }),
             kind: activity.kind,
             ...(activity.visitId !== undefined && { visitId: activity.visitId }),
             ...(activity.outside && { outside: true as const }),
@@ -899,7 +975,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       /** The last stay found for each person, for joining one that crosses midnight to its other half. */
       const latest = new Map<string, OutsideStay>();
       for (const day of daysIn(from, to)) {
-        for (const { personId, activities } of plansForDay(day)) {
+        for (const { personId, outsider, activities } of everyPlan(day)) {
           for (const activity of activities) {
             if (activity.kind === 'travel' || activity.end <= from || activity.start >= to) continue;
             if (activity.kind !== 'street' && !activity.outside) continue;
@@ -914,6 +990,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
             }
             const stay: OutsideStay = {
               personId,
+              ...(outsider && { outsider }),
               ...where,
               kind: activity.kind === 'street' ? activity.purpose : (activity.kind as 'work' | 'visit'),
               ...(activity.visitId !== undefined && { visitId: activity.visitId }),
@@ -943,7 +1020,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       const found: Trip[] = [];
       const seen = new Set<string>();
       for (const day of daysIn(from, to)) {
-        for (const { personId, activities } of plansForDay(day)) {
+        for (const { personId, outsider, activities } of everyPlan(day)) {
           for (const activity of activities) {
             if (activity.kind !== 'travel' || activity.arriveAt < from || activity.departAt >= to) continue;
             // A trip that crosses midnight appears in both days' plans, and is one trip.
@@ -967,6 +1044,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
             }
             found.push({
               personId,
+              ...(outsider && { outsider }),
               ...(activity.fromBuildingId !== undefined && { fromBuildingId: activity.fromBuildingId }),
               ...(activity.toBuildingId !== undefined && { toBuildingId: activity.toBuildingId }),
               ...(activity.round && { round: true as const }),
@@ -987,7 +1065,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
       const sinceMidnight = time - startOfDay(day);
       const [x, y] = point;
       const found: Nearby[] = [];
-      for (const { personId, travel: walk, box } of seen.walks[Math.floor(sinceMidnight / WALK_SLOT)] ?? []) {
+      for (const { personId, outsider, travel: walk, box } of seen.walks[Math.floor(sinceMidnight / WALK_SLOT)] ?? []) {
         if (time < walk.start || time >= walk.end) continue;
         // A walk whose whole line is out of reach is not worth placing.
         if (x < box.minX - radius || x > box.maxX + radius || y < box.minY - radius || y > box.maxY + radius) continue;
@@ -996,6 +1074,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
         if (away > radius) continue;
         found.push({
           personId,
+          ...(outsider && { outsider }),
           distance: away,
           point: at,
           kind: 'walking',
@@ -1004,13 +1083,14 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           ...(walk.round && { round: true as const }),
         });
       }
-      for (const { personId, stay } of seen.stays[Math.floor(sinceMidnight / STAY_SLOT)] ?? []) {
+      for (const { personId, outsider, stay } of seen.stays[Math.floor(sinceMidnight / STAY_SLOT)] ?? []) {
         if (time < stay.start || time >= stay.end) continue;
         const at = positionOnWander(stay.wander as Wander, time);
         const away = distance(point, at);
         if (away > radius) continue;
         found.push({
           personId,
+          ...(outsider && { outsider }),
           distance: away,
           point: at,
           kind: 'outside',
@@ -1058,6 +1138,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
           tripsStarted: started[hour] as number,
         })),
         trips,
+        ...(outsiders && { outsiders: outsidersOn(day) }),
       };
     },
 

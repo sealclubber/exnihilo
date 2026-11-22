@@ -12,15 +12,36 @@ import { PointSchema } from '../schema.ts';
 
 const text = z.string().min(1);
 const gameTime = z.number();
+const count = z.int().nonnegative();
 
 /**
  * Raised whenever the plans for the same inputs would change. Version 1 was
  * the first daily life; version 2 added opening hours, occupations split
  * across shifts, and stays out of doors; version 3 has people who are outside
  * move about the lot's open ground; version 4 added errands that chain and
- * repeat, strolls, work done on rounds, and stops on the street.
+ * repeat, strolls, work done on rounds, and stops on the street; version 5
+ * added outsiders, who are in every answer beside the residents and marked.
  */
-export const LIFE_VERSION = 4;
+export const LIFE_VERSION = 5;
+
+/**
+ * Outsiders: people in town who do not live there. A traveller's ID carries the settlement's number, the day the
+ * party arrived (six digits, with an `m` before them for a day before day 1), the kind of traveller, the party's
+ * number among that kind's arrivals of the day, and the member's number: traveller-641-000040-merchant-002-01.
+ * So the whole visit can be worked out again from the ID alone. A vagrant's is like a resident's.
+ */
+export const TravellerIdSchema = z.string().regex(/^traveller-(0|[1-9][0-9]*)-m?[0-9]{6}-[a-z][a-z0-9]*(-[a-z0-9]+)*-[0-9]{3}-[0-9]{2}$/, 'must be a traveller ID');
+export const PartyIdSchema = z.string().regex(/^party-(0|[1-9][0-9]*)-m?[0-9]{6}-[a-z][a-z0-9]*(-[a-z0-9]+)*-[0-9]{3}$/, 'must be a party ID');
+export const VagrantIdSchema = z.string().regex(/^vagrant-(0|[1-9][0-9]*)-[0-9]{6}$/, 'must be a vagrant ID');
+export const OutsiderIdSchema = z.union([TravellerIdSchema, VagrantIdSchema]);
+/** Whoever a plan or an answer is about: a resident or an outsider. An outsider's is marked `outsider`. */
+const who = z.union([PersonIdSchema, OutsiderIdSchema]);
+const marked = { outsider: z.literal(true).optional() };
+
+/** Whether an ID is an outsider's rather than a resident's. */
+export function isOutsiderId(id: string): boolean {
+  return id.startsWith('traveller-') || id.startsWith('vagrant-');
+}
 
 /**
  * Moving about outside: the points a person is at, on the open ground of a
@@ -77,14 +98,20 @@ export type Stay = z.infer<typeof StaySchema>;
  * pause on a stroll. The person is outside and moves about a short stretch of
  * the segment, as a wander.
  */
+export const StreetPurposeSchema = z.enum(['work', 'visit', 'sleep', 'home']);
+export type StreetPurpose = z.infer<typeof StreetPurposeSchema>;
+
 export const StreetStopSchema = z.strictObject({
   kind: z.literal('street'),
   start: gameTime,
   end: gameTime,
   segmentId: SegmentIdSchema,
   wander: WanderSchema,
-  /** What the person is there for: their work, or a visit of the pack's. */
-  purpose: z.enum(['work', 'visit']),
+  /**
+   * What the person is there for: their work, or a visit of the pack's. For someone who lives on the streets it
+   * may also be `sleep` or `home`: asleep, or awake, at the place where they sleep.
+   */
+  purpose: StreetPurposeSchema,
   visitId: text.optional(),
   round: z.literal(true).optional(),
 });
@@ -132,18 +159,26 @@ export const ActivitySchema = z
   );
 export type Activity = z.infer<typeof ActivitySchema>;
 
-/** One person's day, from midnight to midnight, with no gaps and no overlaps. */
-export const DayPlanSchema = z.strictObject({
-  personId: PersonIdSchema,
-  day: z.int(),
-  activities: z.array(ActivitySchema).min(1),
-});
+/**
+ * One person's day, from midnight to midnight, with no gaps and no overlaps. An outsider's plan covers only the
+ * part of the day they are in town, and is empty on a day they are not; for a traveller, `sleep` and `home` are
+ * asleep and awake at their lodging.
+ */
+export const DayPlanSchema = z
+  .strictObject({
+    personId: who,
+    ...marked,
+    day: z.int(),
+    activities: z.array(ActivitySchema),
+  })
+  .refine((plan) => plan.outsider === true || plan.activities.length > 0, 'a resident\'s plan is never empty');
 export type DayPlan = z.infer<typeof DayPlanSchema>;
 
 /** Where a person is at a moment: in a building, outside at one, or at a point on the street. */
 export const WhereaboutsSchema = z.discriminatedUnion('kind', [
   z.strictObject({
-    personId: PersonIdSchema,
+    personId: who,
+    ...marked,
     time: gameTime,
     kind: z.enum(['sleep', 'home', 'work', 'visit']),
     buildingId: BuildingIdSchema,
@@ -156,7 +191,8 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
     until: gameTime,
   }),
   z.strictObject({
-    personId: PersonIdSchema,
+    personId: who,
+    ...marked,
     time: gameTime,
     kind: z.literal('travel'),
     point: PointSchema,
@@ -171,23 +207,27 @@ export const WhereaboutsSchema = z.discriminatedUnion('kind', [
   }),
   /** At a point on a street, with no building: a stop on a round, or a pause on a stroll. */
   z.strictObject({
-    personId: PersonIdSchema,
+    personId: who,
+    ...marked,
     time: gameTime,
     kind: z.literal('street'),
     point: PointSchema,
     segmentId: SegmentIdSchema,
-    purpose: z.enum(['work', 'visit']),
+    purpose: StreetPurposeSchema,
     visitId: text.optional(),
     round: z.literal(true).optional(),
     since: gameTime,
     until: gameTime,
   }),
+  /** Not in town: a traveller before arriving or after leaving. */
+  z.strictObject({ personId: OutsiderIdSchema, outsider: z.literal(true), time: gameTime, kind: z.literal('away') }),
 ]);
 export type Whereabouts = z.infer<typeof WhereaboutsSchema>;
 
 /** Someone at a building at a moment, inside it or outside on its lot. */
 export const OccupantSchema = z.strictObject({
-  personId: PersonIdSchema,
+  personId: who,
+  ...marked,
   kind: z.enum(['sleep', 'home', 'work', 'visit']),
   visitId: text.optional(),
   outside: z.literal(true).optional(),
@@ -196,7 +236,8 @@ export type Occupant = z.infer<typeof OccupantSchema>;
 
 /** One walk, whole: who, between which buildings, when, and along what line. */
 export const TripSchema = z.strictObject({
-  personId: PersonIdSchema,
+  personId: who,
+  ...marked,
   /** The buildings walked between; one is absent where that end of the walk is a point on a street. */
   fromBuildingId: BuildingIdSchema.optional(),
   toBuildingId: BuildingIdSchema.optional(),
@@ -215,11 +256,12 @@ export type Trip = z.infer<typeof TripSchema>;
  * gives only the part of the wander that falls within it.
  */
 export const OutsideStaySchema = z.strictObject({
-  personId: PersonIdSchema,
+  personId: who,
+  ...marked,
   /** The building they are at; absent for a stop on a street, which has a segment instead. */
   buildingId: BuildingIdSchema.optional(),
   segmentId: SegmentIdSchema.optional(),
-  kind: z.enum(['work', 'visit']),
+  kind: StreetPurposeSchema,
   visitId: text.optional(),
   round: z.literal(true).optional(),
   /** At a building, but out on the street in front of it rather than on its lot. */
@@ -233,7 +275,8 @@ export type OutsideStay = z.infer<typeof OutsideStaySchema>;
 /** A resident who can be seen near a point at a moment: walking between two buildings, or outside at one. */
 export const NearbySchema = z.discriminatedUnion('kind', [
   z.strictObject({
-    personId: PersonIdSchema,
+    personId: who,
+    ...marked,
     /** In metres, in a straight line. */
     distance: z.number().nonnegative(),
     point: PointSchema,
@@ -245,7 +288,8 @@ export const NearbySchema = z.discriminatedUnion('kind', [
     round: z.literal(true).optional(),
   }),
   z.strictObject({
-    personId: PersonIdSchema,
+    personId: who,
+    ...marked,
     distance: z.number().nonnegative(),
     point: PointSchema,
     kind: z.literal('outside'),
@@ -253,7 +297,7 @@ export const NearbySchema = z.discriminatedUnion('kind', [
     buildingId: BuildingIdSchema.optional(),
     segmentId: SegmentIdSchema.optional(),
     /** What they are there for. */
-    activity: z.enum(['work', 'visit']),
+    activity: StreetPurposeSchema,
     visitId: text.optional(),
     round: z.literal(true).optional(),
   }),
@@ -285,6 +329,32 @@ export const DaySummarySchema = z.strictObject({
     .length(24),
   /** Trips begun during the day. */
   trips: z.int().nonnegative(),
+  /**
+   * The outsiders in town that day, apart from the residents above: how many travellers by kind and how many
+   * vagrants, and for each hour the average number in town and in each state. Present when outsiders are computed.
+   */
+  outsiders: z
+    .strictObject({
+      travellers: count,
+      vagrants: count,
+      byKind: z.record(text, count),
+      hours: z
+        .array(
+          z.strictObject({
+            hour: z.int().min(0).max(23),
+            inTown: z.number().nonnegative(),
+            asleep: z.number().nonnegative(),
+            /** Awake at their lodging or, for a vagrant, at the place where they sleep. */
+            atLodging: z.number().nonnegative(),
+            visiting: z.number().nonnegative(),
+            travelling: z.number().nonnegative(),
+            outside: z.number().nonnegative(),
+          }),
+        )
+        .length(24),
+      trips: count,
+    })
+    .optional(),
 });
 export type DaySummary = z.infer<typeof DaySummarySchema>;
 

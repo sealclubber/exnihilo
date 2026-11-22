@@ -39,7 +39,7 @@ const world = importAfmg(loadLomia());
 const brief = world.world.settlements.find((entry) => entry.id === 'settlement-641')!;
 const city = generateCity(brief, pack);
 const layout = generateLayout(city, brief, pack);
-const expected = createLife({ city, layout, pack });
+const expected = createLife({ city, layout, pack, brief });
 const LIFE = '/api/settlements/settlement-641/life';
 const at = (day: number, hours: number, minutes = 0) => startOfDay(day) + hours * 3600 + minutes * 60;
 
@@ -135,10 +135,12 @@ describe('trips in a window', () => {
     const stays = expected.outsideStays(from, to);
     expect(body.outside.length).toBeGreaterThan(900);
     expect(body.outside.map((stay) => [stay.personId, stay.buildingId, stay.from, stay.to])).toEqual(stays.map((stay) => [stay.personId, stay.buildingId, stay.from, stay.to]));
-    for (const { name, role, occupationId: _occupation, apprentice: _apprentice, ...stay } of body.outside.slice(0, 100)) {
+    for (const { name, role, occupationId: _occupation, apprentice: _apprentice, kindId: _kind, origin: _origin, ...stay } of body.outside.slice(0, 100)) {
       expect(OutsideStaySchema.safeParse(stay).success).toBe(true);
       expect(name.length).toBeGreaterThan(2);
-      expect(role in pack.display.categories || role === 'keeping-house' || role === 'not-working').toBe(true);
+      // A resident's role is a category or a workforce state; an outsider's is their kind (outsiders-api.test.ts).
+      if (stay.outsider) expect(role).toMatch(/^traveller:|^vagrant$/);
+      else expect(role in pack.display.categories || role === 'keeping-house' || role === 'not-working').toBe(true);
     }
     // The wander, not positions: the points and times of the window, to the nearest centimetre.
     const sent = body.outside[0]!;
@@ -150,8 +152,9 @@ describe('trips in a window', () => {
     expect(Object.keys(atBuilding).sort()).toEqual(['buildingId', 'from', 'kind', 'name', 'occupationId', 'personId', 'role', 'to', 'wander']);
     // Twenty minutes of someone's day is a handful of points, not their whole day.
     expect(Math.max(...body.outside.map((stay) => stay.wander.times.length))).toBeLessThan(40);
-    // At night nobody is out but the watch, stopped at points on its beat: on a segment, at no building.
-    const night = (await get<TripsWindow>(`${LIFE}/trips?from=${at(2, 2)}&to=${at(2, 2, 20)}`)).body.outside;
+    // At night no resident is out but the watch, stopped at points on its beat: on a segment, at no building.
+    // (Since phase 6C the vagrants are out too, asleep on the street.)
+    const night = (await get<TripsWindow>(`${LIFE}/trips?from=${at(2, 2)}&to=${at(2, 2, 20)}`)).body.outside.filter((stay) => !stay.outsider);
     expect(night.length).toBeGreaterThan(0);
     expect(night.every((stay) => stay.occupationId === 'watchman' && stay.round === true && stay.buildingId === undefined && stay.segmentId !== undefined)).toBe(true);
     // A region limits the stays as it does the trips.
@@ -301,7 +304,10 @@ describe('the day command', () => {
     const text = describeSettlementDay({ settlementId: 'settlement-641', day: 2, storePath, packPath: MEDIEVAL_PATH });
     expect(text).toContain('Badanos, day 2: Tilsday');
     expect(text).toMatch(/Hour\s+Asleep\s+At home\s+At work\s+Visiting\s+Travelling\s+Outside\s+Trips begun/);
-    expect(text.split('\n').filter((line) => /^\s+\d\d:00\s/.test(line))).toHaveLength(24);
+    // Twenty-four hours of the residents, and since phase 6C twenty-four of the outsiders, counted apart.
+    expect(text.split('\n').filter((line) => /^\s+\d\d:00\s/.test(line))).toHaveLength(48);
+    expect(text).toMatch(/Outsiders, who are not residents: \d+ travellers in town at some time of the day \([^)]*merchant[^)]*\), and 29 vagrants/);
+    expect(text).toMatch(/Hour\s+In town\s+Asleep\s+At lodging\s+Visiting\s+Travelling\s+Outside/);
     expect(text).toMatch(/Busiest segments[^\n]*\n\s+segment-641-\d{6}\s+[\d,]+\s+bridge/);
     expect(text).toBe(describeSettlementDay({ settlementId: 'settlement-641', day: 2, storePath, packPath: MEDIEVAL_PATH }));
     expect(describeSettlementDay({ settlementId: 'settlement-641', day: 7, storePath, packPath: MEDIEVAL_PATH })).toContain('Restday, a rest day');

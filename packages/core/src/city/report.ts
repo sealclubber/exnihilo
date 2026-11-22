@@ -25,7 +25,9 @@ export function packLabels(pack: SettingPack): PackLabels {
     calendar: pack.calendar,
     avatar: pack.avatar,
     roleColours: roleColours(pack),
-    visits: Object.fromEntries(pack.visits.visits.map((visit) => [visit.id, visit.name])),
+    visits: Object.fromEntries([...pack.visits.visits, ...(pack.travellers?.visits ?? [])].map((visit) => [visit.id, visit.name])),
+    travellerKinds: Object.fromEntries((pack.travellers?.kinds ?? []).map((kind) => [kind.id, kind.name])),
+    ...(pack.travellers?.vagrants && { vagrantName: pack.travellers.vagrants.name }),
   };
 }
 

@@ -33,6 +33,9 @@ export { positionOnWander, clipWander, groundOf, makeWander, type Ground, type W
 export { createPlanChecker, type PlanChecker } from './life/invariants.ts';
 export { describeDay } from './life/report.ts';
 export { drawOf, arrivalRate, expectedTravellers, type Draw, type DrawTerm } from './outsiders/draw.ts';
+export * from './outsiders/records.ts';
+export { createOutsiders, sleepingPlacesAt, OutsidersError, type Outsiders, type OutsidersInputs } from './outsiders/outsiders.ts';
+export { createOutsiderChecker, type OutsiderChecker } from './outsiders/invariants.ts';
 export * from './avatar/records.ts';
 export {
   AvatarError,

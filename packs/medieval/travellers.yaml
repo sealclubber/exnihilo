@@ -37,8 +37,8 @@
 #                  makes its visits one after another on the way through,
 #                  whatever their windows, and leaves.
 #   arrivalHours   the hours of the day in which a party arrives
-#   departureHours the hours of its last morning in which a party that
-#                  lodged sets out
+#   departureHours the hours of its last day in which a party that lodged
+#                  sets out. Before then it does what there is time for.
 #   ages, maleShare  who they are
 #   lodging        building types the party lodges at: it takes one of those
 #                  the settlement has. With none of them it does not stay.
@@ -163,7 +163,7 @@ kinds:
     partySize: {min: 1, max: 3}
     nights: {min: 1, max: 3}
     arrivalHours: {from: "09:00", to: "18:00"}
-    departureHours: {from: "06:00", to: "09:00"}
+    departureHours: {from: "10:00", to: "15:00"}
     ages: {min: 20, max: 60}
     maleShare: 0.8
     lodging: [inn]
@@ -182,7 +182,7 @@ kinds:
     partySize: {min: 1, max: 4}
     nights: {min: 1, max: 4}
     arrivalHours: {from: "10:00", to: "18:00"}
-    departureHours: {from: "07:00", to: "10:00"}
+    departureHours: {from: "08:00", to: "12:00"}
     ages: {min: 18, max: 65}
     maleShare: 0.55
     lodging: [inn]

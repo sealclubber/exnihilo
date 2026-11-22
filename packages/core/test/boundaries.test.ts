@@ -79,6 +79,19 @@ describe('package boundaries', () => {
     expect(offenders(untouched, /avatar/i)).toEqual([]);
   });
 
+  it('keeps outsiders out of the city and the layout, and the avatar out of outsiders', () => {
+    // The city generator may ask what the brief says of the people who come (the draw, the travellers expected), and
+    // nothing else; a layout knows nothing of them; and no outsider reads the avatar.
+    const city = shipped.filter((path) => /core\/src\/city\//.test(path));
+    expect(offenders(city, /outsiders\/(?!draw\.ts)/)).toEqual([]);
+    expect(offenders(shipped.filter((path) => /core\/src\/layout\//.test(path)), /outsider|traveller|vagrant/i)).toEqual([]);
+    const outsiders = shipped.filter((path) => /core\/src\/outsiders\//.test(path));
+    expect(outsiders.length).toBeGreaterThanOrEqual(4);
+    expect(offenders(outsiders, /avatar/i)).toEqual([]);
+    // The draw is worked out from the brief and the pack alone.
+    expect(offenders(outsiders.filter((path) => path.endsWith('draw.ts')), /from '\.\.\/(city|layout|life)\//)).toEqual([]);
+  });
+
   it('keeps unseeded randomness out of every package', () => {
     expect(offenders(shipped, /Math\.random|randomUUID|getRandomValues/)).toEqual([]);
   });

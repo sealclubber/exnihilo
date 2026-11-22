@@ -4,6 +4,8 @@
 import type { Building, District, Household, Person } from './city/records.ts';
 import type { AvatarState } from './avatar/records.ts';
 import type { DayPlan, Nearby, Occupant, OpenSpan, OutsideStay, Trip, Whereabouts } from './life/records.ts';
+import type { Draw } from './outsiders/draw.ts';
+import type { Outsider, Party, Traveller, Vagrant } from './outsiders/records.ts';
 import type { AvatarSettings, Calendar } from './pack/schema.ts';
 import type { CategoryId } from './pack/schema.ts';
 import type { ImportReport, Point, RouteKind, SizeGroup, WorldInfo } from './schema.ts';
@@ -56,8 +58,11 @@ export interface PackLabels {
   avatar: AvatarSettings;
   /** The colour each role is drawn in: by category ID, `keeping-house`, `not-working`, and any occupation with a colour of its own. */
   roleColours: Record<string, string>;
-  /** The names of the pack's visits, by ID. */
+  /** The names of the pack's visits, by ID: the residents', and those outsiders make. */
   visits: Record<string, string>;
+  /** The names of the kinds of traveller, by ID, and what a vagrant is called. A traveller's colour is under `traveller:<kind>`, a vagrant's under `vagrant`. */
+  travellerKinds: Record<string, string>;
+  vagrantName?: string;
   buildingTypes: Record<string, string>;
   districtKinds: Record<string, string>;
 }
@@ -138,12 +143,18 @@ export interface Seen {
   role: string;
   occupationId?: string;
   apprentice?: true;
+  /** For an outsider: the kind of traveller, by ID, or nothing for a vagrant; and where they came from, as text. */
+  kindId?: string;
+  origin?: string;
 }
+
+/** Whoever an answer is about: a resident, or an outsider, who has a `group`. */
+export type Anyone = Person | Outsider;
 
 /** A person at a moment: who they are and where. */
 export interface PersonNow {
   time: number;
-  person: Person;
+  person: Anyone;
   whereabouts: Whereabouts;
   /** The type of each building the answer names, by building ID. */
   buildings: Record<string, string>;
@@ -151,7 +162,7 @@ export interface PersonNow {
 
 /** A person's plan for a day. */
 export interface PersonPlan {
-  person: Person;
+  person: Anyone;
   plan: DayPlan;
   /** The type of each building the plan names, by building ID. */
   buildings: Record<string, string>;
@@ -165,7 +176,43 @@ export interface OccupantsNow {
   open: boolean;
   /** The stretches of the moment's day during which it is open. */
   hours: OpenSpan[];
-  occupants: Array<Occupant & { person: Person }>;
+  occupants: Array<Occupant & { person: Anyone }>;
+  /** The travellers who lodge here that day, whether or not they are in at the moment. */
+  guests: Traveller[];
+}
+
+/** The outsiders in town on a day. */
+export interface OutsidersToday {
+  day: number;
+  /** The travellers, in the order their parties arrived, and how many there are of each kind. */
+  travellers: Traveller[];
+  byKind: Record<string, number>;
+  vagrants: Vagrant[];
+  /** The type of each building someone lodges at, by building ID. */
+  buildings: Record<string, string>;
+}
+
+/** One outsider: who they are, their party, where they are at a moment and their plan for that moment's day. */
+export interface OutsiderDetail {
+  time: number;
+  outsider: Outsider;
+  /** For a traveller: the party, and everyone in it. */
+  party?: Party;
+  companions?: Traveller[];
+  whereabouts: Whereabouts;
+  plan: DayPlan;
+  /** The type of each building the answer names, by building ID. */
+  buildings: Record<string, string>;
+}
+
+/** Why visitors come to a settlement, and what the town has for them. */
+export interface SettlementDraw {
+  draw: Draw;
+  /** How many travellers the pack's rules expect to arrive in a day. */
+  expectedTravellers: number;
+  /** The draw at which a settlement has a visitors' quarter, where the pack has such a quarter, and whether this one reaches it. */
+  quarterAt?: number;
+  hasQuarter: boolean;
 }
 
 /** The avatar as the server reports it: its state, or nothing until it has been spawned. */
@@ -181,8 +228,8 @@ export type AvatarPerception =
       settlementId: string;
       point: Point;
       radius: number;
-      /** Residents walking or out of doors within the radius, nearest first. */
-      nearby: Array<Nearby & { person: Person }>;
+      /** Residents and outsiders walking or out of doors within the radius, nearest first. */
+      nearby: Array<Nearby & { person: Anyone }>;
       /** The type of each building the answer names, by building ID. */
       buildings: Record<string, string>;
     }
@@ -193,7 +240,7 @@ export type AvatarPerception =
       buildingId: string;
       buildingType: string;
       /** Everyone at the building, inside it or outside on its lot. */
-      occupants: Array<Occupant & { person: Person }>;
+      occupants: Array<Occupant & { person: Anyone }>;
     };
 
 /** What each member of a household is doing at a moment. */

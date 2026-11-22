@@ -7,6 +7,7 @@ import {
   checkCity,
   checkLayout,
   createLife,
+  createOutsiderChecker,
   createPathFinder,
   createPlanChecker,
   createRng,
@@ -52,6 +53,8 @@ describe('every settlement of Lomia', () => {
     const { settlements } = lomiaWorld();
     const RESIDENTS_SAMPLED = 12;
     let plans = 0;
+    let outsiderPlans = 0;
+    let vagrants = 0;
     let lots = 0;
     let slowest = { seconds: 0, id: '' };
     let layoutSeconds = 0;
@@ -87,7 +90,7 @@ describe('every settlement of Lomia', () => {
           if (!(path.length >= 0) || path.segmentIds.length === 0) failures.push(`${brief.id}: no path to ${layout.lots[at]!.id}`);
         }
         // A seeded sample of residents has a sound plan for day 1 that joins on to day 2.
-        const life = createLife({ city, layout, pack });
+        const life = createLife({ city, layout, pack, brief });
         const checker = createPlanChecker({ city, layout, pack });
         const pick = createRng(brief.seed);
         for (let sample = 0; sample < RESIDENTS_SAMPLED; sample++) {
@@ -96,16 +99,24 @@ describe('every settlement of Lomia', () => {
           plans++;
           failures.push(...checker.check(today), ...checker.checkContinuity(today, life.plan(person.id, 2)));
         }
+        // Every outsider in town on day 1, traveller and vagrant, has a sound plan that joins on to day 2.
+        const strangers = createOutsiderChecker({ city, layout, pack, outsiders: life.outsiders! });
+        for (const plan of life.outsiders!.plansForDay(1)) {
+          outsiderPlans++;
+          failures.push(...strangers.check(plan), ...strangers.checkContinuity(plan, life.plan(plan.personId, 2)));
+        }
+        vagrants += life.outsiders!.vagrants().length;
       } catch (error) {
         failures.push((error as Error).message);
       }
     }
-    console.log(`Checked the day plans of ${plans.toLocaleString('en-US')} sampled residents across ${settlements.length} settlements`);
+    console.log(`Checked the day plans of ${plans.toLocaleString('en-US')} sampled residents across ${settlements.length} settlements, and of all ${outsiderPlans.toLocaleString('en-US')} outsiders in town on day 1, ${vagrants.toLocaleString('en-US')} of them vagrants`);
     console.log(
       `Laid out ${settlements.length} settlements, ${lots.toLocaleString('en-US')} lots, in ${layoutSeconds.toFixed(1)} s; the slowest was ${slowest.id} at ${slowest.seconds.toFixed(2)} s`,
     );
     expect(failures.slice(0, 10)).toEqual([]);
     expect(slowest.seconds).toBeLessThan(5);
+    expect(outsiderPlans).toBeGreaterThan(10_000);
     expect(footprints).toBeGreaterThan(400_000);
     expect(openAirLots).toBeGreaterThan(10_000);
   });

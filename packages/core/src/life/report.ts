@@ -36,6 +36,23 @@ export function describeDay(life: SettlementLife, day: number, inputs: { layout:
   const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => (row[column] as string).length)));
   for (const row of rows) lines.push(`  ${row.map((cell, column) => (column === 0 ? cell.padEnd(widths[column] as number) : cell.padStart(widths[column] as number))).join('  ')}`);
 
+  // People who do not live here, counted apart.
+  const strangers = summary.outsiders;
+  if (strangers) {
+    const kinds = new Map((pack.travellers?.kinds ?? []).map((kind) => [kind.id, kind.name]));
+    const byKind = Object.entries(strangers.byKind).map(([kind, count]) => `${count} ${(kinds.get(kind) ?? kind).toLowerCase()}`);
+    lines.push(
+      '',
+      `Outsiders, who are not residents: ${strangers.travellers.toLocaleString('en-US')} travellers in town at some time of the day${byKind.length > 0 ? ` (${byKind.join(', ')})` : ''}, and ${strangers.vagrants.toLocaleString('en-US')} vagrants. ${strangers.trips.toLocaleString('en-US')} trips begun.`,
+    );
+    const table = [
+      ['Hour', 'In town', 'Asleep', 'At lodging', 'Visiting', 'Travelling', 'Outside'],
+      ...strangers.hours.map((hour) => [`${String(hour.hour).padStart(2, '0')}:00`, whole(hour.inTown), whole(hour.asleep), whole(hour.atLodging), whole(hour.visiting), hour.travelling.toFixed(1), whole(hour.outside)]),
+    ];
+    const tableWidths = table[0]!.map((_, column) => Math.max(...table.map((row) => (row[column] as string).length)));
+    for (const row of table) lines.push(`  ${row.map((cell, column) => (column === 0 ? cell.padEnd(tableWidths[column] as number) : cell.padStart(tableWidths[column] as number))).join('  ')}`);
+  }
+
   const segments = new Map(layout.segments.map((segment) => [segment.id, segment]));
   lines.push('', 'Busiest segments (trips that use them)');
   for (const { segmentId, trips } of life.segmentLoads(day).slice(0, BUSIEST_SHOWN)) {
