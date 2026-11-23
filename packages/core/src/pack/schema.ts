@@ -483,11 +483,101 @@ const GrownSettingsSchema = z.strictObject({
 });
 export type GrownSettings = z.infer<typeof GrownSettingsSchema>;
 
+/**
+ * The numbers of the `staged` generator of phase 6E: the town is made in stages on one shared mesh, each stage
+ * final. Every value started as the approved prototype's.
+ */
+const share = z.number().positive();
+const StagedSettingsSchema = z.strictObject({
+  /** Roadway widths: a highway, a main street, the border between two wards, a lane inside a ward. */
+  widths: z.strictObject({ highway: metres, mainStreet: metres, wardBorder: metres, lane: metres }),
+  /**
+   * The town's radius is that of a circle of `perBuilding` square metres for each building. Highways, the river and
+   * the coast are drawn out to `reach` times that radius, and at least `least` metres.
+   */
+  extent: z.strictObject({ perBuilding: metres, reach: share, least: metres }),
+  /**
+   * A river: its width, and `portWidth` times that through a river port with no coast. It passes the centre at a
+   * distance drawn from `distance`, as a share of the town's radius; a river port draws from `portDistance`. The
+   * centre is never nearer the bank than `least` metres. Each
+   * half has one bend, pushed aside by a share of the half's length drawn from `bend`. Its ends lie `beyond` times
+   * the reach out. A river that rises here starts a share of the radius drawn from `source` from the centre, and is laid as if it
+   * came from opposite the way it leaves, turned by a number of degrees drawn from `sourceTurn`.
+   */
+  river: z.strictObject({ width: metres, portWidth: share, least: metres, distance: span, portDistance: span, bend: span, beyond: share, source: span, sourceTurn: span }),
+  /**
+   * A coast: the shore lies a share of the radius drawn from `distance` from the centre. `knots` points along it
+   * are moved in and out by about `depth` metres, and no more than `depthShare` of that distance, evened over
+   * `smoothing` knots, so that there are broad bays and headlands only. Where a land route leaves within 90 degrees
+   * of the water's bearing, the shore on that side runs out to sea so as to pass `clearAngle` degrees clear of
+   * it, though never more steeply than `steepest` metres out for each metre along.
+   */
+  coast: z.strictObject({ distance: span, knots: wholeNumber.min(4), depth: z.number().nonnegative(), depthShare: probability, smoothing: z.number().nonnegative(), clearAngle: z.number().nonnegative(), steepest: z.number().nonnegative() }),
+  /**
+   * Highways: two exits more than `through` degrees apart are one road through the centre. A highway strays aside
+   * by `wander` times the reach and is evened in steps of `step` metres. It keeps `waterClear` metres from a
+   * river it runs beside, and an exit that would fall in a river is turned by up to `exitShift` degrees.
+   */
+  highways: z.strictObject({ through: z.number().min(90).max(180), wander: z.number().nonnegative(), step: metres, waterClear: metres, exitShift: z.number().nonnegative() }),
+  /**
+   * Bridges. `counts` gives the number by the town's buildings: the first entry whose `below` exceeds them, the
+   * last having none. A bridge's ends lie `landing` metres beyond the water. The main crossing is looked for every
+   * `step` metres of river within `search` times the radius of the centre, scoring `square` for a river square to
+   * the way and losing `near` for each metre from the centre. A town whose centre is within `astrideWithin`
+   * metres of that bridge is astride its river. The road runs straight for `lead` metres either side of the main
+   * bridge: `single` where it is the only one, otherwise `share` of the distance from the centre held between
+   * `min` and `max`. Beside the river further bridges stand `apart` metres along the bank and the highway splits
+   * to them, straight for `approach` metres at each; astride it they stand `astrideApart` (a share of the wall's
+   * radius, held between `min` and `max`, varied by `vary`) apart and each one's road runs `run` metres on and
+   * then to the nearest highway within `joinWithin` times the radius, a metre along the bank counting `veer` more.
+   * Where no route crosses the river, the main bridge carries a road of its own that ends `beyond` times the
+   * radius into the far bank.
+   */
+  bridges: z.strictObject({
+    counts: z.array(z.strictObject({ below: wholeNumber.optional(), bridges: wholeNumber.min(1) })).min(1),
+    landing: metres,
+    step: metres,
+    search: share,
+    square: z.number().nonnegative(),
+    near: z.number().nonnegative(),
+    astrideWithin: metres,
+    lead: z.strictObject({ single: metres, share: share, min: metres, max: metres }),
+    apart: span,
+    approach: metres,
+    astrideApart: z.strictObject({ share: share, min: metres, max: metres, vary: span }),
+    run: metres,
+    joinWithin: share,
+    veer: z.number().nonnegative(),
+    beyond: share,
+  }),
+  /**
+   * The wall of a town flagged for one encloses ground for `share` of its buildings at `perBuilding` square metres
+   * each. It is an oval `through` times as long as wide along a single through road, `several` otherwise.
+   */
+  wall: z.strictObject({ share: probability, perBuilding: metres, ratio: z.strictObject({ through: share, several: share }) }),
+  /**
+   * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
+   * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,
+   * `piers.length` long and `piers.width` wide; on a river, jetties no longer than `jettyShare` of the river's
+   * width. The road to it strays `wander` metres. A river wharf keeps `clearOfBridge` metres from any bridge.
+   */
+  harbour: z.strictObject({
+    quay: z.strictObject({ length: metres, lengthShare: share, width: metres, inset: metres }),
+    piers: z.strictObject({ count: wholeNumber.min(1), length: metres, width: metres }),
+    jettyShare: probability,
+    wander: z.number().nonnegative(),
+    clearOfBridge: metres,
+  }),
+});
+export type StagedSettings = z.infer<typeof StagedSettingsSchema>;
+
 const LayoutSettingsSchema = z.strictObject({
   /** Which generator lays towns out: the plain `grid`, or `grown`. Left out, the grid. */
   generator: LayoutGeneratorSchema.optional(),
   /** The numbers of the `grown` generator. Needed when it is the one named. */
   grown: GrownSettingsSchema.optional(),
+  /** The numbers of the `staged` generator, which is being built stage by stage. */
+  staged: StagedSettingsSchema.optional(),
   /** The full width of the roadway, per kind of street segment. */
   streetWidths: z.strictObject({ arterial: metres, street: metres, lane: metres, bridge: metres }),
   /** The land between streets: its length along the street and its depth. */
