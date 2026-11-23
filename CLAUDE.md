@@ -24,6 +24,24 @@ current phase before starting, and the README for how things run today.
 | Draw a town's layout to SVG | `npm run render -- <settlement id> [--generator grid\|grown]` |
 | Measure the shape of laid-out towns | `node scripts/measure-layout.ts --all` |
 
+**How long things take** (measured 2026-11-23 on the development machine, phase
+6D.3). Plan around these; run a single test file with `npx vitest run <file>`
+while working, and the full check once at the end.
+
+| Task | Time |
+| --- | --- |
+| `npm run check` (type-check and every test) | about 8 to 10 minutes |
+| `packages/core/test/lomia-cities.test.ts` (lays out all 682 settlements) | about 7 to 8 minutes |
+| `packages/core/test/visitors.test.ts` (lays out all 682 under an edited pack) | about 4 to 8 minutes |
+| `packages/core/test/outsiders.test.ts`, `districts.test.ts` | about 2 to 3 minutes each |
+| `packages/core/test/grown.test.ts` (the five test towns) | about 1 minute |
+| `npm run test:viewer` | about 1.5 minutes |
+| Grown layout of one town | Badanos 1 s, Cevilefon 2 s, Pombal 8 s, the slowest of Lomia about 17 s |
+| All of Lomia laid out once, one core | about 7 minutes |
+
+The two whole-Lomia tests carry a 900-second limit of their own. Commands
+that run longer than two minutes are best run in the background.
+
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
 
@@ -188,14 +206,13 @@ centre, x east and y south; bearings are degrees clockwise from north.
   and spokes nearly 100%.
 - Every length, width and density limit comes from `packs/medieval/layout.yaml`;
   the grown generator's numbers are in its `grown` block.
-- **Road first.** The grown generator lays the brief's routes as highways
-  first, branches arterials off them, and grows the town along them; blocks
-  are seeded as brickwork in the grain of their nearest road, and the streets
-  are the boundaries between blocks. Do not derive a street's direction from
-  the centre: that is what made rings.
-- **Blocks and greens.** A grown layout lists its blocks, each with a
-  `growthRank` from 0 (first built on) to 1 (last). A block inside the town
-  with no lots is a `green` place; there are at most the pack's number.
+- **Roads, wards, buildings.** The grown generator lays the brief's routes as
+  highways first and branches arterials off them; the roads cut the town's
+  ground into wards, and each ward is cut in two again and again until the
+  pieces are buildings. A lot is its piece. Do not derive a street's
+  direction from the centre: that is what made rings.
+- **Blocks are wards.** A grown layout lists its wards as blocks, each with a
+  district and a `growthRank` from 0 (first built on) to 1 (last).
 
 ## Conventions
 
@@ -211,7 +228,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 7 and 5.
+  inputs would change. Today they are 6, 8 and 5.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

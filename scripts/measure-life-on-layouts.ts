@@ -42,13 +42,11 @@ for (const generator of ['grid', 'grown'] as const) {
   const typeOf = new Map(city.buildings.map((building) => [building.id, building.type]));
   const wells = layout.lots.filter((lot) => typeOf.get(lot.buildingId) === 'well');
   let nearest = Infinity;
-  let close = 0;
   for (const one of wells) {
     for (const other of wells) {
       if (one.id >= other.id) continue;
       const away = geometry.distance(geometry.polygonCentroid(one.polygon), geometry.polygonCentroid(other.polygon));
       nearest = Math.min(nearest, away);
-      if (away < (pack.layout.grown?.civicSpacing ?? 0)) close++;
     }
   }
   const finder = createPathFinder(layout);
@@ -67,6 +65,6 @@ for (const generator of ['grid', 'grown'] as const) {
   console.log(`  a trip, days 1 and 8: mean ${mean(lengths).toFixed(0)} m and ${(mean(durations) / 60).toFixed(1)} minutes, of ${lengths.length.toLocaleString('en')} trips`);
   console.log(`  to be seen at 12:00: day 1 ${seen[0]}; days 8 to 13 ${seen.slice(1).join(', ')}; mean ${mean(seen).toFixed(0)}`);
   console.log(`  travellers in town, days 1 to 6: ${travellers.join(', ')}`);
-  console.log(`  wells: ${wells.length}, the nearest two ${nearest.toFixed(0)} m apart; pairs nearer than the pack's ${pack.layout.grown?.civicSpacing} m: ${close}`);
+  console.log(`  wells: ${wells.length}, the nearest two ${nearest.toFixed(0)} m apart`);
   console.log(`  vagrants: ${vagrants.length}, asleep on a street at 03:00 ${asleep.length}: ${[...places].map(([kind, count]) => `${count} at ${kind}`).join(', ')}`);
 }

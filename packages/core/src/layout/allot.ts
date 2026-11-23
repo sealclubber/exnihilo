@@ -50,6 +50,8 @@ export interface Fixes {
   frontless: number;
   /** Pieces left open because nothing else would do. */
   forced: number;
+  /** Buildings that went on to another ward of their district, their own having too few pieces. */
+  carried: number;
 }
 
 export interface Allotment {
@@ -80,6 +82,14 @@ export interface AllotInput {
   river?: Point[];
   /** Whether a ward touches the water. */
   atWater: (ward: Point[]) => boolean;
+  /** How far a point is from water. */
+  dryBy?: (point: Point) => number;
+  /** Buildings held from the districts that go to a given ward all the same, such as a gatehouse by its gate. */
+  extra?: Array<{ ward: number; building: Building }>;
+  /** A line no lane may be carried across, such as the wall. */
+  barrier?: Point[];
+  /** The wards beside the plaza: the plaza building's district starts from one of them. */
+  besidePlaza?: { wards: number[]; district: number };
 }
 
 /** Ways filed by square, so that those near a point are found quickly. */
@@ -110,6 +120,21 @@ class WayIndex {
     return id;
   }
 
+  /** Whether any way's roadway edge comes within `reach` of a point. */
+  touches(point: Point, reach: number): boolean {
+    const x = Math.floor(point[0] / this.square);
+    const y = Math.floor(point[1] / this.square);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const [id, k] of this.filed.get(`${x + dx}:${y + dy}`) ?? []) {
+          const way = this.ways[id] as Way;
+          if (toPiece(point, way.points[k - 1] as Point, way.points[k] as Point) - way.width / 2 <= reach) return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /** The ways whose roadway edge comes within `reach` of a point, nearest first: by how far beyond its edge the point lies. */
   near(point: Point, reach: number): Array<{ way: number; beyond: number }> {
     const found = new Map<number, number>();
@@ -128,6 +153,8 @@ class WayIndex {
   }
 }
 
+/** A district with at least this share of the ground its buildings want takes no ward from its neighbours. */
+const BALANCED = 0.92;
 /** How close a lot's edge must come to a roadway's edge to open onto it. */
 const BORDER = VERGE + 0.1;
 /** How much of a lot's edge must run along a way for it to open onto it. */
@@ -143,7 +170,7 @@ function frontageOf(polygon: readonly Point[], index: WayIndex): number {
     const steps = Math.max(1, Math.ceil(run));
     for (let step = 0; step < steps; step++) {
       const t = (step + 0.5) / steps;
-      if (index.near([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], BORDER).length > 0) total += run / steps;
+      if (index.touches([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], BORDER)) total += run / steps;
     }
   }
   return total;
@@ -158,7 +185,7 @@ function frontEdge(polygon: readonly Point[], index: WayIndex): [Point, Point] |
     const b = polygon[(i + 1) % polygon.length] as Point;
     const run = Math.hypot(b[0] - a[0], b[1] - a[1]);
     const middle: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    if (run > most && index.near(middle, BORDER).length > 0) {
+    if (run > most && index.touches(middle, BORDER)) {
       most = run;
       best = [a, b];
     }
@@ -177,6 +204,11 @@ export function allot(input: AllotInput): Allotment {
   };
 
   // ---- The wards: where each is, what it costs, and which are loose --------------------------------------------
+  const index = new WayIndex(15);
+  for (const way of input.ways) index.add(way);
+  // A ward with no way along it is no part of the town: it can be reached from nowhere.
+  const frontages = wards.map((ward) => frontageOf(ward.polygon, index));
+  const usable = frontages.map((frontage) => frontage >= FRONTAGE);
   const middles = wards.map((ward) => interiorPoint(ward.polygon));
   const areas = wards.map((ward) => area(ward.polygon));
   const costs = middles.map((point) => town.ground.cost(point));
@@ -209,7 +241,7 @@ export function allot(input: AllotInput): Allotment {
       if (shared < 1) continue;
       const wa = wardOfFace.get(a);
       const wb = wardOfFace.get(b);
-      if (wa === undefined || wb === undefined) continue;
+      if (wa === undefined || wb === undefined || !usable[wa] || !usable[wb]) continue;
       // What runs along the stretch they share: looked for at the middle of the longest edge of it.
       let longest = 0;
       let middle: Point = one[0] as Point;
@@ -241,7 +273,7 @@ export function allot(input: AllotInput): Allotment {
   const placementOf = (district: District) => placements.get(district.kind);
   const seeds = new Map<number, number>();
   const taken = new Set<number>();
-  const byRank = wards.map((_, index) => index).sort((a, b) => (costs[a] as number) - (costs[b] as number) || a - b);
+  const byRank = wards.map((_, index) => index).filter((index) => usable[index]).sort((a, b) => (costs[a] as number) - (costs[b] as number) || a - b);
   const distance = (a: number, b: number) => Math.hypot((middles[a] as Point)[0] - (middles[b] as Point)[0], (middles[a] as Point)[1] - (middles[b] as Point)[1]);
   /** Of some wards, the one furthest from every seed laid so far. */
   const farthest = (among: number[]) => {
@@ -263,8 +295,11 @@ export function allot(input: AllotInput): Allotment {
     taken.add(ward);
   };
   const wanting = (placement: string) => districts.map((district, index) => ({ district, index })).filter(({ district, index }) => placementOf(district) === placement && (demand[index] as number) > 0 && !seeds.has(index));
-  // The centre's first district on the oldest ward, the rest of the centre about it.
-  for (const { index } of wanting('centre')) seed(index, seeds.size === 0 ? byRank[0] : farthest(byRank.filter((id) => (rank[id] as number) <= 0.3)));
+  // The plaza's district beside it; the centre's first district on the oldest ward, the rest of the centre about it.
+  if (input.besidePlaza && input.besidePlaza.wards.length > 0 && (demand[input.besidePlaza.district] as number) > 0) {
+    seed(input.besidePlaza.district, [...input.besidePlaza.wards].sort((a, b) => (costs[a] as number) - (costs[b] as number) || a - b)[0]);
+  }
+  for (const { index } of wanting('centre')) seed(index, seeds.size === 0 ? byRank[0] : (farthest(byRank.filter((id) => (rank[id] as number) <= 0.3)) ?? farthest(byRank)));
   // Every piece of ground parted from the rest by water gets a district of its own where it is big enough.
   {
     const component = new Map<number, number>();
@@ -295,14 +330,16 @@ export function allot(input: AllotInput): Allotment {
       if (waiting.length === 0) break;
       const wet = piece.some((id) => input.atWater((wards[id] as { polygon: Point[] }).polygon));
       const pick = waiting.findIndex(({ district }) => placementOf(district) === (wet ? 'waterside' : 'edge'));
-      const { index } = waiting.splice(pick >= 0 ? pick : 0, 1)[0] as { index: number };
-      seed(index, piece[0]);
+      const { index, district } = waiting.splice(pick >= 0 ? pick : 0, 1)[0] as { index: number; district: District };
+      // A waterside district starts at the water.
+      const atTheWater = placementOf(district) === 'waterside' ? piece.find((id) => input.atWater((wards[id] as { polygon: Point[] }).polygon)) : undefined;
+      seed(index, atTheWater ?? piece[0]);
     }
   }
   const atWater = byRank.filter((id) => input.atWater((wards[id] as { polygon: Point[] }).polygon));
   for (const { index } of wanting('waterside')) {
     const wet = atWater.filter((id) => (rank[id] as number) <= 0.7);
-    seed(index, farthest(wet.length > 0 ? wet : atWater.length > 0 ? atWater : byRank));
+    seed(index, farthest(wet) ?? farthest(atWater) ?? farthest(byRank));
   }
   for (const { index } of wanting('middle')) seed(index, farthest(byRank.filter((id) => (rank[id] as number) >= 0.15 && (rank[id] as number) <= 0.75)) ?? farthest(byRank));
   for (const { index } of wanting('edge')) seed(index, farthest(byRank.filter((id) => loose[id])) ?? farthest(byRank.filter((id) => (rank[id] as number) >= 0.55)) ?? farthest(byRank));
@@ -337,6 +374,10 @@ export function allot(input: AllotInput): Allotment {
   const districtOf = new Array<number>(wards.length).fill(-1);
   const assign = () => {
     for (let ward = 0; ward < wards.length; ward++) {
+      if (!usable[ward]) {
+        districtOf[ward] = -1;
+        continue;
+      }
       let best = -1;
       let bestCost = Infinity;
       for (const district of active) {
@@ -379,6 +420,37 @@ export function allot(input: AllotInput): Allotment {
     }
     if (!moved) break;
   }
+  // Then ward by ward, the district with least ground for its buildings takes a ward from the neighbour with most,
+  // as long as the neighbour stays in one piece.
+  const ratio = (district: number, change = 0) => (districtOf.reduce((sum, owner, ward) => sum + (owner === district ? (areas[ward] as number) : 0), 0) + change) / totalArea / ((demand[district] as number) / totalDemand);
+  const joinedWithout = (district: number, without: number) => {
+    const own = districtOf.map((owner, ward) => (owner === district && ward !== without ? ward : -1)).filter((ward) => ward >= 0);
+    if (own.length === 0) return false;
+    const set = new Set(own);
+    const seen = new Set([own[0] as number]);
+    const queue = [own[0] as number];
+    for (let at = 0; at < queue.length; at++) for (const next of neighbours[queue[at] as number] ?? []) if (set.has(next.ward) && !seen.has(next.ward)) (seen.add(next.ward), queue.push(next.ward));
+    return seen.size === own.length;
+  };
+  for (let guard = 0; guard < 2 * wards.length; guard++) {
+    const neediest = [...active].sort((a, b) => ratio(a) - ratio(b) || a - b);
+    let moved = false;
+    for (const district of neediest) {
+      if (ratio(district) >= BALANCED) break;
+      // Its bordering wards held by others, best first: from the neighbour with the most to spare.
+      const offers = districtOf
+        .map((owner, ward) => ({ owner, ward }))
+        .filter(({ owner, ward }) => owner >= 0 && owner !== district && ward !== seeds.get(owner) && (neighbours[ward] ?? []).some((next) => districtOf[next.ward] === district && next.between !== 'water'))
+        .filter(({ owner, ward }) => ratio(owner, -(areas[ward] as number)) > ratio(district, areas[ward] as number) && joinedWithout(owner, ward))
+        .sort((a, b) => ratio(b.owner) - ratio(a.owner) || a.ward - b.ward);
+      const offer = offers[0];
+      if (!offer) continue;
+      districtOf[offer.ward] = district;
+      moved = true;
+      break;
+    }
+    if (!moved) break;
+  }
   // A district needs a building for each of its wards: one with too few gives its farthest wards to its neighbours.
   for (const district of active) {
     const own = () => districtOf.map((owner, ward) => (owner === district ? ward : -1)).filter((ward) => ward >= 0);
@@ -401,13 +473,22 @@ export function allot(input: AllotInput): Allotment {
   for (const district of active) {
     const own = districtOf.map((owner, ward) => (owner === district ? ward : -1)).filter((ward) => ward >= 0);
     const buildings = [...(buildingsOf[district] as Building[])].sort((a, b) => lotArea(b) - lotArea(a) || (a.id < b.id ? -1 : 1));
-    const weights = own.map((ward) => (areas[ward] as number) * (vary[ward] as number));
+    // A ward is built from the ways along it: one with little road along it holds no more than that road serves.
+    const weights = own.map((ward) => Math.min(areas[ward] as number, (frontages[ward] as number) * settings.frontDepth) * (vary[ward] as number));
     const total = weights.reduce((sum, value) => sum + value, 0);
     const room = own.map((_, at) => ((weights[at] as number) / total) * (demand[district] as number));
-    // Largest first, each to the ward with the most room left.
+    // Largest first, each to the ward with the most room left. A waterside district's big buildings, such as a
+    // harbour's, take wards at the water while they have room.
+    const meanArea = (demand[district] as number) / buildings.length;
+    const waterside = placementOf(districts[district] as District) === 'waterside';
+    const wet = own.map((ward) => input.atWater((wards[ward] as { polygon: Point[] }).polygon));
     for (const building of buildings) {
-      let best = 0;
-      for (let at = 1; at < own.length; at++) if ((room[at] as number) > (room[best] as number)) best = at;
+      const toWater = waterside && lotArea(building) > settings.big * meanArea && wet.some(Boolean);
+      let best = -1;
+      for (let at = 0; at < own.length; at++) {
+        if (toWater && !wet[at]) continue;
+        if (best < 0 || (room[at] as number) > (room[best] as number)) best = at;
+      }
       (buildingsIn[own[best] as number] as Building[]).push(building);
       room[best] = (room[best] as number) - lotArea(building);
     }
@@ -421,19 +502,44 @@ export function allot(input: AllotInput): Allotment {
     }
   }
 
+  const fixed = new Set<Building>();
+  for (const { ward: asked, building } of input.extra ?? []) {
+    // A ward with no district is no part of the town: the nearest that is takes it.
+    let ward = asked;
+    if ((districtOf[ward] as number) < 0) {
+      let gap = Infinity;
+      districtOf.forEach((owner, at) => {
+        if (owner < 0) return;
+        const away = distance(asked, at);
+        if (away < gap) {
+          gap = away;
+          ward = at;
+        }
+      });
+    }
+    (buildingsIn[ward] as Building[]).push(building);
+    fixed.add(building);
+  }
+
   // ---- Every way a lot may open onto, lanes included as they are cut ----------------------------------------------
-  const index = new WayIndex();
-  for (const way of input.ways) index.add(way);
-  const fixes: Fixes = { extraCuts: 0, opened: 0, merged: 0, frontless: 0, forced: 0 };
+  const fixes: Fixes = { extraCuts: 0, opened: 0, merged: 0, frontless: 0, forced: 0, carried: 0 };
   const cutRng = input.rng('grown-buildings');
   const placed: Placed[] = [];
   const lanes: Point[][] = [];
   const open: Point[][] = [];
   const characterOf = (district: number) => settings.character[(districts[district] as District).kind] ?? (settings.character.default as NonNullable<(typeof settings.character)[string]>);
 
-  wards.forEach((ward, at) => {
-    const buildings = buildingsIn[at] as Building[];
-    if (buildings.length === 0) return;
+  const barrier = input.barrier;
+  const crossesBarrier = (a: Point, b: Point) => {
+    if (!barrier) return false;
+    for (let k = 0; k < barrier.length; k++) if (crossing(a, b, barrier[k] as Point, barrier[(k + 1) % barrier.length] as Point)) return true;
+    return false;
+  };
+  type Made = { placed: Placed[]; lanes: Point[][]; open: Point[][]; fixes: Fixes };
+  /** Cuts a ward for its buildings, the pieces `finer` times the usual size; or says how many pieces it fell short. */
+  const cutOne = (at: number, buildings: Building[], finer: number): Made | { short: number } => {
+    const ward = wards[at] as Town['wards']['wards'][number];
+    const made: Made = { placed: [], lanes: [], open: [], fixes: { extraCuts: 0, opened: 0, merged: 0, frontless: 0, forced: 0, carried: 0 } };
     const character = characterOf(districtOf[at] as number);
     const cost = costs[at] as number;
     const openShare = loose[at] ? settings.loose.open.min + (settings.loose.open.max - settings.loose.open.min) * ((cost - looseFrom) / (mostCost - looseFrom || 1)) : character.open;
@@ -447,11 +553,12 @@ export function allot(input: AllotInput): Allotment {
     const cut: CutWard = cutWard(
       {
         polygon: ward.polygon,
-        size: (smallMean * (1 - openShare)) / settings.pieceShare,
+        size: (smallMean * (1 - openShare) * finer) / settings.pieceShare,
         gridChaos,
         sizeChaos: character.sizeChaos,
         open: 0,
-        alley: grown.widths.alley,
+        // The alley is cut a verge wider than the lane's roadway down it.
+        alley: grown.widths.alley + 2 * VERGE,
         alleyAbove: settings.alleyAbove,
         squareBelow: settings.squareBelow,
         big: bigOnes.map((entry) => entry.target),
@@ -461,7 +568,7 @@ export function allot(input: AllotInput): Allotment {
     );
     // Lanes: each carried on to the way it meets at either end; those that meet none, directly or by another lane, go.
     const own: Way[] = [];
-    const ownIndex = new WayIndex();
+    const ownIndex = new WayIndex(15);
     const reachOut = Math.max(grown.widths.highway, grown.widths.arterial) / 2 + VERGE + 0.5;
     const carried = cut.lanes.map((lane) => {
       const ends = [0, lane.length - 1].map((end) => {
@@ -476,7 +583,7 @@ export function allot(input: AllotInput): Allotment {
           for (const way of ways) {
             for (let k = 1; k < way.points.length; k++) {
               const found = crossing(ray[0] as Point, ray[1] as Point, way.points[k - 1] as Point, way.points[k] as Point);
-              if (found && found.along <= way.width / 2 + VERGE + 0.3 && (!hit || found.along < hit.along)) hit = { point: found.point, along: found.along, lane: isLane };
+              if (found && found.along <= way.width / 2 + VERGE + 0.3 && (!hit || found.along < hit.along) && !crossesBarrier(point, found.point)) hit = { point: found.point, along: found.along, lane: isLane };
             }
           }
         };
@@ -503,10 +610,18 @@ export function allot(input: AllotInput): Allotment {
     }
     carried.forEach((lane, k) => {
       if (!keep[k]) return;
-      lanes.push(lane.points);
+      made.lanes.push(lane.points);
       ownIndex.add({ points: lane.points, width: grown.widths.alley });
     });
-    const fronts = (polygon: Point[]) => frontageOf(polygon, index) + frontageOf(polygon, ownIndex) >= FRONTAGE;
+    const known = new WeakMap<Point[], boolean>();
+    const fronts = (polygon: Point[]) => {
+      let found = known.get(polygon);
+      if (found === undefined) {
+        found = frontageOf(polygon, index) + frontageOf(polygon, ownIndex) >= FRONTAGE;
+        known.set(polygon, found);
+      }
+      return found;
+    };
     const frontEdgeOf = (polygon: Point[]) => frontEdge(polygon, index) ?? frontEdge(polygon, ownIndex);
 
     // The pieces: those of big buildings kept apart; a piece with no way along it joins a neighbour.
@@ -535,15 +650,33 @@ export function allot(input: AllotInput): Allotment {
         const withFront = parts.filter((other) => other !== part && fronts(other.polygon));
         const other = neighbourOf(part, withFront) ?? neighbourOf(part, parts);
         if (other && join(part, other)) {
-          fixes.frontless++;
+          made.fixes.frontless++;
           changed = true;
         }
       }
     }
+    // A big building's piece with no way along it takes in a neighbour that has one.
     for (const part of [...parts]) {
-      if (part.big === undefined && !fronts(part.polygon)) {
+      if (part.big === undefined || fronts(part.polygon)) continue;
+      const withFront = parts.filter((other) => other !== part && other.big === undefined && fronts(other.polygon));
+      const other = neighbourOf(part, withFront);
+      if (other) {
+        const joined = merge(part.polygon, other.polygon, 1e-5);
+        if (joined) {
+          part.polygon = joined;
+          parts = parts.filter((entry) => entry !== other);
+          made.fixes.frontless++;
+        }
+      }
+    }
+    for (const part of [...parts]) {
+      if (!fronts(part.polygon)) {
+        // A big building's piece that still has none gives up its building to the largest piece that does.
+        if (part.big !== undefined) {
+          delete part.big;
+        }
         part.open = true;
-        fixes.forced++;
+        made.fixes.forced++;
       }
     }
     // A big building whose piece was not cut for it takes the largest piece there is.
@@ -576,7 +709,7 @@ export function allot(input: AllotInput): Allotment {
           if (halves.length !== 2 || !halves.every((half) => fronts(half) && area(half) > 6)) continue;
           parts = parts.filter((entry) => entry !== part);
           parts.push(...halves.map((polygon) => ({ polygon })));
-          fixes.extraCuts++;
+          made.fixes.extraCuts++;
           done = true;
           break;
         }
@@ -596,7 +729,7 @@ export function allot(input: AllotInput): Allotment {
       const farFirst = plain().map((part) => ({ part, away: away(part.polygon) })).sort((a, b) => b.away - a.away);
       for (const { part } of farFirst.slice(0, Math.min(spare, allowed))) {
         part.open = true;
-        fixes.opened++;
+        made.fixes.opened++;
         spare--;
       }
     }
@@ -606,7 +739,7 @@ export function allot(input: AllotInput): Allotment {
       for (const part of smallest) {
         const other = neighbourOf(part, plain());
         if (other && join(part, other)) {
-          fixes.merged++;
+          made.fixes.merged++;
           spare--;
           done = true;
           break;
@@ -619,22 +752,67 @@ export function allot(input: AllotInput): Allotment {
       const farFirst = plain().map((part) => ({ part, away: away(part.polygon) })).sort((a, b) => b.away - a.away);
       for (const { part } of farFirst.slice(0, spare)) {
         part.open = true;
-        fixes.forced++;
+        made.fixes.forced++;
       }
     }
     const pieces = plain();
-    if (pieces.length < want) throw new Error(`a ward of ${Math.round(areas[at] as number)} m² holds ${pieces.length} pieces for ${want} buildings`);
+    if (pieces.length < want) return { short: want - pieces.length };
     // Pairs by size, largest to largest.
     const bySize = [...small].sort((a, b) => lotArea(b) - lotArea(a) || (a.id < b.id ? -1 : 1));
     const pieceBySize = [...pieces].sort((a, b) => area(b.polygon) - area(a.polygon));
-    bySize.forEach((building, k) => placed.push({ building, polygon: (pieceBySize[k] as Part).polygon, ward: at, loose: loose[at] as boolean }));
+    bySize.forEach((building, k) => made.placed.push({ building, polygon: (pieceBySize[k] as Part).polygon, ward: at, loose: loose[at] as boolean }));
+    if (bigOnes.some((_, k) => !parts.some((candidate) => candidate.big === k))) return { short: 1 };
     bigOnes.forEach((entry, k) => {
       const part = parts.find((candidate) => candidate.big === k);
-      if (!part) throw new Error(`a ward of ${Math.round(areas[at] as number)} m² has no piece for ${entry.building.id}`);
-      placed.push({ building: entry.building, polygon: part.polygon, ward: at, loose: loose[at] as boolean });
+      if (!part) return;
+      made.placed.push({ building: entry.building, polygon: part.polygon, ward: at, loose: loose[at] as boolean });
     });
-    for (const part of parts) if (part.open) open.push(part.polygon);
-  });
+    // In a waterside district, the big buildings change places with whatever stands nearest the water, where it is of
+    // a size with theirs.
+    if (placementOf(districts[districtOf[at] as number] as District) === 'waterside' && input.dryBy) {
+      const dryBy = input.dryBy;
+      const wetness = (polygon: Point[]) => Math.min(...polygon.map(dryBy));
+      for (const entry of bigOnes) {
+        const own = made.placed.find((lot) => lot.building === entry.building) as Placed;
+        const better = made.placed
+          .filter((lot) => lot !== own && Math.abs(area(lot.polygon) - area(own.polygon)) <= settings.bigMatch * area(own.polygon) && wetness(lot.polygon) < wetness(own.polygon))
+          .sort((a, b) => wetness(a.polygon) - wetness(b.polygon))[0];
+        if (better) [own.building, better.building] = [better.building, own.building];
+      }
+    }
+    for (const part of parts) if (part.open) made.open.push(part.polygon);
+    return made;
+    };
+  // District by district, nearest its seed first. A ward that cannot be cut into pieces enough for its buildings is
+  // cut finer; failing that, its smallest buildings go on to the next ward of the district.
+  for (const district of active) {
+    const far = reach.get(district) as Float64Array;
+    const own = districtOf.map((owner, ward) => (owner === district ? ward : -1)).filter((ward) => ward >= 0).sort((a, b) => (far[a] as number) - (far[b] as number) || a - b);
+    let carried: Building[] = [];
+    for (const at of own) {
+      let buildings = [...(buildingsIn[at] as Building[]), ...carried];
+      carried = [];
+      let result: Made | { short: number } = { short: buildings.length };
+      for (let tries = 0; buildings.length > 0; tries++) {
+        result = cutOne(at, buildings, 0.8 ** Math.min(tries, 3));
+        if (!('short' in result)) break;
+        if (tries >= 3) {
+          const bySize = buildings.filter((building) => !fixed.has(building)).sort((a, b) => lotArea(a) - lotArea(b) || (a.id < b.id ? -1 : 1));
+          const moving = bySize.slice(0, Math.max(1, result.short));
+          if (moving.length === 0) break;
+          carried.push(...moving);
+          buildings = buildings.filter((building) => !moving.includes(building));
+          fixes.carried += moving.length;
+        }
+      }
+      if ('short' in result) continue;
+      placed.push(...result.placed);
+      lanes.push(...result.lanes);
+      open.push(...result.open);
+      for (const key of Object.keys(result.fixes) as Array<keyof Fixes>) fixes[key] += result.fixes[key];
+    }
+    if (carried.length > 0) throw new Error(`the district ${(districts[district] as District).name} has ${carried.length} buildings its wards could not be cut for`);
+  }
   return { districtOf, rank, loose, placed, lanes, open, fixes };
 }
 

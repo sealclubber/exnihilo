@@ -361,11 +361,11 @@ const GrownSettingsSchema = z.strictObject({
   widths: z.strictObject({ highway: metres, arterial: metres, street: metres, alley: metres, bridge: metres }),
   /**
    * Highways: every route of the brief, laid before anything else. `wander` is how far a highway strays aside from
-   * a straight line, in metres; two exits within `through` degrees of opposite make one road through the centre;
+   * a straight line, in metres, and no more than `wanderShare` of the town's radius; two exits within `through` degrees of opposite make one road through the centre;
    * a highway runs on `beyond` metres past the town before its exit. Where it crosses a river it leaves its line
    * `approach` metres either side, to meet a bridge square to the bank.
    */
-  highways: z.strictObject({ wander: z.number().nonnegative(), through: z.number().nonnegative(), beyond: metres, approach: metres }),
+  highways: z.strictObject({ wander: z.number().nonnegative(), wanderShare: z.number().nonnegative(), through: z.number().nonnegative(), beyond: metres, approach: metres }),
   /**
    * Arterials branch off each highway on alternating sides, `spacing` metres apart, along a stretch `span` times the
    * town's radius either side of the centre. Each is `reach` times the radius long less `fall` for every metre
@@ -430,9 +430,11 @@ const GrownSettingsSchema = z.strictObject({
    * by a share drawn from `vary`. Buildings of more than `big` times the ward's building size are cut for first,
    * a half within `bigMatch` of one's size going to it. The last `loose.share` of wards by growth are loose: a
    * piece is left open with a chance rising from `loose.open.min` to `loose.open.max` toward the very edge, and
-   * each building is drawn in from its lot by a distance drawn from `loose.pull`.
+   * each building is drawn in from its lot by a distance drawn from `loose.pull`. A ward's buildings are no more
+   * than the ground within `frontDepth` metres of the ways along it would hold.
    */
   buildings: z.strictObject({
+    frontDepth: metres,
     alleyAbove: z.number().positive(),
     squareBelow: z.number().positive(),
     pieceShare: z.number().positive(),

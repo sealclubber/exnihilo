@@ -20,8 +20,8 @@ import { bearingVector, distance, pointAlongPolyline, projectOnPolyline, slicePo
 import { alongOf, chaikin, firstCrossing, normal, wander } from './lines.ts';
 import type { Coast, River } from './water.ts';
 
-/** A highway carries a route; a quay or a local road stands in for one; a bank street follows a river. */
-export type RoadKind = 'highway' | 'quay' | 'local' | 'arterial' | 'bank';
+/** A highway carries a route; a quay or a local road stands in for one; a bank street follows a river; a street is any other. */
+export type RoadKind = 'highway' | 'quay' | 'local' | 'arterial' | 'bank' | 'street';
 
 export interface Road {
   kind: RoadKind;
@@ -105,7 +105,10 @@ export function planRoads(input: RoadInput): RoadPlan {
     let line = points;
     if (coast) line = stopAtWater(line, (point) => coast.gap(point), widths.highway, 0);
     const road: Road = { kind, points: line, width: widths.highway, ...(route !== undefined && { route }), bridges: [] };
-    if (river) bridgeOver(road, river);
+    if (river) {
+      bridgeOver(road, river);
+      road.points = clearOfWater(road.points, road.bridges, (point) => river.gap(point), (point) => river.nearest(point).point, widths.highway / 2 + 1);
+    }
     road.points = thin(road.points, road.bridges);
     roads.push(road);
     trunks.push(roads.length - 1);
@@ -169,7 +172,7 @@ export function planRoads(input: RoadInput): RoadPlan {
     if (run.length > 1) out.push(...simplify(run, THIN).slice(1));
     return out;
   };
-  const amplitude = settings.highways.wander;
+  const amplitude = Math.min(settings.highways.wander, settings.highways.wanderShare * radius);
   for (const [a, b] of pairs) {
     // One line through the centre, so that it bends as one road; then cut at the centre into the two routes.
     const inward = wander(rng, ray(bearings[a] as number, far), [0, 0], amplitude);
@@ -197,7 +200,8 @@ export function planRoads(input: RoadInput): RoadPlan {
       return chaikin(points, 2);
     };
     for (const sign of [1, -1]) {
-      const line = quay(sign);
+      // Stopping where it reaches a river's mouth.
+      const line = river ? stopAtWater(quay(sign), (point) => river.gap(point), widths.highway, 0) : quay(sign);
       if (line.length > 2 && distance(line[0] as Point, [0, 0]) < 1.5 * extent) {
         roads.push({ kind: 'quay', points: simplify(line, THIN), width: widths.highway, bridges: [] });
         trunks.push(roads.length - 1);
@@ -378,4 +382,36 @@ export function planRoads(input: RoadInput): RoadPlan {
     }
   }
   return { roads, trunks };
+}
+
+/**
+ * A road that runs beside water without crossing it, moved away from it wherever it comes nearer than `clear`:
+ * the line is cut finely and each point too near is pushed straight away from the nearest water. Bridges and the
+ * stretches up to them stay as they are.
+ */
+function clearOfWater(points: Point[], bridges: Array<[Point, Point]>, gap: (point: Point) => number, nearest: (point: Point) => Point, clear: number): Point[] {
+  const ends = new Set(bridges.flat());
+  const out: Point[] = [];
+  for (let k = 0; k < points.length; k++) {
+    const point = points[k] as Point;
+    out.push(point);
+    const next = points[k + 1];
+    if (!next || (ends.has(point) && ends.has(next))) continue;
+    const run = Math.hypot(next[0] - point[0], next[1] - point[1]);
+    const steps = Math.floor(run / 4);
+    for (let step = 1; step < steps; step++) out.push([point[0] + ((next[0] - point[0]) * step) / steps, point[1] + ((next[1] - point[1]) * step) / steps]);
+  }
+  return out.map((point, k) => {
+    if (ends.has(point)) return point;
+    // Near a bridge's end the road is meant to come down to the water.
+    const before = out[k - 1];
+    const after = out[k + 1];
+    if ((before && ends.has(before)) || (after && ends.has(after))) return point;
+    const away = gap(point);
+    if (away >= clear) return point;
+    const water = nearest(point);
+    const run = Math.hypot(point[0] - water[0], point[1] - water[1]) || 1;
+    const push = clear - away;
+    return [point[0] + ((point[0] - water[0]) / run) * push, point[1] + ((point[1] - water[1]) / run) * push];
+  });
 }

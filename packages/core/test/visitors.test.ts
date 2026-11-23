@@ -186,7 +186,8 @@ describe('inns and the gaming house in Badanos', () => {
 });
 
 describe('every settlement of Lomia', () => {
-  it('keeps its population and category counts, has an inn where travellers are expected, a visitors\' quarter exactly when its draw reaches the threshold, and every invariant', { timeout: 400_000 }, () => {
+  // Every settlement laid out: phase 6D.3's wards and buildings take about 7 minutes for all of Lomia on one core.
+  it('keeps its population and category counts, has an inn where travellers are expected, a visitors\' quarter exactly when its draw reaches the threshold, and every invariant', { timeout: 900_000 }, () => {
     const before = medievalPackBefore6C();
     const failures: string[] = [];
     const versionFour = createHash('sha256');

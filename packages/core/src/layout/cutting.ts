@@ -467,7 +467,21 @@ export function offsetLine(line: readonly Point[], by: number): Point[] {
     const a: Point = [point[0] + before[0] * by, point[1] + before[1] * by];
     const b: Point = [point[0] + after[0] * by, point[1] + after[1] * by];
     const turnCos = dot(before, after);
-    // A sharp turn is cut off square rather than mitred to a spike.
+    const turn = Math.atan2(cross(before, after), turnCos);
+    // On the outside of a bend, round it as a roadway is; on the inside, the corner where the two sides meet.
+    const outside = turn * by < 0;
+    if (outside && turnCos < 0.97) {
+      const steps = Math.max(2, Math.ceil(Math.abs(turn) / (Math.PI / 12)));
+      // Round the circle rather than inside it, as at a strip's end.
+      const reach = by / Math.cos(turn / (2 * steps));
+      for (let k = 0; k <= steps; k++) {
+        const angle = (turn * k) / steps;
+        const n: Point = [before[0] * Math.cos(angle) - before[1] * Math.sin(angle), before[1] * Math.cos(angle) + before[0] * Math.sin(angle)];
+        const size = k === 0 || k === steps ? by : reach;
+        out.push([point[0] + n[0] * size, point[1] + n[1] * size]);
+      }
+      return;
+    }
     if (turnCos < 0.5) {
       out.push(a, b);
       return;
@@ -478,11 +492,33 @@ export function offsetLine(line: readonly Point[], by: number): Point[] {
   return untangle(out);
 }
 
-/** The outline of a line drawn `width` metres wide, its ends cut square at the line's ends. */
+/** How many pieces the round end of a strip is drawn with. */
+const CAP_PIECES = 8;
+
+/** The outline of a line drawn `width` metres wide, its ends rounded as a roadway's are. */
 export function stripOutline(line: readonly Point[], width: number): Point[] {
-  const left = offsetLine(line, width / 2);
-  const right = offsetLine(line, -width / 2);
-  return [...left, ...right.reverse()];
+  const half = width / 2;
+  const left = offsetLine(line, half);
+  const right = offsetLine(line, -half).reverse();
+  /** A half circle round an end, from one side of the strip to the other, outward. */
+  const cap = (end: Point, toward: Point): Point[] => {
+    const run = Math.hypot(end[0] - toward[0], end[1] - toward[1]) || 1;
+    const out: Point = [(end[0] - toward[0]) / run, (end[1] - toward[1]) / run];
+    const side: Point = [-out[1], out[0]];
+    const points: Point[] = [];
+    for (let k = 1; k < CAP_PIECES; k++) {
+      const angle = (Math.PI * k) / CAP_PIECES;
+      const along = Math.sin(angle);
+      const across = Math.cos(angle);
+      // Drawn round the circle rather than inside it, so that nothing within the roadway's reach is left out.
+      const reach = half / Math.cos(Math.PI / (2 * CAP_PIECES));
+      points.push([end[0] + (out[0] * along + side[0] * across) * reach, end[1] + (out[1] * along + side[1] * across) * reach]);
+    }
+    return points;
+  };
+  const last = line[line.length - 1] as Point;
+  const first = line[0] as Point;
+  return [...left, ...cap(last, line[line.length - 2] as Point), ...right, ...cap(first, line[1] as Point)];
 }
 
 // ---- Shapes of pieces ---------------------------------------------------------------------------------------------

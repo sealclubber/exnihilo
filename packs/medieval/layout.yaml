@@ -165,11 +165,12 @@ grown:
   # ward; an alley is the gap a cut leaves between buildings, with a lane
   # down it.
   widths: {highway: 10, arterial: 7, street: 4.5, alley: 2.4, bridge: 10}
-  # How far a highway strays from a straight line; exits within `through`
+  # How far a highway strays from a straight line, and no more than
+  # `wanderShare` of the town's radius; exits within `through`
   # degrees of opposite make one road through the centre; how far a highway
   # runs on past the town before its exit; how far either side of a river it
   # leaves its line to meet a bridge square to the bank.
-  highways: {wander: 55, through: 50, beyond: 200, approach: 85}
+  highways: {wander: 55, wanderShare: 0.15, through: 50, beyond: 200, approach: 85}
   # Arterials branch off each highway, alternating sides, `spacing` metres
   # apart, along a stretch `span` times the town's radius either side of the
   # centre. One is `reach` times the radius long, less `fall` for each metre
@@ -234,8 +235,11 @@ grown:
   # `big` times the building size are cut for first, a half within `bigMatch`
   # of one's size going to it. The last `loose.share` of wards by growth are
   # loose: more pieces left open toward the edge, and buildings drawn in from
-  # their lots by `loose.pull` metres.
+  # their lots by `loose.pull` metres. A ward with little road along it is
+  # given no more buildings than `frontDepth` metres of ground behind that
+  # road would hold.
   buildings:
+    frontDepth: 60
     alleyAbove: 1
     squareBelow: 4
     pieceShare: 0.7

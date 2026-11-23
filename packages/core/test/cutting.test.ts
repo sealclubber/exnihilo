@@ -61,7 +61,7 @@ describe('cutting ground', () => {
     expect(pieces.map(area).sort((a, b) => a - b)).toEqual([40, 40].map((value) => expect.closeTo(value, 6)));
   });
 
-  it('takes a notch where a road ends inside, and says so where it would leave a hole', () => {
+  it('takes a round-ended notch where a road ends inside, and says so where it would leave a hole', () => {
     const stub = stripOutline(
       [
         [5, -10],
@@ -71,7 +71,9 @@ describe('cutting ground', () => {
     );
     const notched = subtract(square(0, 0, 10), stub);
     expect(notched.pieces).toHaveLength(1);
-    expect(area(notched.pieces[0] as Point[])).toBeCloseTo(100 - 10, 6);
+    // A 2 m notch 5 m deep, with a round end drawn just round the circle: about half a circle more than its square part.
+    expect(area(notched.pieces[0] as Point[])).toBeGreaterThan(100 - 10 - 1.7);
+    expect(area(notched.pieces[0] as Point[])).toBeLessThan(100 - 10 - 1.4);
     const inner = subtract(square(0, 0, 10), square(4, 4, 2));
     expect(inner.hole).toBe(true);
   });

@@ -129,7 +129,7 @@ function measure(brief: SettlementBrief, city: City, layout: Layout) {
       const segment = bySide.get(segmentKey(point, block.polygon[(at + 1) % block.polygon.length] as Point));
       if (!segment) return;
       // The frontage a side can hold: its length, less the corners cut back for the roadways that meet there.
-      side += Math.max(0, polylineLength(segment.points) - 2 * (pack.layout.streetWidths.arterial / 2 + (pack.layout.grown?.roadside ?? 0)));
+      side += Math.max(0, polylineLength(segment.points) - 2 * (pack.layout.streetWidths.arterial / 2 + 0));
       lot += inside.filter((entry) => entry.entrance.segmentId === segment.id).reduce((sum, entry) => sum + shapes.get(entry.id)!.frontage, 0);
     });
     if (side > 0 && inside.length > 0) filled.push(Math.min(1, lot / side));

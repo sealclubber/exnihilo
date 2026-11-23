@@ -1,0 +1,10 @@
+{
+  "note": "Fingerprints of LAYOUT_VERSION 8 layouts by the grown generator (roads, wards, buildings, phase 6D.3) under the medieval pack 0.14.0, default seeds: the whole layout as JSON. Made again whenever LAYOUT_VERSION rises or the pack changes a layout; the grid's fingerprints are in layout-v1.json.",
+  "towns": {
+    "Badanos": "955ac9a35246380b01d285a60952869ef0b5ec80525e8d051ecf5fabda1bbc95",
+    "Pombal": "f78f9c1282551ac7c2f7a214f6d7d618244c43cbdb562a83072ec653d3783bb3",
+    "Cevilefon": "22ff6aea3d3c7fd076f3e3fbef0f531e24cd732fbffb6f062d8f17aaf2de7ce4",
+    "Vereceldo": "288995433c4b2712341357d4641d8e06c4903ad180b6b5c0f703dd6bfe326c4b",
+    "Flupines": "4b658aab46cea48fa06caf0bb405d11d6183eceb9d3475b5d6bbc22ffefac1f6"
+  }
+}

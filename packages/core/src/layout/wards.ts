@@ -13,7 +13,7 @@
 import type { Rng } from '../city/random.ts';
 import type { GrownSettings } from '../pack/schema.ts';
 import type { Point } from '../schema.ts';
-import { type Box, area, boxAround, boxesMeet, interiorPoint, inside, smallestRectangle, splitAlong, stripOutline, subtract, toEdge, toLine } from './cutting.ts';
+import { type Box, area, boxAround, boxesMeet, interiorPoint, inside, merge, smallestRectangle, splitAlong, stripOutline, subtract, toEdge, toLine } from './cutting.ts';
 import { chaikin, normal } from './lines.ts';
 
 /** Kept between a roadway and the ground beside it, so that what is built never touches the roadway. */
@@ -39,6 +39,8 @@ export interface Ward {
 export interface Wards {
   faces: Point[][];
   wards: Ward[];
+  /** The face the plaza stands on, if there is one. */
+  plazaFace?: number;
   /** The streets that split wards, each a line from one side of its face to the other. */
   streets: Point[][];
 }
@@ -71,6 +73,12 @@ export interface WardInput {
   streetWidth: number;
   /** Whether a point lies on a road a street may end at, rather than the ground's edge or the wall. */
   onRoad: (point: Point) => boolean;
+  /** How far a point is from water: a street keeps its roadway out of it. */
+  dryBy: (point: Point) => number;
+  /** The plaza: the face that holds it is no ward. */
+  reserved?: Point[];
+  /** The street round a plaza at the centre: the faces inside it are joined into the plaza's. */
+  reservedRing?: Point[];
 }
 
 export function layWards(input: WardInput): Wards {
@@ -85,6 +93,22 @@ export function layWards(input: WardInput): Wards {
     faces = faces.flatMap((face) => (boxesMeet(boxAround(face), box) ? splitAlong(face, cut.closed ? cut.points : lengthened(cut.points, 0.5), cut.closed).pieces : [face]));
   }
   faces = faces.filter((face) => area(face) > 1);
+  if (input.reservedRing) {
+    const ring = input.reservedRing;
+    const within = faces.filter((face) => inside(interiorPoint(face), ring));
+    let joined = within[0];
+    let left = within.slice(1);
+    for (let guard = 0; joined && left.length > 0 && guard < 20; guard++) {
+      for (const face of [...left]) {
+        const both = merge(joined as Point[], face, 1e-5);
+        if (both) {
+          joined = both;
+          left = left.filter((other) => other !== face);
+        }
+      }
+    }
+    if (joined) faces = [...faces.filter((face) => !within.includes(face)), joined, ...left];
+  }
   const strips = input.cuts.filter((cut) => cut.strip).map((cut) => ({ outline: cut.strip as Point[], box: boxAround(cut.strip as Point[]) }));
   /** What is left of a piece of ground once every strip near it is taken out. */
   const stripped = (piece: Point[], extra: Array<{ outline: Point[]; box: Box }> = []) => {
@@ -108,13 +132,22 @@ export function layWards(input: WardInput): Wards {
       wards.push({ polygon: ward, face: faceList.length - 1 });
       return;
     }
-    // Across the long axis, so that the street reaches a road or another street at one end at least.
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const line = streetAcross(ward, rng, settings, turn, false);
+    // Across the long axis, so that the street reaches a road or another street at one end at least; failing
+    // that, along it.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const line = streetAcross(ward, rng, settings, turn, attempt >= 6);
       // Only the stretches of it that pass through the ward, ending on a road at one end at least.
       const { pieces, chords } = splitAlong(face, line);
       if (chords.length === 0 || pieces.length < 2) continue;
       const through = chords.filter((chord) => chord.some((point, at) => at > 0 && inside(midpoint(chord[at - 1] as Point, point), ward)));
+      const wet = through.some((chord) => chord.some((point, at) => {
+        if (at === 0) return false;
+        const from = chord[at - 1] as Point;
+        const steps = Math.ceil(Math.hypot(point[0] - from[0], point[1] - from[1]) / 2);
+        for (let step = 0; step <= steps; step++) if (input.dryBy([from[0] + ((point[0] - from[0]) * step) / steps, from[1] + ((point[1] - from[1]) * step) / steps]) < input.streetWidth / 2 + VERGE) return true;
+        return false;
+      }));
+      if (wet) continue;
       const reaches = (point: Point) => input.onRoad(point) || streets.some((street) => toLine(point, street) < 1e-4);
       if (through.length === 0 || !through.every((chord) => reaches(chord[0] as Point) || reaches(chord[chord.length - 1] as Point))) continue;
       // Split along the chords that pass through the ward and no others.
@@ -140,14 +173,21 @@ export function layWards(input: WardInput): Wards {
     wards.push({ polygon: ward, face: faceList.length - 1 });
   };
 
+  let plazaFace: number | undefined;
+  const plazaMiddle = input.reserved ? interiorPoint(input.reserved) : undefined;
   for (const face of faces) {
+    if (plazaMiddle && plazaFace === undefined && inside(plazaMiddle, face)) {
+      faceList.push(face);
+      plazaFace = faceList.length - 1;
+      continue;
+    }
     const pieces = stripped(face).filter((piece) => area(piece) >= least);
     if (pieces.length === 0) continue;
     // A face is one ward: its largest piece. Slivers a strip cut off are no ward.
     const ward = pieces.reduce((best, piece) => (area(piece) > area(best) ? piece : best));
     settle(face, ward, 0);
   }
-  return { faces: faceList, wards, streets };
+  return { faces: faceList, wards, streets, ...(plazaFace !== undefined && { plazaFace }) };
 }
 
 const midpoint = (a: Point, b: Point): Point => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];

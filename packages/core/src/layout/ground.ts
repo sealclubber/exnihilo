@@ -12,6 +12,7 @@ import type { Rng } from '../city/random.ts';
 import type { GrownSettings } from '../pack/schema.ts';
 import type { Point } from '../schema.ts';
 import { area, inside, signedArea, simplifyRing } from './cutting.ts';
+import { Heap } from './heap.ts';
 import { LineIndex, chaikin } from './lines.ts';
 
 /** Thrown when the ground laid out proved too small; the town is laid out again on more. */
@@ -25,6 +26,10 @@ export class TooSmall extends Error {
   }
 }
 
+/** A wall round all the ground follows it this many cells blurred, at this level of the blurred ground: just outside it. */
+const ALL_BLUR = 1.5;
+const ALL_LEVEL = 0.08;
+
 export interface Ground {
   /** The town's ground: the outline of each piece of it, largest first, without holes. */
   outlines: Point[][];
@@ -32,7 +37,10 @@ export interface Ground {
   cost: (point: Point) => number;
   /** Where a cost falls among the ground taken: 0 for the first taken, 1 for the last. */
   rank: (cost: number) => number;
-  /** The outline of the ground whose cost is below a share of it, smoothed over `smoothing` metres; nothing if there is none. */
+  /**
+   * The outline of the ground whose cost is below a share of it, smoothed over `smoothing` metres; nothing if there
+   * is none. For a share of 1, a line just outside all of it.
+   */
   oldest: (share: number, smoothing: number) => Point[] | undefined;
 }
 
@@ -177,24 +185,92 @@ export function layGround(input: GroundInput): Ground {
     const j = Math.max(0, Math.min(size - 1, Math.round((point[1] - origin) / cell)));
     return loudest === 0 ? 0 : ((noise.values[i * size + j] as number) / loudest) * costs.noise.depth;
   };
-  const cost = (point: Point): number => {
-    if (dryBy(point) < costs.wet) return Infinity;
-    const highway = trunkIndex.nearest(point);
+  /** The nearest point of a line to a point and how far along its line that is, as a line index finds it. */
+  type Near = { distance: number; along: number; point: Point } | undefined;
+  /** The cost of ground, given the nearest highway, arterial and road beyond a bridge. */
+  const costFrom = (point: Point, highway: Near, arterial: Near, over: Near): number => {
     if (!highway) return Infinity;
-    const arterial = arterialIndex.size > 0 ? arterialIndex.nearest(point, costs.arterialCap) : undefined;
+    const dryHere = dryBy(point);
+    if (dryHere < costs.wet) return Infinity;
     let value = highway.distance + costs.along * highway.along + costs.arterial * Math.min(arterial ? arterial.distance : costs.arterialCap, costs.arterialCap) + noiseAt(point);
     // Ground across the water from its highway, unless an arterial on its own side, such as one over a bridge, is near.
     const across = (to: Point) => {
+      // Water further off than the road is cannot lie between them.
+      if (dryHere > Math.hypot(to[0] - point[0], to[1] - point[1])) return false;
       for (let step = 1; step < 8; step++) {
         const t = step / 8;
         if (dryBy([point[0] + (to[0] - point[0]) * t, point[1] + (to[1] - point[1]) * t]) < 0) return true;
       }
       return false;
     };
-    const over = beyondIndex.size > 0 ? beyondIndex.nearest(point, costs.arterialCap) : undefined;
     if (across(highway.point) && (!arterial || across(arterial.point)) && (!over || across(over.point))) value += costs.water;
     return value;
   };
+  const cap = (near: Near) => (near && near.distance <= costs.arterialCap ? near : undefined);
+  const cost = (point: Point): number => {
+    if (dryBy(point) < costs.wet) return Infinity;
+    const highway = trunkIndex.nearest(point);
+    const arterial = arterialIndex.size > 0 ? arterialIndex.nearest(point, costs.arterialCap) : undefined;
+    const over = beyondIndex.size > 0 ? beyondIndex.nearest(point, costs.arterialCap) : undefined;
+    return costFrom(point, highway, arterial, over);
+  };
+  // Over the grid, the nearest point of each kind of line is found by spreading out from the lines cell by cell, each
+  // cell taking its neighbour's nearest point where that is nearer than its own.
+  const nearestField = (lines: Point[][]) => {
+    const px = new Float64Array(size * size).fill(NaN);
+    const py = new Float64Array(size * size);
+    const along = new Float64Array(size * size);
+    const away = new Float64Array(size * size).fill(Infinity);
+    const heap = new Heap();
+    const offer = (index: number, point: Point, distanceAlong: number) => {
+      const i = Math.floor(index / size);
+      const j = index % size;
+      const d = Math.hypot(at(i) - point[0], at(j) - point[1]);
+      if (d < (away[index] as number)) {
+        away[index] = d;
+        px[index] = point[0];
+        py[index] = point[1];
+        along[index] = distanceAlong;
+        heap.push(d, index);
+      }
+    };
+    for (const line of lines) {
+      let walked = 0;
+      for (let k = 1; k < line.length; k++) {
+        const a = line[k - 1] as Point;
+        const b = line[k] as Point;
+        const run = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        const steps = Math.max(1, Math.ceil(run / (cell / 3)));
+        for (let step = 0; step <= steps; step++) {
+          const t = step / steps;
+          const point: Point = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+          const i = Math.round((point[0] - origin) / cell);
+          const j = Math.round((point[1] - origin) / cell);
+          if (i < 0 || j < 0 || i >= size || j >= size) continue;
+          offer(i * size + j, point, walked + run * t);
+        }
+        walked += run;
+      }
+    }
+    while (heap.size > 0) {
+      const [d, index] = heap.pop();
+      if (d > (away[index] as number)) continue;
+      const i = Math.floor(index / size);
+      const j = index % size;
+      const point: Point = [px[index] as number, py[index] as number];
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          const [ii, jj] = [i + di, j + dj];
+          if ((di === 0 && dj === 0) || ii < 0 || jj < 0 || ii >= size || jj >= size) continue;
+          offer(ii * size + jj, point, along[index] as number);
+        }
+      }
+    }
+    return (index: number): Near => (Number.isNaN(px[index] as number) ? undefined : { distance: away[index] as number, along: along[index] as number, point: [px[index] as number, py[index] as number] });
+  };
+  const highwayAt = nearestField(input.trunks);
+  const arterialAt = nearestField(input.arterials);
+  const overAt = nearestField(input.beyondBridges);
 
   // The cells of the grid, cheapest first, as many as the town needs.
   const value = new Float64Array(size * size);
@@ -202,7 +278,8 @@ export function layGround(input: GroundInput): Ground {
   for (let i = 0; i < size; i++) {
     for (let j = 0; j < size; j++) {
       const point: Point = [at(i), at(j)];
-      const here = point[0] * point[0] + point[1] * point[1] > extent * extent ? Infinity : cost(point);
+      const index = i * size + j;
+      const here = point[0] * point[0] + point[1] * point[1] > extent * extent ? Infinity : costFrom(point, highwayAt(index), cap(arterialAt(index)), cap(overAt(index)));
       value[i * size + j] = here;
       if (Number.isFinite(here)) order.push(i * size + j);
     }
@@ -321,6 +398,8 @@ export function layGround(input: GroundInput): Ground {
     return groundCosts.length === 0 ? 0 : low / groundCosts.length;
   };
   const oldest = (share: number, smoothing: number) => {
+    // All of it: the ground blurred a little and traced a little way out.
+    if (share >= 1) return mainLoop(contours(blur(mask, ALL_BLUR), ALL_LEVEL));
     const limit = groundCosts[Math.min(groundCosts.length - 1, Math.floor(share * groundCosts.length))] as number;
     const old: Field = { size, origin, cell, values: new Float64Array(size * size) };
     for (let index = 0; index < size * size; index++) old.values[index] = mask.values[index] && (value[index] as number) <= limit ? 1 : 0;

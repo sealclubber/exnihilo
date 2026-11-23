@@ -451,10 +451,13 @@ pack that says nothing gets the grid. `generateLayout(city, brief, pack,
   the centre outward, an arterial from the centre to each exit, and bridges
   where streets meet the river. It has no walls and no plaza, and its water
   has straight edges.
-- **`grown`** (`layout/town.ts` and `layout/grown.ts`), the medieval pack's
-  choice, lays the road first and grows the town along it (phase 6D.2). Its
-  reference is the prototype in `docs/prototypes/proto_road.py` and its
-  picture `proto_districts.png`.
+- **`grown`** (`layout/town.ts`, `layout/allot.ts` and `layout/grown.ts`),
+  the medieval pack's choice, lays out roads, then wards, then buildings
+  (phase 6D.3). Its reference is the prototype in
+  `docs/prototypes/proto_combined.py` and its pictures `proto_combined.png`
+  and `proto_combined_b.png`. The cutting of wards into buildings is the
+  method of Watabou's Medieval Fantasy City Generator, written afresh here;
+  no code of it is copied.
 
 **How a town is grown.** Each step draws on a random stream of its own, and
 every number is in the `grown` block of `layout.yaml`.
@@ -462,68 +465,70 @@ every number is in the `grown` block of `layout.yaml`.
 1. **Water** (`layout/water.ts`), before anything else: a meandering river of
    varying width, a coast of bays and headlands, a port in a bay of its own.
 2. **Highways** (`layout/roads.ts`). Every route of the brief is a highway,
-   laid as a gently wandering line before anything else. Two exits nearly
-   opposite each other make one road through the centre; the others run from
-   their bearing to the centre. A port's quay is a highway of its own; a town
-   with no routes has one local road through its centre in their place.
-3. **Arterials** branch off each highway on alternating sides, every 120 to
-   210 m, at about a right angle, longest near the centre. One crosses the
-   river by a bridge, two in a town of 5,000 or more; the others stop at the
-   street along the bank. An arterial ends where it meets another road, and
-   where the town ends it carries on as a smaller street.
-4. **The order of growth.** Ground costs its distance from the nearest
-   highway, plus a share of its distance along it from the centre, plus a
-   share of its distance from an arterial, plus slow noise; ground on a
-   highway costs less. The town takes the cheapest first, so it stretches
-   along its road, and every block records its `growthRank`, from 0 for the
-   first built on to 1 for the last.
-5. **Blocks** (`layout/fabric.ts`). The ground is divided into patches about
-   200 m across, each with the grain of its nearest road. Inside each, block
-   seeds are laid as brickwork in that grain, rows a block's depth apart and
-   seeds a block's length apart, every other row moved half a length. Pairs
-   of seeds either side of every road, bank and the wall's line make each of
-   those fall between blocks. One Voronoi diagram of all the seeds, not
-   evened out, gives the blocks.
-6. **Through streets.** At each junction the two streets that continue each
-   other within 40 degrees are one street passing through, and over ten
-   rounds each junction is pulled toward the line of those streets, so that
-   streets straighten along their length and meet others at a T. Each road is
-   found again as an unbroken chain of block boundaries.
-7. **Strip lots** (`layout/strips.ts`). A block is cut along its long axis
-   into two rows back to back, or one where only one long side has a street,
-   and each row across into strips, one building to a strip, its frontage
-   drawn from the pack's with a spread and set to give the lot its area.
-8. **Districts grow block by block.** Each district starts from a seed block:
-   the centre's on the oldest ground, the others spread as far apart as can
-   be, by the pack's placement of their kind. All grow at once, the nearest
-   and cheapest block going to a district that still has buildings, with
-   crossing a highway, an arterial, the wall or the water counting for more,
-   so that those become their edges. Each block is cut into lots as it is
-   taken, and a district stops when its last building has a lot; the ground
-   is used exactly, and what is left over lies at the edge and goes back to
-   the land. A district boxed in by others takes a block from a neighbour,
-   which grows on to make it up.
-9. **The wall** follows a contour of the oldest ground, blurred over 60 m, so
-   it has the town's stretched shape; it is drawn as a smooth line, with a
-   gate wherever a highway or an arterial passes it. A street that runs up to
-   it stops a clear strip short.
-10. **Exits and greens.** Each highway runs on 200 m past the town to its
-    exit at the brief's bearing. A block inside the town left with no lots is
-    a green, a place of its own; the pack allows two to a town.
+   a gently wandering line. Two exits nearly opposite each other make one road
+   through the centre; the others run in to the centre. Where a highway
+   crosses a river it bends to meet a bridge set square to the bank. A port's
+   quay along the shore is a highway of its own; a town with no routes has a
+   local road through its centre; a single highway runs on past the centre
+   as a street.
+3. **Arterials** branch off each highway on alternating sides, every 130 to
+   220 m, at about a right angle, longest near the centre, and stop at the
+   water. A town whose highway does not cross its river carries the arterial
+   nearest the centre over on a bridge; one of more than 5,000 residents has
+   a second bridge a few hundred metres along the river, with an arterial of
+   its own. A street follows each bank.
+4. **Ground** (`layout/ground.ts`): as much as the buildings' lot area over
+   0.8, taken cheapest first, where ground costs its distance from the
+   nearest highway, plus a share of its distance along it from the centre,
+   plus a share of its distance from an arterial, plus smooth noise. The
+   outline is closed over gaps and opened at necks; every piece a road
+   reaches is kept, so a town may stand on both banks. The cost is the order
+   the town grew in, and every ward records its `growthRank`.
+5. **Arterials are cut back** to the town's edge; only highways run on, 200 m
+   past the town, to their exits.
+6. **The plaza and the wall.** A plaza stands where the highways meet, with a
+   street all round it, or beside the road where one road runs through the
+   centre. A wall follows a contour of the oldest ground, blurred over 60 m;
+   in a town under 1,000 residents it goes round all of it. A street runs
+   along the outside of the wall.
+7. **Wards** (`layout/wards.ts`). The ground is split along the centre line
+   of every road, the river and the wall into faces, and each road's strip is
+   taken out at its own width; what is left of a face is a ward. A ward
+   larger than a limit drawn between 0.65 and 1.5 ha is split by a street
+   across its long axis, turned and bent a little, until none is.
+8. **Districts on wards** (`layout/allot.ts`). Each district starts from a
+   seed ward by the pack's placement of its kind; a ward joins the district
+   whose seed is nearest going ward to ward, crossing a highway, an arterial
+   or the river counting for more, and the districts' reach is adjusted until
+   each one's ground matches its buildings.
+9. **Buildings** (`layout/buildings.ts`). Each ward is cut in two again and
+   again across its long axis near the middle until the pieces are building
+   sized, leaving an alley with a lane down it on the early cuts. Each kind of
+   district sets how far the cuts wander and how much sizes vary. The last
+   fifth of wards by growth are loose: more pieces left open, and buildings
+   drawn in from their lots. The count is made exact: a piece with no way
+   along it joins a neighbour, too few pieces and the largest are cut again,
+   too many and some are left open and the smallest joined to a neighbour.
+   Buildings and pieces are paired by size, and buildings of a trade then
+   change places to stand together.
+10. **Streets, lanes and gates** (`layout/network.ts`). Every road, street
+    and lane is cut at its junctions into segments. Gates stand where the
+    highways cross the wall, then arterials and streets, as many as there are
+    gatehouses; each gatehouse takes the piece nearest its gate, and anything
+    else that meets the wall stops short of it.
 
 The grown generator checks every invariant on what it made. A layout that
-breaks one, or a town that does not fit, is laid out again on more ground,
-and the fault of the last attempt is reported if none passes. Phase 6D.2's
-measures are in `packages/core/test/shape.ts`, printed by
-`node scripts/measure-road-first.ts`.
+breaks one is laid out again with its streams drawn afresh, a town that does
+not fit on more ground, and the fault of the last attempt is reported if none
+passes. Phase 6D.3's measures are in `packages/core/test/shape.ts`, printed
+by `node scripts/measure-wards.ts`; `node scripts/preview-town.ts <name>
+<out.svg> [--buildings | --districts]` draws a town's ground plan step by
+step.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
 length within 20° of a circle about the centre or of a line to it, leaving
-out the innermost 30 m. The first grown generator, which followed the main
-roads' direction, scored 99% in Badanos; its pictures are kept as
-`docs/renders/*-rings.svg`, and phase 6D.1's scattered blocks as
-`docs/renders/*-scattered.svg`.
+out the innermost 30 m.
 
 **Drawing a town.** `renderLayoutSvg(layout, options)` in core returns a
 picture of a layout as SVG text: water, streets by kind, lots tinted by
@@ -534,8 +539,9 @@ they lead. `npm run render` wraps it:
 npm run render -- settlement-641 [--generator grid|grown] [--seed <number>] [--out <file.svg>]
 ```
 
-`docs/renders/` holds each of the five towns above as `-grown`, `-grid`,
-`-scattered` (phase 6D.1) and `-rings` (the first grown generator).
+`docs/renders/` holds each of the five towns above as `-grown` and `-grid`,
+and Badanos at each of the first three steps of phase 6D.3
+(`badanos-step1-wards.svg`, `-step2-buildings`, `-step3-districts`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

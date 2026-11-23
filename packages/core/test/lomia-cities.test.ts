@@ -48,7 +48,8 @@ describe('every settlement of Lomia', () => {
     expect(people).toBe(2_935_089);
   });
 
-  it('lays out with every layout invariant holding, a path between lots everywhere, and sound day plans', { timeout: 400_000 }, () => {
+  // Every settlement laid out: phase 6D.3's wards and buildings take about 7 minutes for all of Lomia on one core.
+  it('lays out with every layout invariant holding, a path between lots everywhere, and sound day plans', { timeout: 900_000 }, () => {
     const pack = medievalPack();
     const { settlements } = lomiaWorld();
     const RESIDENTS_SAMPLED = 12;

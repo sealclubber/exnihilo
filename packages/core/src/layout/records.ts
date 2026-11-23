@@ -25,9 +25,10 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * Raised whenever a layout for the same inputs would change. Version 4 places the civic buildings a pack spreads,
  * such as wells, on streets of their own within a district instead of side by side. Version 5 adds walls with
  * gates and open places to the format, and a second generator, `grown`. Version 6 lets a river's width vary along
- * its length, and has the grown generator scatter blocks and leave streets between them.
+ * its length, and has the grown generator scatter blocks and leave streets between them. Version 7 lays the grown
+ * generator's roads first. Version 8 cuts its ground into wards along the roads, and each ward into its buildings.
  */
-export const LAYOUT_VERSION = 7;
+export const LAYOUT_VERSION = 8;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);

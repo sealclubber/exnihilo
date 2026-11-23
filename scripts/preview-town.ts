@@ -34,6 +34,7 @@ const town = layTown(brief, pack, grown, brief.seed, {
   plazaArea,
   centralLotArea: city.buildings.filter((building) => centre.has(building.districtId)).reduce((sum, building) => sum + area(building.type), 0),
   room: 1,
+  ...(brief.flags.walls && { wall: { share: brief.population < grown.wall.enclosesAllBelow ? 1 : grown.wall.share, smoothing: grown.wall.smoothing, width: grown.wall.width } }),
 });
 const took = performance.now() - started;
 const { wards, faces, streets } = town.wards;
@@ -117,6 +118,9 @@ if (process.argv.includes('--districts')) {
   for (const lane of result.lanes) parts.push(`<path d="${path(lane, false)}" fill="none" stroke="#c9a86b" stroke-width="0.5"/>`);
   fixes = `${JSON.stringify(result.fixes)}, ${((performance.now() - started2) / 1000).toFixed(2)} s`;
 }
+if (town.wall) parts.push(`<path d="${path(town.wall, true)}" fill="none" stroke="#333" stroke-width="3"/>`);
+for (const line of town.wallStreet ?? []) parts.push(`<path d="${path(line, false)}" fill="none" stroke="red" stroke-width="2"/>`);
+if (town.plaza) parts.push(`<path d="${path(town.plaza.polygon, true)}" fill="#c8b890"/>`);
 for (const face of faces) parts.push(`<path d="${path(face, true)}" fill="none" stroke="#c44" stroke-width="1.2" stroke-dasharray="4,3"/>`);
 for (const road of town.plan.roads) {
   const colour = road.kind === 'arterial' ? '#d8c9a8' : road.kind === 'bank' ? '#e0d4bb' : '#d2bd94';
