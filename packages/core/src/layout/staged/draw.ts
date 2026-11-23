@@ -12,6 +12,7 @@ const WATER = '#8d9a9c';
 const ROAD = '#e1dbd5';
 const INK = '#3f322c';
 const CASTLE = '#9a9486';
+const WARD = '#a9a79b';
 const GATE = '#d9a441';
 
 const round = (value: number) => String(Math.round(value * 10) / 10);
@@ -32,8 +33,10 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     lines.push(`<path d="${path(points, false)}" fill="none" stroke="${INK}" stroke-width="${round(width)}" stroke-linejoin="round"/>`);
     lines.push(`<path d="${path(points, false)}" fill="none" stroke="${ROAD}" stroke-width="${round(width - 1.4)}" stroke-linejoin="round"/>`);
   };
+  // Wards as plain cells; the ground between them is the street.
+  for (const ward of plan.wards) if (ward.kind === 'ordinary') lines.push(`<path d="${path(ward.polygon, true)}" fill="${WARD}" stroke="${INK}" stroke-width="0.6"/>`);
   if (plan.plaza) lines.push(`<path d="${path(plan.plaza.polygon, true)}" fill="${ROAD}" stroke="${INK}" stroke-width="1"/>`);
-  for (const street of plan.mainStreets) road(street, mainStreetWidth - 2);
+  for (const street of plan.streets) road(street.points, mainStreetWidth - 2);
   for (const highway of plan.highways) road(highway.points, highwayWidth - 2);
   if (plan.harbour) {
     for (const [from, to] of plan.harbour.piers) road([from, to], plan.harbour.pierWidth);
@@ -66,7 +69,8 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     `${plan.bridges.length} bridge${plan.bridges.length === 1 ? '' : 's'}`,
     ...(plan.river ? [`river ${Math.round(plan.river.width)} m wide, set ${Math.round(plan.river.distance)} m from the centre`] : []),
     ...(plan.astride !== undefined ? [plan.astride ? 'astride the river' : 'beside the river'] : []),
-    ...(plan.mainStreets.length > 0 ? [`${plan.mainStreets.length} main street${plan.mainStreets.length === 1 ? '' : 's'} beyond the bridges`] : []),
+    `${plan.wards.filter((ward) => ward.kind === 'ordinary').length} wards`,
+    `${plan.streets.length} main street${plan.streets.length === 1 ? '' : 's'}`,
     ...(plan.river && !plan.farBank ? ['no ground across the river'] : []),
     ...(plan.harbour ? [`${plan.harbour.kind} on the ${plan.harbour.on}`] : []),
     ...(plan.wall ? [`wall ${Math.round(2 * plan.wall.long)} by ${Math.round(2 * plan.wall.short)} m, ${plan.wall.towers.length} towers, ${plan.wall.gates.length} gates${plan.wall.farDropped ? ', closed by the river' : ''}`] : []),

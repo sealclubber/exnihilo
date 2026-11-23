@@ -469,6 +469,81 @@ const StagedSettingsSchema = z.strictObject({
     turn: z.number().positive().max(180),
   }),
   /**
+   * How far the mesh reaches. Land is taken cheapest first until there is `factor` times the ground the town's
+   * buildings need, where a metre from the nearest highway costs `highway` and a metre from the centre `centre`:
+   * `single` where at most two roads leave the centre, `several` otherwise. Smooth noise of up to `noise.size`
+   * times the radius, in patches about `noise.scale` metres across, is added. Land is looked at out to `extent`
+   * radii, on squares of which there are about `raster.across` along that span and none finer than
+   * `raster.finest` metres. Hollows narrower than twice `close` metres are filled. Ground within `fromWater.cost`
+   * metres of water is never taken, and none is kept within `fromWater.edge`.
+   */
+  ground: z.strictObject({
+    factor: z.number().min(1),
+    extent: share,
+    raster: z.strictObject({ across: wholeNumber.min(20), finest: metres }),
+    single: z.strictObject({ highway: z.number().nonnegative(), centre: z.number().nonnegative(), close: z.number().nonnegative() }),
+    several: z.strictObject({ highway: z.number().nonnegative(), centre: z.number().nonnegative(), close: z.number().nonnegative() }),
+    noise: z.strictObject({ size: z.number().nonnegative(), scale: metres }),
+    fromWater: z.strictObject({ cost: z.number().nonnegative(), edge: z.number().nonnegative() }),
+  }),
+  /**
+   * The mesh of wards. Seed points are scattered `spacing` times the radius apart, between `min` and `max`
+   * metres: `tries` points are thrown and one is kept if no other is within a share of the spacing drawn from
+   * `apart`. Seeds within `clearOfLines` spacings of a highway, the river or the wall are removed, and pairs are
+   * set either side of each such line, half a spacing times a draw from `pairs.offset` out, a spacing times a
+   * draw from `pairs.every` along, within `pairs.within` radii of the centre, so that the line falls on the
+   * border between cells. A seed within `tooNear` spacings of an earlier one is removed. A cell is a ward if its
+   * middle is within `keep` spacings of the ground.
+   */
+  mesh: z.strictObject({
+    spacing: share,
+    min: metres,
+    max: metres,
+    tries: wholeNumber.min(1),
+    apart: span,
+    clearOfLines: z.number().nonnegative(),
+    pairs: z.strictObject({ offset: span, every: span, within: share }),
+    tooNear: z.number().nonnegative(),
+    keep: z.number().nonnegative(),
+  }),
+  /**
+   * Main streets follow cell borders out from the highways. A border may carry one if its middle is within
+   * `edgeMargin` metres of the ground and it is at least `shortest` metres long; a border within `highwayIs`,
+   * `wallIs` or `riverIs` spacings of such a line is that line and not a street. A street starts at a corner
+   * within `startWithin` spacings of a highway and no nearer than `startsApart` spacings to a street already
+   * laid, takes the straightest way on, and stops where the turn's cosine would fall under `straightest`. One of
+   * fewer than `least` points is not kept. Each is then evened `smoothing` times, moving the corners it passes
+   * through. A town of fewer than `skipBelow` buildings has none.
+   */
+  mainStreets: z.strictObject({
+    edgeMargin: z.number().nonnegative(),
+    shortest: z.number().nonnegative(),
+    highwayIs: z.number().nonnegative(),
+    wallIs: z.number().nonnegative(),
+    riverIs: z.number().nonnegative(),
+    startWithin: z.number().nonnegative(),
+    startsApart: z.number().nonnegative(),
+    straightest: z.number().min(-1).max(1),
+    least: wholeNumber.min(2),
+    smoothing: wholeNumber,
+    skipBelow: wholeNumber,
+  }),
+  /**
+   * A ward is its cell less everything laid before, moved in by half a ward border. A highway takes its width and
+   * `highwayVerge` metres either side, a main street its width and `mainStreetVerge`; water takes `fromWater`
+   * metres beyond its edge, the wall `fromWall` either side, the plaza `roundPlaza` and the castle `roundCastle`
+   * beyond half a border. A piece under `least` square metres is no ward.
+   */
+  wards: z.strictObject({
+    highwayVerge: z.number().nonnegative(),
+    mainStreetVerge: z.number().nonnegative(),
+    fromWater: z.number().nonnegative(),
+    fromWall: z.number().nonnegative(),
+    roundPlaza: z.number().nonnegative(),
+    roundCastle: z.number().nonnegative(),
+    least: z.number().nonnegative(),
+  }),
+  /**
    * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
    * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,
    * `piers.length` long and `piers.width` wide, the outermost `piers.first` of the quay's length from its ends;

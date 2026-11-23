@@ -507,13 +507,42 @@ and each stage draws on streams named `staged-…`. So far:
    leave the centre, inside the wall and clear of roads and water. Both are
    sized per building between a least and a most, and never more than a
    share of the ground the town needs, so that a village's are small.
+6. **Ground** (`staged/ground.ts`). How far the mesh needs to reach: land is
+   taken cheapest first until there is 2.6 times the ground the buildings
+   need, where cost is distance from the nearest highway and from the
+   centre, with smooth noise. One road draws the town out along it; several
+   make it round. It is held as squares and never as an outline, and takes
+   nothing across a river without a bridge. The cost is kept as the growth
+   rank of what stands there.
+7. **The mesh** (`staged/mesh.ts`). Seed points are scattered over the
+   ground about 0.6 of the radius apart; those near a highway, the river or
+   the wall are replaced by pairs either side of it, so that the line falls
+   on the border between cells. The castle and the plaza each get a seed
+   with one mirrored in every side, which makes each a cell. The Voronoi
+   diagram of the seeds is the mesh: cells that share their corners.
+8. **Main streets** (`staged/streets.ts`). From mesh corners on a highway
+   each follows cell borders outward, taking the straightest way on and
+   stopping where the turn is too sharp, then is evened by moving the
+   corners it passes through, so the wards beside it bend with it. None
+   crosses water or the wall.
+9. **Wards** (`staged/wards.ts`). A ward is its cell less the highways, main
+   streets, water, wall and special wards, moved in by half a ward border;
+   the plaza and the castle are wards with exactly the shape they were
+   given. Blocks and houses are not built yet.
+
+Polygon arithmetic (taking shapes out of shapes, moving outlines in, giving
+lines width) goes through `clipper2-ts`, a TypeScript port of Clipper2 with
+no dependencies, wrapped in `staged/shapes.ts`. It works on whole numbers,
+here millimetres, so the same shapes give the same answer on every machine.
+The mesh is `d3-delaunay`'s Voronoi diagram.
 
 `node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...`
 draws the plan as far as the stages go; `--as walls,plaza,citadel` draws a
-town as if its brief had those flags too. `docs/renders/*-6e-step1.svg` and
-`*-6e-step2.svg` are seven towns after each step, and
-`badanos-6e-step2-as-walled.svg` is Badanos, which the world gave no wall,
-drawn with one for comparison with the prototype.
+town as if its brief had those flags too. `docs/renders/*-6e-step1.svg`,
+`*-6e-step2.svg` and `*-6e-step3.svg` are seven towns after each step, and
+`badanos-6e-step2-as-walled.svg` and `badanos-6e-step3-as-walled.svg` are
+Badanos, which the world gave no wall, drawn with one for comparison with
+the prototype.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
@@ -531,7 +560,7 @@ npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <fi
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1`, `-6e-step2`).
+and the staged generator's plans step by step (`-6e-step1`, `-6e-step2`, `-6e-step3`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

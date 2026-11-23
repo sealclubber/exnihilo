@@ -299,6 +299,79 @@ staged:
   # roads has room, every `turn` degrees round is tried.
   castle: {perBuilding: 3.2, min: 3500, max: 14000, groundShare: 0.05, sides: 5, jitter: 0.1, offPlaza: 30, step: 15, fromWall: 12, fromWater: 15, fromRoad: 3, turn: 15}
 
+  # Ground: how far the mesh reaches. Land is taken cheapest first until
+  # there is `factor` times the ground the town's buildings need. A metre from
+  # the nearest highway costs `highway` and a metre from the centre `centre`:
+  # the `single` weights where at most two roads leave the centre, which draw
+  # the town out along its road, and `several` otherwise. Smooth noise of up
+  # to `noise.size` radii, in patches about `noise.scale` metres across, keeps
+  # the edge from being regular. Land is looked at out to `extent` radii on
+  # squares, about `raster.across` of them along that span and none finer
+  # than `raster.finest` metres. Hollows narrower than twice `close` metres
+  # are filled. Land within `fromWater.cost` metres of water is never taken,
+  # and none is kept within `fromWater.edge`.
+  ground:
+    factor: 2.6
+    extent: 2.6
+    raster: {across: 220, finest: 4}
+    single: {highway: 1.0, centre: 0.55, close: 30}
+    several: {highway: 0.6, centre: 0.8, close: 70}
+    noise: {size: 0.18, scale: 100}
+    fromWater: {cost: 10, edge: 4}
+
+  # The mesh: each of its cells is a ward. Seed points are scattered `spacing`
+  # radii apart, between `min` and `max` metres: `tries` points are thrown,
+  # and one is kept if no other is within a share of the spacing drawn from
+  # `apart`. Seeds within `clearOfLines` spacings of a highway, the river or
+  # the wall are removed, and pairs are set either side of each such line
+  # (`pairs.offset` times half a spacing out, `pairs.every` spacings along,
+  # within `pairs.within` radii of the centre), so that the line falls on the
+  # border between cells. A seed within `tooNear` spacings of an earlier one
+  # is removed. A cell is a ward if its middle is within `keep` spacings of
+  # the ground.
+  mesh:
+    spacing: 0.62
+    min: 120
+    max: 300
+    tries: 6000
+    apart: {min: 0.85, max: 1.0}
+    clearOfLines: 0.42
+    pairs: {offset: {min: 0.85, max: 1.1}, every: {min: 0.8, max: 1.25}, within: 2.6}
+    tooNear: 0.45
+    keep: 0.25
+
+  # Main streets follow cell borders out from the highways. A border can
+  # carry one if its middle is within `edgeMargin` metres of the ground and
+  # it is at least `shortest` metres long; a border within `highwayIs`,
+  # `wallIs` or `riverIs` spacings of such a line is that line and no street.
+  # A street starts at a corner within `startWithin` spacings of a highway,
+  # no nearer than `startsApart` spacings to a street already laid; it takes
+  # the straightest way on and stops where the turn's cosine would fall
+  # under `straightest`. One with fewer than `least` points is not kept. Each
+  # is evened `smoothing` times, moving the corners it passes through, so the
+  # wards beside it bend with it. A town of fewer than `skipBelow` buildings
+  # has none.
+  mainStreets:
+    edgeMargin: 20
+    shortest: 25
+    highwayIs: 0.2
+    wallIs: 0.2
+    riverIs: 0.18
+    startWithin: 0.3
+    startsApart: 0.9
+    straightest: 0.6
+    least: 3
+    smoothing: 2
+    skipBelow: 60
+
+  # A ward is its cell less everything laid before it, moved in by half a
+  # ward border. A highway takes its width and `highwayVerge` metres either
+  # side; a main street its width and `mainStreetVerge`. Water takes
+  # `fromWater` metres beyond its edge and the wall `fromWall` either side;
+  # the plaza and the castle take `roundPlaza` and `roundCastle` metres
+  # beyond half a border. A piece under `least` square metres is no ward.
+  wards: {highwayVerge: 1.5, mainStreetVerge: 0.5, fromWater: 7, fromWall: 6.5, roundPlaza: 1, roundCastle: 3, least: 500}
+
   # The harbour. A sea route is a highway from the centre that ends at the
   # quay, and its exit is at the end of the quay: ships leave by water.
   # On a coast the quay is a strip along the shore with piers square to it,

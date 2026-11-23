@@ -34,6 +34,7 @@ with the grid laying every town out). Run a single test file with
 | `npm run test:viewer` | about 1 minute |
 | `packages/core/test/staged-roads.test.ts` (stages 1 to 3 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-wall.test.ts` (stages 4 and 5 for all 682 settlements) | about 10 seconds |
+| `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -42,7 +43,7 @@ the server. Run `npm run check` before calling any task done.
 
 | Path | Holds | May depend on |
 | --- | --- | --- |
-| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generators, daily life, outsiders, the avatar | Nothing in this repository, and `d3-delaunay` |
+| `packages/core` | World format, AFMG importer, setting pack format, city generator, layout format and generators, daily life, outsiders, the avatar | Nothing in this repository; `d3-delaunay` and `clipper2-ts` |
 | `packages/server` | SQLite storage, pack loader, commands, world clock, the avatar's state, HTTP API | `core` |
 | `packages/client` | Browser viewer, city inspector and living town map | `core`, for types only |
 | `packs/medieval` | The first setting pack, as YAML | n/a |
@@ -208,6 +209,12 @@ centre, x east and y south; bearings are degrees clockwise from north.
   wall, special wards, the mesh, and so on. A later stage never moves what an
   earlier one placed, and nothing is repaired afterwards. Each stage is a
   pure function of the stages before it.
+- **One shared mesh.** After stage 7 the town is a mesh of cells with shared
+  corners; move a corner and every cell that has it moves. Only main streets
+  move corners, and nothing after them does.
+- **Polygon arithmetic goes through `staged/shapes.ts`**, which wraps
+  `clipper2-ts`. Do not call the library elsewhere, and do not call it once
+  per house: rows of rectangles in a block are tested directly.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
 - **It is not a layout yet.** Until its last stage is built it makes a plan
