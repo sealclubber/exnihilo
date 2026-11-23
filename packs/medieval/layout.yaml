@@ -4,8 +4,8 @@
 #
 # Two generators read this file. The `grid` is deliberately regular: a street
 # grid trimmed to a compact outline, with lots along the streets. The `grown`
-# one scatters blocks and lets the streets be the gaps between them; water,
-# walls and the plaza are its alone.
+# one lays roads first, cuts the ground between them into wards and the wards
+# into buildings; water, walls and the plaza are its alone.
 
 # Which generator lays towns out: `grid`, or `grown`, whose own numbers are
 # in the `grown` block at the end of this file. The numbers before that block
@@ -151,93 +151,123 @@ watersideReach: 40
 # Town walls have no geometry yet; gatehouses are ordinary lots.
 atExits: [gatehouse]
 
-# --- The grown generator (phases 6D to 6D.2) -------------------------------
-# Road first. The brief's routes are laid as highways before anything else;
-# arterials branch off them; ground is taken nearest the roads first, so the
-# town stretches along its road; blocks are seeded as brickwork in the grain of
-# the nearest road, and the streets are the gaps between them. EVERY NUMBER IS
-# A PLACEHOLDER, to be tuned by eye against the renders in docs/renders. The
-# starting values are the prototype's in docs/prototypes/proto_road.py.
+# --- The grown generator (phase 6D.3) -------------------------------------
+# Roads, then wards, then buildings. The brief's routes are laid as highways
+# before anything else and arterials branch off them; the town takes the
+# ground nearest its roads first, as much as its buildings need; the roads cut
+# that ground into wards; and each ward is cut in two again and again until
+# the pieces are its buildings. EVERY NUMBER IS A PLACEHOLDER, to be tuned by
+# eye against the renders in docs/renders. The starting values are the
+# prototype's, docs/prototypes/proto_combined.py.
 grown:
+  # Roadway widths. A highway carries a route; an arterial branches off one,
+  # as does the road to a bridge; a street runs along a river bank or splits a
+  # ward; an alley is the gap a cut leaves between buildings, with a lane
+  # down it.
+  widths: {highway: 10, arterial: 7, street: 4.5, alley: 2.4, bridge: 10}
   # How far a highway strays from a straight line; exits within `through`
   # degrees of opposite make one road through the centre; how far a highway
-  # runs on past the town before its exit.
-  highways: {wander: 55, through: 50, beyond: 200}
+  # runs on past the town before its exit; how far either side of a river it
+  # leaves its line to meet a bridge square to the bank.
+  highways: {wander: 55, through: 50, beyond: 200, approach: 85}
   # Arterials branch off each highway, alternating sides, `spacing` metres
-  # apart, along a stretch `span` times the square root of the town's ground
-  # either side of the centre. Near the centre one is `reach` times that root
-  # long, `fall` metres shorter for each metre further out, times a share drawn
-  # from `spread`. `turn` (degrees) and `lean` set how far from a right angle
-  # it leaves; `wander` how far it strays; `width` its roadway.
+  # apart, along a stretch `span` times the town's radius either side of the
+  # centre. One is `reach` times the radius long, less `fall` for each metre
+  # along the highway from the centre, times a share drawn from `spread`. It
+  # leaves square, leaning along the highway by about `lean`, and strays by
+  # `wander` metres; it stops `bank` metres from water. Once the ground is
+  # known it is cut back to `trim` metres past it, and dropped if shorter than
+  # `shortest`.
   arterials:
-    width: 8
-    spacing: {min: 120, max: 210}
-    span: 0.5
-    reach: 0.5
-    fall: 0.75
+    spacing: {min: 130, max: 220}
+    span: 1.25
+    reach: 1.5
+    fall: 0.7
     spread: {min: 0.75, max: 1.1}
-    turn: 20
     lean: 0.3
-    wander: 40
-    shortest: 60
-  # The order ground is built on: distance from the nearest highway, plus
-  # `along` per metre along it from the centre, plus `arterial` per metre from
-  # the nearest arterial (up to `arterialCap`), plus slow noise. Ground across
-  # the water from its nearest road costs `water` more; a block on a highway
-  # costs `frontage` less, so the road's frontage is built on first.
-  ground: {along: 0.45, arterial: 0.8, arterialCap: 200, noise: {depth: 30, length: 150}, water: 400, frontage: 120}
-  # Patches share a grain taken from their nearest road, turned by up to about
-  # `turn` degrees.
-  patches: {spacing: 200, turn: 10}
-  # Blocks are seeded as brickwork: rows `depth` apart, seeds `length` apart
-  # along a row, both varied per patch; every other row moved half a length.
-  # The oldest blocks are `oldScale` times the size of the newest.
-  blocks:
-    depth: 46
-    length: 105
-    depthSpread: {min: 0.85, max: 1.3}
-    lengthSpread: {min: 0.75, max: 1.35}
-    rowShift: 0.15
-    jitter: {along: 0.16, across: 0.1}
-    oldScale: 0.8
-  # No block seed within `clear` of a road or `waterClear` of water; pairs
-  # `offset` either side of each road, `spacing` apart, so roads fall between
-  # blocks. Seeds nearer than `nearest` to an earlier one are dropped.
-  roadSeeds: {clear: 20, waterClear: 22, offset: 23, spacing: {min: 50, max: 90}, nearest: 14}
-  # Two streets at a junction within `through` degrees of straight are one
-  # street passing through; junctions are pulled `pull` of the way toward the
-  # line of that street over `rounds` rounds. Streets shorter than `shortest`
-  # are closed up; one passing fewer than `laneBelow` junctions is a lane. A
-  # block's corners are cut back `corner` metres.
-  streets: {through: 40, rounds: 10, pull: 0.45, shortest: 7, laneBelow: 2, corner: 1.5}
-  # Clear ground between a roadway and the lots along it.
-  roadside: 0.4
-  # The share of the town's ground, streets included, that lots cover.
-  lotShare: 0.6
-  # How far beyond the last junction of its highway an exit stands.
-  exitReach: 70
-  # A block joins the nearest district, crossing a highway, an arterial or the
-  # water counting as so many metres more.
+    wander: 35
+    bank: 11
+    trim: 5
+    shortest: 25
+  # Bridges stand square to the bank, ending `landing` metres beyond the
+  # water. A town of more than `secondAbove` residents has a second bridge
+  # `apart` metres along the river from the first, with an arterial of its
+  # own that strays `wander` metres and runs `beyond` times the town's radius
+  # past the far end.
+  bridges: {landing: 7, secondAbove: 5000, apart: 260, wander: 20, beyond: 0.75}
+  # A street follows each bank of a river, this far out from the water.
+  quays: {offset: 8}
+  # The ground the town needs is its buildings' lot area over `fill`, times
+  # `margin`. It is taken cheapest first on a grid of `cell` metres. Cost is
+  # the distance from the nearest highway, plus `along` per metre along it
+  # from the centre, plus `arterial` per metre from the nearest arterial (up
+  # to `arterialCap`), plus smooth noise; ground across the water from its
+  # highway costs `water` more, and none within `wet` metres of the water is
+  # taken. The outline closes gaps of `close` metres and opens necks of
+  # `open`; nothing is built within `waterClear` metres of the water.
+  ground:
+    fill: 0.8
+    margin: 1.12
+    cell: 12
+    along: 0.45
+    arterial: 0.8
+    arterialCap: 200
+    noise: {depth: 70, length: 72}
+    water: 400
+    wet: 4
+    close: 28
+    open: 10
+    waterClear: 6
+  # A ward larger than a limit drawn from `limit` square metres is split by a
+  # street across its long axis, `at` of the way along, turned by about
+  # `turn` degrees and bent aside by `bend` of its width, at most `rounds`
+  # times over. A piece under `least` square metres is no ward.
+  wards: {limit: {min: 6500, max: 15000}, at: {min: 0.36, max: 0.64}, turn: 11.5, bend: 0.07, rounds: 8, least: 250}
+  # Buildings. Each ward is cut in two again and again across its long axis.
+  # A cut leaves an alley while the piece is over its building size times
+  # `alleyAbove` divided by a small draw; cuts are square once a piece is
+  # under `squareBelow` building sizes; finished pieces come out at about
+  # `pieceShare` of the building size. Each kind of district has a character:
+  # how far cuts wander from square and the middle (`gridChaos`, drawn per
+  # ward), how much sizes vary (`sizeChaos`), and the chance a piece is left
+  # open. Building size varies from ward to ward by `vary`. Buildings over
+  # `big` times the building size are cut for first, a half within `bigMatch`
+  # of one's size going to it. The last `loose.share` of wards by growth are
+  # loose: more pieces left open toward the edge, and buildings drawn in from
+  # their lots by `loose.pull` metres.
+  buildings:
+    alleyAbove: 1
+    squareBelow: 4
+    pieceShare: 0.7
+    character:
+      default: {gridChaos: {min: 0.5, max: 0.8}, sizeChaos: 0.7, open: 0.02}
+      centre: {gridChaos: {min: 0.6, max: 0.9}, sizeChaos: 0.6, open: 0.02}
+      upper: {gridChaos: {min: 0.3, max: 0.5}, sizeChaos: 0.7, open: 0.06}
+      outskirts: {gridChaos: {min: 0.5, max: 0.8}, sizeChaos: 0.7, open: 0.05}
+      shanty: {gridChaos: {min: 0.7, max: 1}, sizeChaos: 0.8, open: 0.01}
+    vary: {min: 0.75, max: 1.3}
+    big: 3
+    bigMatch: 0.3
+    loose: {share: 0.2, open: {min: 0.22, max: 0.47}, pull: {min: 0.6, max: 2.2}}
+  # A ward joins the district whose seed ward is nearest, crossing a highway,
+  # an arterial or the water counting as so many metres more; over `rounds`
+  # rounds each district's reach is set so its ground matches its buildings.
   districts:
-    penalty: {highway: 300, arterial: 220, water: 600}
-  # At most this many blocks inside the town are left as greens, with no lots.
-  greens: 2
-  # Wells and public ovens stand at least this far from another of their
-  # type, where the district has the room.
-  civicSpacing: 70
+    penalty: {highway: 150, arterial: 110, water: 400}
+    rounds: 12
   # The plaza of a town flagged for one: square metres for each resident,
   # between a least and a most, and the building whose lot it is.
   plaza: {perResident: 0.09, min: 1200, max: 4500, building: market-square}
-  # The wall of a town flagged for one: its width, the clear strip inside it,
-  # the share of the town's ground it encloses (the oldest), the number of
-  # residents below which it encloses everything, how many metres its line is
-  # smoothed over, and the building at each gate.
-  wall: {width: 3, clearStrip: 4, share: 0.75, enclosesAllBelow: 1000, smoothing: 60, gatehouse: gatehouse}
+  # The wall of a town flagged for one: its width, the share of the town's
+  # ground it encloses (the oldest), the number of residents below which it
+  # encloses everything, how many metres its line is smoothed over, and the
+  # building at each gate.
+  wall: {width: 3, share: 0.75, enclosesAllBelow: 1000, smoothing: 60, gatehouse: gatehouse}
   # A river: meanders eleven widths long, swinging aside by a share of that;
   # width varying by a share along its length; the length of the pieces its
-  # line is cut into; and the size above which a town on both banks has a
-  # second bridge.
-  river: {meanderLength: 11, meanderSwing: 0.14, widthVariation: 0.25, pieceLength: 2.5, secondBridgeAbove: 5000}
+  # line is cut into; how far from the centre it passes at the least, beyond
+  # the plaza. A coast stands as far beyond the town's oldest ground.
+  river: {meanderLength: 11, meanderSwing: 0.14, widthVariation: 0.25, pieceLength: 2.5, beside: 60}
   # The coast: broad bays and headlands, a smaller wobble on top, and the bay
   # a port's harbour stands in. Lengths are along the shore, depths across it.
   coast:
@@ -245,25 +275,3 @@ grown:
     wobble: {length: 110, depth: 9}
     harbour: {length: 320, depth: 70}
     pieceLength: 8
-  # Lots. A block is cut along its length into two rows back to back, or one
-  # where it is shallower than `rows`; the line between `split` of the way
-  # across. Rows are cut into strips across, sides askew by about `skew`
-  # metres. A strip's frontage is the type's within `frontageSpread`, then set
-  # so its area is within `area` of the pack's size, between `leastFrontage`
-  # and `widest` times the type's. A lot of `wholeBlock` square metres or more
-  # takes a block. Blocks of growth rank below `oldBelow`, and in the `filled`
-  # district kinds, are built wall to wall; elsewhere a gap follows a lot with
-  # the chance given for the kind.
-  lots:
-    rows: 30
-    split: {min: 0.44, max: 0.56}
-    skew: 0.9
-    frontageSpread: 0.3
-    leastFrontage: 4
-    widest: 3.5
-    area: {min: 0.7, max: 1.35}
-    wholeBlock: 1300
-    oldBelow: 0.45
-    filled: [centre, craft, visitors, harbour]
-    gaps: {common: 0.08, upper: 0.2, lower: 0.1, outskirts: 0.3, shanty: 0.05}
-    gapWidth: {min: 2, max: 9}

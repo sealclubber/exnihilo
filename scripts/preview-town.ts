@@ -1,18 +1,19 @@
 /**
- * Draws the fabric of a grown town before districts and lots: water, its blocks shaded by growth rank (darker is
- * older), and its streets by kind. For checking the road-first method step by step.
+ * Draws the ground plan of a grown town before its buildings: water, the town's ground, its wards shaded by growth
+ * (darker is older), the faces they stand on, and its roads at their widths. For checking the method of phase 6D.3
+ * step by step.
  *
- * Usage: node scripts/preview-town.ts <settlement name> <out.svg> [--lines]
- * With --lines the planned road lines are drawn over it in red.
+ * Usage: node scripts/preview-town.ts <settlement name> <out.svg>
  */
 import { writeFileSync } from 'node:fs';
 import { generateCity, lotSizeOf, riverOutline } from '../packages/core/src/index.ts';
+import { interiorPoint } from '../packages/core/src/layout/cutting.ts';
 import { layTown } from '../packages/core/src/layout/town.ts';
 import type { Point } from '../packages/core/src/schema.ts';
 import { lomiaWorld, medievalPack } from '../packages/core/test/pack.ts';
 
 const [name, out] = process.argv.slice(2);
-if (!name || !out) throw new Error('Usage: node scripts/preview-town.ts <settlement name> <out.svg> [--lines]');
+if (!name || !out) throw new Error('Usage: node scripts/preview-town.ts <settlement name> <out.svg>');
 const pack = medievalPack();
 const grown = pack.layout.grown!;
 const brief = lomiaWorld().settlements.find((entry) => entry.name === name)!;
@@ -26,38 +27,30 @@ const started = performance.now();
 const town = layTown(brief, pack, grown, brief.seed, {
   lotArea: city.buildings.filter((building) => building !== plaza).reduce((sum, building) => sum + area(building.type), 0),
   plazaArea,
-  gatehouses: brief.flags.walls ? city.buildings.filter((building) => building.type === grown.wall.gatehouse).length : 0,
-  enclosesAll: brief.population < grown.wall.enclosesAllBelow,
-  room: 1,
   centralLotArea: city.buildings.filter((building) => centre.has(building.districtId)).reduce((sum, building) => sum + area(building.type), 0),
+  room: 1,
 });
 const took = performance.now() - started;
-const blocks = town.ground.map((id) => ({ id, polygon: town.blockOf(id), rank: town.rank.get(id)! }));
-const points = blocks.flatMap((block) => town.cells[block.id]!.corners.map((corner) => town.corners[corner]!));
-const xs = points.map((point) => point[0]);
-const ys = points.map((point) => point[1]);
-const margin = 120;
-const [minX, maxX, minY, maxY] = [Math.min(...xs) - margin, Math.max(...xs) + margin, Math.min(...ys) - margin, Math.max(...ys) + margin];
-const f = (value: number) => value.toFixed(1);
-const path = (line: readonly Point[], closed: boolean) => line.map(([x, y], at) => `${at === 0 ? 'M' : 'L'}${f(x)} ${f(y)}`).join('') + (closed ? 'Z' : '');
-const svg: string[] = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${f(minX)} ${f(minY)} ${f(maxX - minX)} ${f(maxY - minY)}" width="1500" font-family="sans-serif">`, `<rect x="${f(minX)}" y="${f(minY)}" width="${f(maxX - minX)}" height="${f(maxY - minY)}" fill="#f6f4ee"/>`];
-if (town.coast) svg.push(`<path d="${path(town.coast.polygon, true)}" fill="#a9cbe8"/>`);
-if (town.river) svg.push(`<path d="${path(riverOutline({ id: 'water-1-001', kind: 'river', centreLine: town.river.line, width: town.river.width, widths: town.river.widths }), true)}" fill="#a9cbe8"/>`);
-for (const block of blocks) {
-  if (block.polygon.length < 3) continue;
-  const shade = Math.round(150 + 80 * block.rank);
-  svg.push(`<path d="${path(block.polygon, true)}" fill="rgb(${shade},${shade - 10},${shade - 30})" stroke="#23272e" stroke-width="0.3"/>`);
+const { wards, faces, streets } = town.wards;
+const extent = 2.05 * town.radius;
+const path = (points: readonly Point[], closed: boolean) => `M${points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}${closed ? 'Z' : ''}`;
+const parts: string[] = [];
+parts.push(`<rect x="${-extent}" y="${-extent}" width="${2 * extent}" height="${2 * extent}" fill="#f6f4ee"/>`);
+for (const outline of town.ground.outlines) parts.push(`<path d="${path(outline, true)}" fill="#e2ded3"/>`);
+if (town.river) parts.push(`<path d="${path(riverOutline({ id: 'water-0-001', kind: 'river', centreLine: town.river.line, width: town.river.width, widths: town.river.widths }), true)}" fill="#a9cbe8"/>`);
+if (town.coast) parts.push(`<path d="${path(town.coast.polygon, true)}" fill="#a9cbe8"/>`);
+for (const ward of wards) {
+  const rank = town.ground.rank(town.ground.cost(interiorPoint(ward.polygon)));
+  const shade = Math.round(200 + 40 * rank);
+  parts.push(`<path d="${path(ward.polygon, true)}" fill="rgb(${shade},${shade - 10},${shade - 30})" stroke="#8a8170" stroke-width="0.6"/>`);
 }
-const colours: Record<string, string> = { highway: '#c8a060', arterial: '#d8b880', street: '#cfcac0', lane: '#e0ddd5' };
-for (const kind of ['lane', 'street', 'arterial', 'highway']) {
-  for (const edge of town.edges) {
-    if (!edge.street || edge.bridge || edge.kind !== kind) continue;
-    svg.push(`<path d="${path([town.corners[edge.a]!, town.corners[edge.b]!], false)}" stroke="${colours[kind]}" stroke-width="${f(town.widthOf(edge))}" stroke-linecap="round" fill="none"/>`);
-  }
+for (const face of faces) parts.push(`<path d="${path(face, true)}" fill="none" stroke="#c44" stroke-width="1.2" stroke-dasharray="4,3"/>`);
+for (const road of town.plan.roads) {
+  const colour = road.kind === 'arterial' ? '#d8c9a8' : road.kind === 'bank' ? '#e0d4bb' : '#d2bd94';
+  parts.push(`<path d="${path(road.points, false)}" fill="none" stroke="${colour}" stroke-width="${road.width}" stroke-opacity="0.85"/>`);
+  for (const [a, b] of road.bridges) parts.push(`<path d="${path([a, b], false)}" fill="none" stroke="#5c5548" stroke-width="${grown.widths.bridge}"/>`);
 }
-for (const edge of town.edges) if (edge.street && edge.bridge) svg.push(`<path d="${path([town.corners[edge.a]!, town.corners[edge.b]!], false)}" stroke="#9a8f7d" stroke-width="${f(town.widthOf(edge))}" fill="none"/>`);
-if (town.wallLine) svg.push(`<path d="${path(town.wallLine, true)}" stroke="#3b3530" stroke-width="2" stroke-dasharray="6 4" fill="none"/>`);
-if (process.argv.includes('--lines')) for (const road of town.plan.roads) svg.push(`<path d="${path(road.points, false)}" stroke="red" stroke-width="1.2" fill="none"/>`);
-svg.push(`<text x="${f(minX + 20)}" y="${f(minY + 40)}" font-size="28" font-weight="bold">${name}: ${blocks.length} blocks, ${town.plan.roads.length} roads, ${took.toFixed(0)} ms</text>`, '</svg>');
-writeFileSync(out, svg.join('\n'));
-console.log(`${name}: ${blocks.length} blocks, ${town.plan.roads.filter((road) => road.kind === 'arterial').length} arterials, ${town.chains.size} chains, ${took.toFixed(0)} ms`);
+for (const street of streets) parts.push(`<path d="${path(street, false)}" fill="none" stroke="#e8dcc4" stroke-width="${grown.widths.street}"/>`);
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-extent} ${-extent} ${2 * extent} ${2 * extent}" width="1400" height="1400">${parts.join('')}<text x="${-extent * 0.97}" y="${-extent * 0.93}" font-size="${extent / 40}" font-family="sans-serif">${name}: ${wards.length} wards, ${city.buildings.length} buildings, ${(took / 1000).toFixed(2)} s</text></svg>`;
+writeFileSync(out, svg);
+console.log(`${name}: ${wards.length} wards in ${faces.length} faces, ${streets.length} ward streets, ${town.plan.roads.length} roads, ${(took / 1000).toFixed(2)} s`);
