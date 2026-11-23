@@ -30,14 +30,12 @@ with the grid laying every town out). Run a single test file with
 
 | Task | Time |
 | --- | --- |
-| `npm run check` (type-check and every test) | about 2.6 minutes |
+| `npm run check` (type-check and every test) | about 3.5 minutes |
 | `npm run test:viewer` | about 1 minute |
 | `packages/core/test/staged-roads.test.ts` (stages 1 to 3 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-wall.test.ts` (stages 4 and 5 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
-| `packages/core/test/staged-houses.test.ts` (blocks and rows for all 682 settlements) | about 85 seconds |
-| `packages/core/test/staged-landmarks.test.ts` (reservations for all 682 settlements) | about 60 seconds |
-| `packages/core/test/staged-districts.test.ts` (districts and selection for all 682 settlements) | about 90 seconds |
+| `packages/core/test/staged-town.test.ts` (blocks, houses, landmarks, districts and selection for all 682 settlements, planned once) | about 2.5 minutes |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
