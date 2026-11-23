@@ -22,6 +22,8 @@ export interface Ward {
   kind: 'ordinary' | 'plaza' | 'castle';
   /** The seed of the cell it was cut from, which names it, and which piece of that cell it is, largest first. */
   seed: Point;
+  /** That cell, by its place in the mesh. */
+  cell: number;
   piece: number;
   polygon: Point[];
   area: number;
@@ -77,8 +79,8 @@ export function cutWards({ settings, mesh, ground, roads, streets, river, coast,
       // A town with no bridge has no ward across its river, however near the bank its ground comes.
       .filter((piece) => roads.farBank || !river || crossingsOfPolyline([0, 0], piece.ring[0] as Point, river.line) % 2 === 0)
       .sort((a, b) => b.area - a.area)
-      .forEach(({ ring, area }, piece) => wards.push({ kind: 'ordinary', seed, piece, polygon: ring, area, growthRank: ground.rank(polygonCentroid(ring)) }));
+      .forEach(({ ring, area }, piece) => wards.push({ kind: 'ordinary', seed, cell: cell.seed, piece, polygon: ring, area, growthRank: ground.rank(polygonCentroid(ring)) }));
   }
-  for (const ward of [plaza, castle]) if (ward) wards.push({ kind: ward.kind, seed: ward.centre, piece: 0, polygon: ward.polygon, area: ward.area, growthRank: ground.rank(ward.centre) });
+  for (const ward of [plaza, castle]) if (ward) wards.push({ kind: ward.kind, seed: ward.centre, cell: mesh.cells.findIndex((cell) => cell.special === ward.kind), piece: 0, polygon: ward.polygon, area: ward.area, growthRank: ground.rank(ward.centre) });
   return { wards, holes };
 }

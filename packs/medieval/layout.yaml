@@ -401,13 +401,14 @@ staged:
   #   court    a block whose narrow side is under `least` metres has one row
   #            right through. Otherwise a house is at most `share` of the
   #            narrow side deep, so that a courtyard always remains.
-  #   wing     with this `chance` a house at least `bodyLeast` wide in a
-  #            courtyard block has a rear wing at one end, making an L:
-  #            `width` of the house's width and `depth` metres deep.
-  #   passage  with this `chance` a courtyard block has one passage `width`
-  #            metres wide through a row, on an edge at least `edgeLeast`
-  #            long, `after` of the way along it, and `depth` times as deep
-  #            as the row.
+  #   wing     a house at least `bodyLeast` wide in a courtyard block may
+  #            have a rear wing at one end, making an L: `width` of the
+  #            house's width and `depth` metres deep. How often is part of
+  #            its ward's character (below).
+  #   passage  a courtyard block may have one passage `width` metres wide
+  #            through a row, on an edge at least `edgeLeast` long, `after`
+  #            of the way along it, and `depth` times as deep as the row.
+  #            How often is part of its ward's character.
   # A house lies `inset` metres inside its block and keeps `gap` metres from
   # any other house or passage. One that does not fit is tried `setBack`
   # metres back from the edge, then narrower or shallower, but never under
@@ -422,8 +423,8 @@ staged:
     width: {median: 12.5, spread: 0.33, min: 6.5, max: 30}
     depth: {min: 10, max: 14, vary: {min: 0.9, max: 1.12}}
     court: {least: 26, share: 0.34}
-    wing: {chance: 0.5, bodyLeast: 10, width: {min: 0.4, max: 0.6}, depth: {min: 4, max: 8}}
-    passage: {chance: 0.35, width: 3.6, after: 0.35, edgeLeast: 40, depth: 1.15}
+    wing: {bodyLeast: 10, width: {min: 0.4, max: 0.6}, depth: {min: 4, max: 8}}
+    passage: {width: 3.6, after: 0.35, edgeLeast: 40, depth: 1.15}
     inset: 0.25
     gap: 0.3
     setBack: 1.2
@@ -485,7 +486,9 @@ staged:
     # Which blocks can be reserved: of an area within `area` square metres, at
     # least `long` by `short` metres, in a ward whose growth rank is within
     # the inner `inner` of the town's wards, and `apart` metres from any other
-    # reserved block. Up to `jitter` metres of chance is added to the distance
+    # reserved block. Where the town has districts, a landmark stands in its
+    # own district instead, among the innermost blocks that have room for
+    # `within` of the district's buildings: never out in the empty fringe. Up to `jitter` metres of chance is added to the distance
     # that ranks them. A footprint is tried at each of `scales` in turn until
     # it fits whole, `margin` metres inside the block, and is not built under
     # `leastArea` square metres.
@@ -494,11 +497,74 @@ staged:
       long: 42
       short: 30
       inner: 0.45
+      within: 0.9
       apart: 90
       jitter: 12
       scales: [1, 0.88, 0.76, 0.64, 0.52]
       margin: 1
       leastArea: 120
+
+  # Districts are groups of wards. The city's districts are grown over the
+  # mesh, each from a seed ward.
+  #   perHouse   a ward's room for houses is its area over this many square
+  #              metres times the scale of its district's houses.
+  #   town       the town proper is the innermost wards that hold this many
+  #              times its buildings; `bands` are shares of their ranking by
+  #              growth, innermost first, in which a district of each
+  #              placement (districts.yaml) looks for its seed. A waterside
+  #              district starts at the ward nearest the quay or the water.
+  #   barriers   districts grow over neighbouring wards, nearest first.
+  #              Crossing a highway, a main street, the river (at a bridge)
+  #              or the wall counts as this many metres more, so those
+  #              become the borders between districts.
+  #   inward     a ward's growth rank counts this many times in the order
+  #              wards are claimed, so that districts fill the inner ground
+  #              first and compete for it.
+  #   room       a district stops growing when its wards have room for this
+  #              many times its buildings, by placement; `roomDefault` for a
+  #              placement not listed. The wards left over then go to
+  #              whichever district is nearest, so that no ward within the
+  #              town is empty and the town fades out at its edge.
+  #              (sim-6e.md says about 1.4 for every district; a centre with
+  #              that much room would be thinned like a suburb.)
+  districts:
+    perHouse: 285
+    inward: 1
+    town: 1.3
+    bands: {centre: [0, 0.3], middle: [0.3, 0.75], edge: [0.75, 1], waterside: [0, 1]}
+    room: {centre: 1.2, middle: 1.25, waterside: 1.25, edge: 1.4}
+    roomDefault: 1.4
+    barriers: {highway: 160, mainStreet: 90, river: 350, wall: 220}
+
+  # Ward character, by the kind of district a ward belongs to. FOR REVIEW:
+  # these are placeholders. `scale` multiplies the size of houses and blocks:
+  # a poor quarter is small and tight, a rich one large and open. `blocks`
+  # multiplies block size alone: under 1 means more lanes. `wing` and
+  # `passage` are the chances of a rear wing and of a courtyard passage.
+  # `default` is for kinds not listed and for wards that are in no district.
+  character:
+    default: {scale: 1, blocks: 1, wing: 0.5, passage: 0.35}
+    kinds:
+      centre: {scale: 1.05, wing: 0.55}
+      visitors: {scale: 1.15, wing: 0.6, passage: 0.5}
+      craft: {scale: 0.95, passage: 0.45}
+      common: {scale: 0.85, blocks: 0.9, wing: 0.4}
+      upper: {scale: 1.45, blocks: 1.15, wing: 0.7, passage: 0.25}
+      lower: {scale: 0.72, blocks: 0.85, wing: 0.3}
+      outskirts: {scale: 0.9, wing: 0.35, passage: 0.2}
+      harbour: {scale: 0.9, wing: 0.4}
+      shanty: {scale: 0.62, blocks: 0.8, wing: 0.15, passage: 0.2}
+
+  # Choosing the town's houses: more are made than it has, and each district
+  # keeps exactly its own number. A house is scored by the growth rank of its
+  # ground. The innermost `solid` of a district's count are always kept;
+  # beyond them a score is raised by its excess times a draw from an
+  # exponential of mean `luck`, so that further out keeping a house is more
+  # and more a matter of chance. A house inside the wall has its score
+  # multiplied by `insideWall` and is not left to chance. If the whole town
+  # has too few houses, ground is taken again `moreGround` times as large,
+  # at most `tries` times; that is the generator's only loop.
+  selection: {solid: 0.62, luck: 1.4, insideWall: 0.2, moreGround: 1.5, tries: 3}
 
   # The harbour. A sea route is a highway from the centre that ends at the
   # quay, and its exit is at the end of the quay: ships leave by water.

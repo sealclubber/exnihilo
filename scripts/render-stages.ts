@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateCity } from '../packages/core/src/index.ts';
 import { drawPlanSvg } from '../packages/core/src/layout/staged/draw.ts';
-import { landmarksOf, planTown, stagedSettings } from '../packages/core/src/layout/staged/plan.ts';
+import { planTown, stagedSettings, townInput } from '../packages/core/src/layout/staged/plan.ts';
 import { lomiaWorld, medievalPack } from '../packages/core/test/pack.ts';
 
 const [out, suffix, ...rest] = process.argv.slice(2);
@@ -24,8 +24,8 @@ for (const name of names) {
   // With `--as`, the city too is the one the flagged brief would have.
   const city = generateCity(brief, pack);
   const started = performance.now();
-  const plan = planTown(brief, city.buildings.length, pack, brief.seed, landmarksOf(city.buildings, pack));
+  const plan = planTown(brief, townInput(city, pack), pack);
   const took = performance.now() - started;
   writeFileSync(join(out, `${name.toLowerCase()}-${suffix}.svg`), drawPlanSvg(plan, brief, stagedSettings(pack).widths.highway, stagedSettings(pack).widths.mainStreet, stagedSettings(pack).widths.wardBorder));
-  console.log(`${name}: ${plan.highways.length} highways, ${plan.bridges.length} bridges, ${plan.wards.length} wards, ${plan.blocks.length} blocks, ${plan.houses.length} houses for ${plan.buildings} buildings, ${Math.round(took)} ms${plan.notes.length ? ` · ${plan.notes.join('; ')}` : ''}`);
+  console.log(`${name}: ${plan.highways.length} highways, ${plan.bridges.length} bridges, ${plan.wards.length} wards, ${plan.blocks.length} blocks, ${plan.houses.length} houses for ${plan.buildings} buildings, ${plan.selection.district.filter((of) => of !== undefined).length} kept, ${plan.selection.borrowed.reduce((a, b) => a + b, 0)} borrowed, ${plan.selection.moved} blocks moved, ${plan.moreGround} more ground, ${Math.round(took)} ms${plan.notes.length ? ` · ${plan.notes.join('; ')}` : ''}`);
 }

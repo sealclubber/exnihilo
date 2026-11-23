@@ -15,7 +15,8 @@ const ROAD = '#e1dbd5';
 const INK = '#3f322c';
 const CASTLE = '#9a9486';
 const WARD = '#a9a79b';
-const HOUSE = '#6f6485';
+/** A tint for each district in turn, as the prototype drew them. */
+const DISTRICTS = ['#6f6485', '#5c7688', '#666a7e', '#806a7c', '#5f8079', '#73708f', '#7a7868', '#8a6f63', '#5d6d5c', '#84789a'];
 const LANDMARK = '#3d3d3d';
 const GATE = '#d9a441';
 
@@ -41,12 +42,16 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     // Wards as plain cells; the ground between them is the street.
     for (const ward of plan.wards) if (ward.kind === 'ordinary') lines.push(`<path d="${path(ward.polygon, true)}" fill="${WARD}" stroke="${INK}" stroke-width="0.6"/>`);
   } else {
-    // The ground between blocks is street; the ground within them, behind the houses, is courtyard.
-    const street = plan.wards.filter((ward) => ward.kind === 'ordinary').flatMap((ward) => grown([ward.polygon], wardBorder / 2 + 0.6).rings);
+    // Streets are found, not made: the ground between blocks wherever a kept house or a landmark stands.
+    const built = new Set([...plan.houses.filter((_, index) => plan.selection.district[index] !== undefined).map((house) => house.block), ...plan.landmarks.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block]))]);
+    const street = plan.blocks.filter((_, index) => built.has(index)).flatMap((block) => grown([block.polygon], wardBorder / 2 + 0.6).rings);
     lines.push(`<path d="${street.map((ring) => path(ring, true)).join('')}" fill="${ROAD}"/>`);
-    lines.push(`<path d="${plan.blocks.map((block) => path(block.polygon, true)).join('')}" fill="${LAND}"/>`);
-    lines.push(`<path d="${plan.passages.map((passage) => path(cornersOf(passage.rect), true)).join('')}" fill="${ROAD}"/>`);
-    lines.push(`<path d="${plan.houses.map((house) => path(house.outline, true)).join('')}" fill="${HOUSE}" stroke="${INK}" stroke-width="0.45" stroke-linejoin="miter"/>`);
+    lines.push(`<path d="${plan.blocks.filter((_, index) => built.has(index)).map((block) => path(block.polygon, true)).join('')}" fill="${LAND}"/>`);
+    lines.push(`<path d="${plan.passages.filter((passage) => built.has(passage.block)).map((passage) => path(cornersOf(passage.rect), true)).join('')}" fill="${ROAD}"/>`);
+    plan.districts.forEach((_, district) => {
+      const kept = plan.houses.filter((__, index) => plan.selection.district[index] === district);
+      if (kept.length > 0) lines.push(`<path d="${kept.map((house) => path(house.outline, true)).join('')}" fill="${DISTRICTS[district % DISTRICTS.length]}" stroke="${INK}" stroke-width="0.45" stroke-linejoin="miter"/>`);
+    });
   }
   if (plan.plaza) lines.push(`<path d="${path(plan.plaza.polygon, true)}" fill="${ROAD}" stroke="${INK}" stroke-width="1"/>`);
   for (const street of plan.streets) road(street.points, mainStreetWidth - 2);
@@ -85,7 +90,7 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     ...(plan.river ? [`river ${Math.round(plan.river.width)} m wide, set ${Math.round(plan.river.distance)} m from the centre`] : []),
     ...(plan.astride !== undefined ? [plan.astride ? 'astride the river' : 'beside the river'] : []),
     `${plan.wards.filter((ward) => ward.kind === 'ordinary').length} wards`,
-    ...(plan.houses.length > 0 ? [`${plan.blocks.length.toLocaleString('en-US')} blocks`, `${plan.houses.length.toLocaleString('en-US')} houses made`, `${plan.landmarks.length} landmarks placed${plan.unplaced.length > 0 ? `, ${plan.unplaced.length} without a place` : ''}`] : []),
+    ...(plan.houses.length > 0 ? [`${plan.blocks.length.toLocaleString('en-US')} blocks`, `${plan.houses.length.toLocaleString('en-US')} houses made, ${plan.selection.district.filter((of) => of !== undefined).length.toLocaleString('en-US')} kept in ${plan.districts.length} district${plan.districts.length === 1 ? '' : 's'}`, `${plan.landmarks.length} landmarks placed${plan.unplaced.length > 0 ? `, ${plan.unplaced.length} without a place` : ''}`] : []),
     `${plan.streets.length} main street${plan.streets.length === 1 ? '' : 's'}`,
     ...(plan.river && !plan.farBank ? ['no ground across the river'] : []),
     ...(plan.harbour ? [`${plan.harbour.kind} on the ${plan.harbour.on}`] : []),

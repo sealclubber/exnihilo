@@ -552,7 +552,28 @@ and each stage draws on streams named `staged-…`. So far:
     passage; one that does not fit is made a little narrower or shallower,
     and failing that is not built and the ground is left as yard. About two
     and a half times as many houses are made as the town has buildings.
-    Choosing among them, districts and the walking network are not built
+11. **Districts** (`staged/districts.ts`), which in the order of work come
+    before blocks. The city's districts are grown over the wards: each
+    starts at a seed ward chosen by its kind's placement (the first at the
+    heart of the town, a waterside one by the quay, the rest spread through
+    their band of the town) and takes neighbouring wards, nearest and
+    innermost first. Crossing a highway, a main street, the wall or the
+    river (only at a bridge) costs extra, so those become district borders.
+    A district stops when its wards have room for its buildings and some to
+    spare, and what is left over goes to the nearest district. A district
+    sets its wards' character from the pack: how large houses and blocks
+    are, how many lanes, how often a rear wing or a passage. A landmark
+    stands in its own district, among its inner blocks.
+    **Selection** (`staged/selection.ts`). Each district keeps exactly its
+    own number of houses from its own blocks: the innermost 62% always,
+    everything inside the wall first, and beyond that by a score that luck
+    inflates with distance, so the town thins toward its edge. Wards are
+    coarse, so a district that would be short first takes whole blocks from
+    the edges of neighbours that have houses to spare; failing that it
+    borrows unkept houses from the nearest wards. If the whole town has too
+    few houses, ground is taken again half as large again, at most three
+    times: the generator's only loop, which no settlement of Lomia needs.
+    The walking network, building types and the layout format are not built
     yet.
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
@@ -570,7 +591,7 @@ The mesh is `d3-delaunay`'s Voronoi diagram.
 `node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...`
 draws the plan as far as the stages go; `--as walls,plaza,citadel` draws a
 town as if its brief had those flags too. `docs/renders/*-6e-step1.svg`,
-`*-6e-step2.svg` to `*-6e-step5.svg` are seven towns after each step, and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
+`*-6e-step2.svg` to `*-6e-step6.svg` are seven towns after each step, and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
 the prototype.
 
 `ringShare` is in every layout's summary so that a town falling back into
@@ -589,7 +610,7 @@ npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <fi
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1` to `-6e-step5`).
+and the staged generator's plans step by step (`-6e-step1` to `-6e-step6`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

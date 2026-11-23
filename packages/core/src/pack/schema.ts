@@ -583,8 +583,8 @@ const StagedSettingsSchema = z.strictObject({
     width: z.strictObject({ median: metres, spread: z.number().nonnegative(), min: metres, max: metres }),
     depth: z.strictObject({ min: metres, max: metres, vary: span }),
     court: z.strictObject({ least: metres, share: probability }),
-    wing: z.strictObject({ chance: probability, bodyLeast: metres, width: span, depth: span }),
-    passage: z.strictObject({ chance: probability, width: metres, after: probability, edgeLeast: metres, depth: share }),
+    wing: z.strictObject({ bodyLeast: metres, width: span, depth: span }),
+    passage: z.strictObject({ width: metres, after: probability, edgeLeast: metres, depth: share }),
     inset: z.number().nonnegative(),
     gap: z.number().nonnegative(),
     setBack: z.number().nonnegative(),
@@ -602,7 +602,8 @@ const StagedSettingsSchema = z.strictObject({
    * and across its width; a footprint is at most `length` by `width` metres and at most `lengthShare` and
    * `widthShare` of its block's long and narrow sides. `block` says which blocks can be reserved: of an area in
    * `area`, at least `long` by `short` metres, in a ward whose growth rank is within the inner `inner` of the
-   * town's, and `apart` metres from any other reserved block; `jitter` metres of chance are added to the
+   * town's (or, where the town has districts, among the innermost blocks of the landmark's own district that have
+   * room for `within` of its buildings), and `apart` metres from any other reserved block; `jitter` metres of chance are added to the
    * distance that ranks them. A footprint is tried at each of `scales` in turn until it fits whole, `margin`
    * metres inside its block, and is not built under `leastArea` square metres.
    */
@@ -631,6 +632,7 @@ const StagedSettingsSchema = z.strictObject({
       long: metres,
       short: metres,
       inner: probability,
+      within: z.number().positive(),
       apart: z.number().nonnegative(),
       jitter: z.number().nonnegative(),
       scales: z.array(z.number().positive().max(1)).min(1),
@@ -638,6 +640,42 @@ const StagedSettingsSchema = z.strictObject({
       leastArea: z.number().nonnegative(),
     }),
   }),
+  /**
+   * Districts on wards. A ward's room for houses is its area over `perHouse` square metres times the scale of
+   * its district's houses. Each of the city's districts starts from a seed ward chosen by its kind's placement: the wards of the
+   * town proper (the innermost that hold `town` times its buildings) are ranked by growth, and `bands` gives the
+   * share of that ranking each placement looks in; a waterside district starts nearest the water. Districts then
+   * grow over neighbouring wards, nearest first, where crossing a highway, a main street, the river or the wall
+   * adds `barriers` metres and a ward's growth rank counts `inward` times, so that inner ground is claimed first,
+   * until each has room for `room` times its buildings (by placement; `roomDefault` otherwise). The wards left
+   * over go to whichever district is nearest.
+   */
+  districts: z.strictObject({
+    perHouse: metres,
+    inward: z.number().nonnegative(),
+    town: z.number().min(1),
+    bands: z.record(z.enum(['centre', 'middle', 'edge', 'waterside']), z.tuple([probability, probability])),
+    room: z.record(z.enum(['centre', 'middle', 'edge', 'waterside']), z.number().min(1)),
+    roomDefault: z.number().min(1),
+    barriers: z.strictObject({ highway: z.number().nonnegative(), mainStreet: z.number().nonnegative(), river: z.number().nonnegative(), wall: z.number().nonnegative() }),
+  }),
+  /**
+   * Ward character, by the kind of district a ward belongs to: `scale` multiplies the size of its houses and
+   * blocks, `blocks` its blocks alone (under 1, more lanes), and `wing` and `passage` are the chances of a rear
+   * wing and of a courtyard passage. `default` is for a kind not listed and for wards in no district.
+   */
+  character: z.strictObject({
+    default: z.strictObject({ scale: share, blocks: share, wing: probability, passage: probability }),
+    kinds: z.record(id, z.strictObject({ scale: share.optional(), blocks: share.optional(), wing: probability.optional(), passage: probability.optional() })),
+  }),
+  /**
+   * Choosing the town's houses from those made. Each house is scored by the growth rank of its ground. In each
+   * district the innermost `solid` of its count are always kept; beyond them a score is raised by its excess
+   * times a draw from an exponential of mean `luck`, so that further out keeping a house is more and more a
+   * matter of chance. A house inside the wall has its score multiplied by `insideWall` and is not left to chance.
+   * Where a town has too few houses in all, ground is taken again `moreGround` times as large, up to `tries` times.
+   */
+  selection: z.strictObject({ solid: probability, luck: z.number().nonnegative(), insideWall: probability, moreGround: z.number().min(1), tries: wholeNumber }),
   /**
    * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
    * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,
@@ -1112,6 +1150,7 @@ function crossCheck(pack: SettingPack): string[] {
       if (mark.reservation === 'ward' && mark.ward === undefined) problems.push(`${where} reserves a ward, so it must say which: castle or plaza`);
       if (mark.reservation === 'block' && mark.template === undefined) problems.push(`${where} reserves a block, so it needs a template for its footprint`);
     }
+    for (const kind of Object.keys(pack.layout.staged.character.kinds)) needKind(kind, 'layout.staged.character.kinds');
     for (const [name, template] of Object.entries(marks.templates)) {
       for (const [x0, y0, x1, y1] of template.parts) if (!(x0 < x1 && y0 < y1)) problems.push(`layout.staged.landmarks.templates: "${name}" has a part whose corners are not written lowest first`);
     }

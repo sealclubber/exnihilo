@@ -37,6 +37,7 @@ with the grid laying every town out). Run a single test file with
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
 | `packages/core/test/staged-houses.test.ts` (blocks and rows for all 682 settlements) | about 85 seconds |
 | `packages/core/test/staged-landmarks.test.ts` (reservations for all 682 settlements) | about 60 seconds |
+| `packages/core/test/staged-districts.test.ts` (districts and selection for all 682 settlements) | about 90 seconds |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -228,6 +229,11 @@ centre, x east and y south; bearings are degrees clockwise from north.
   before ordinary houses are laid, and are never clipped. Which building
   types are landmarks, what each reserves and its footprint template are
   pack data (`layout.staged.landmarks`): code must not name a temple.
+- **Make too many, keep the best.** More houses are made than the town has,
+  and each district keeps exactly its own number. Counts are never met by
+  cutting, moving or remaking houses. A district is a group of wards; its
+  border may shift by whole blocks, and a house may be borrowed, but
+  nothing is generated again.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
 - **It is not a layout yet.** Until its last stage is built it makes a plan

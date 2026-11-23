@@ -36,8 +36,10 @@ describe('blocks', () => {
       plan.wards.forEach((ward, index) => expect(withBlocks.has(index), `${brief.name}: ward ${index}`).toBe(ward.kind === 'ordinary'));
       for (const block of plan.blocks) {
         expect(block.area, brief.name).toBeGreaterThan(settings.blocks.least);
-        expect(block.scale, brief.name).toBeGreaterThanOrEqual(settings.blocks.wardScale.min);
-        expect(block.scale, brief.name).toBeLessThanOrEqual(settings.blocks.wardScale.max);
+        // A ward's scale is its district's, varied a little by a draw of its own.
+        const scale = (plan.characters[block.ward] as TownPlan['characters'][number]).scale;
+        expect(block.scale, brief.name).toBeGreaterThanOrEqual(scale * settings.blocks.wardScale.min - 1e-9);
+        expect(block.scale, brief.name).toBeLessThanOrEqual(scale * settings.blocks.wardScale.max + 1e-9);
       }
     }
   });
@@ -139,7 +141,7 @@ describe('houses', () => {
     expect(open / deep).toBeGreaterThan(0.8);
     // About a third of courtyard blocks have a passage through one row.
     expect(passages / deep).toBeGreaterThan(0.2);
-    expect(passages / deep).toBeLessThan(rules.passage.chance);
+    expect(passages / deep).toBeLessThan(0.45);
   });
 
   it('vary in size within a town, the large about three times the small', () => {
@@ -165,8 +167,7 @@ describe('determinism and pack edits', () => {
     const brief = settlement(named('Badanos').brief.id);
     const raw = rawMedievalPack();
     raw.layout.staged.rows.width.median = 20;
-    raw.layout.staged.rows.wing.chance = 0;
-    raw.layout.staged.rows.passage.chance = 0;
+    for (const character of [raw.layout.staged.character.default, ...Object.values(raw.layout.staged.character.kinds) as any[]]) Object.assign(character, { wing: 0, passage: 0 });
     const wide = planTown(brief, 1825, parsePack(raw));
     expect(wide.houses.length).toBeLessThan(0.8 * named('Badanos').plan.houses.length);
     expect(wide.houses.every((house) => house.outline.length === 4)).toBe(true);

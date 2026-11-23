@@ -36,6 +36,12 @@ export interface Lane {
 export const wardKey = (ward: Pick<Ward, 'seed' | 'piece'>) => `${ward.seed[0].toFixed(2)}:${ward.seed[1].toFixed(2)}:${ward.piece}`;
 export const wardRng = (seed: number, ward: Pick<Ward, 'seed' | 'piece'>, step: string): Rng => stepRng(seed, `staged-${step}:${wardKey(ward)}`);
 
+/** How much larger or smaller than its district's a ward's houses and blocks are: every ward varies a little, by a draw of its own. */
+export function wardVariation(seed: number, ward: Pick<Ward, 'seed' | 'piece'>, settings: StagedSettings): number {
+  const rules = settings.blocks.wardScale;
+  return Math.min(Math.max(Math.exp(normal(wardRng(seed, ward, 'scale')) * rules.spread), rules.min), rules.max);
+}
+
 /** Where a line through a point crosses a polygon: the stretches of it that lie inside. */
 function chords(point: Point, way: Point, polygon: readonly Point[]): Array<[Point, Point]> {
   const hits: number[] = [];
@@ -54,14 +60,21 @@ function chords(point: Point, way: Point, polygon: readonly Point[]): Array<[Poi
   return out;
 }
 
-export function cutBlocks(wards: readonly Ward[], settings: StagedSettings, seed: number, scaleOf: (ward: Ward, index: number) => number = () => 1): { blocks: Block[]; lanes: Lane[] } {
+export function cutBlocks(
+  wards: readonly Ward[],
+  settings: StagedSettings,
+  seed: number,
+  /** A ward's character: how large its houses and blocks are, and how large its blocks alone. */
+  characterOf: (ward: Ward, index: number) => { scale: number; blocks: number } = () => ({ scale: 1, blocks: 1 }),
+): { blocks: Block[]; lanes: Lane[] } {
   const rules = settings.blocks;
   const blocks: Block[] = [];
   const lanes: Lane[] = [];
   wards.forEach((ward, index) => {
     if (ward.kind !== 'ordinary') return;
     const rng = wardRng(seed, ward, 'blocks');
-    const scale = scaleOf(ward, index) * Math.min(Math.max(Math.exp(normal(rng) * rules.wardScale.spread), rules.wardScale.min), rules.wardScale.max);
+    const character = characterOf(ward, index);
+    const scale = character.scale * wardVariation(seed, ward, settings);
     const split = (polygon: Point[], limit: number) => {
       const size = polygonArea(polygon);
       if (size < limit) {
@@ -88,7 +101,7 @@ export function cutBlocks(wards: readonly Ward[], settings: StagedSettings, seed
       for (const line of chords(through, way, polygon)) lanes.push({ ward: index, line });
       for (const piece of pieces) split(piece, limit * drift);
     };
-    split(ward.polygon, drawFrom(rng, rules.area) * scale);
+    split(ward.polygon, drawFrom(rng, rules.area) * scale * character.blocks);
   });
   return { blocks, lanes };
 }

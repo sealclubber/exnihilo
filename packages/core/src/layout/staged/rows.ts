@@ -62,7 +62,7 @@ export function layRows(
   seed: number,
   /** The blocks given to landmarks: no row is laid in them. */
   reserved: ReadonlySet<number> = new Set(),
-  characterOf: (ward: Ward, index: number) => RowCharacter = () => ({ wing: settings.rows.wing.chance, passage: settings.rows.passage.chance }),
+  characterOf: (ward: Ward, index: number) => RowCharacter = () => settings.character.default,
 ): { houses: House[]; passages: Passage[] } {
   const rules = settings.rows;
   const houses: House[] = [];

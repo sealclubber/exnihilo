@@ -10,7 +10,9 @@
 import { stepRng } from '../../city/random.ts';
 import type { SettingPack, StagedSettings } from '../../pack/schema.ts';
 import type { SettlementBrief } from '../../schema.ts';
-import { type Block, type Lane, cutBlocks } from './blocks.ts';
+import { type Block, type Lane, cutBlocks, wardVariation } from './blocks.ts';
+import { polygonCentroid } from '../geometry.ts';
+import { type Character, type DistrictPlan, type Placement, type TownDistrict, characterOf, growDistricts, roomIn } from './districts.ts';
 import { type Ground, takeGround } from './ground.ts';
 import { type RoadPlan, planRoads } from './highways.ts';
 import { type Mesh, makeMesh } from './mesh.ts';
@@ -18,6 +20,7 @@ import { type MainStreet, layMainStreets } from './streets.ts';
 import { type Ward, cutWards } from './wards.ts';
 import { type LandmarkBuilding, type PlacedLandmark, reserve } from './landmarks.ts';
 import { type House, type Passage, layRows } from './rows.ts';
+import { type Selection, chooseHouses } from './selection.ts';
 import { type SpecialWard, planSpecialWards, plazaRadius } from './special.ts';
 import { type Wall, planWall } from './wall.ts';
 import { type Coast, type River, makeCoast, makeRiver } from './water.ts';
@@ -58,6 +61,21 @@ export interface TownPlan extends WardPlan {
   /** Every house made: more than the town has. */
   houses: House[];
   passages: Passage[];
+  /** The city's districts as given, which wards each has, and each ward's character. */
+  districts: TownDistrict[];
+  districtPlan: DistrictPlan;
+  characters: Character[];
+  /** Which houses the town keeps, and for which district. */
+  selection: Selection;
+  /** How many times more ground was taken because the town had too few houses. */
+  moreGround: number;
+}
+
+/** What the staged generator reads of a city: how many buildings, its districts, and which buildings are landmarks. */
+export interface TownInput {
+  buildings: number;
+  districts: TownDistrict[];
+  landmarks: LandmarkBuilding[];
 }
 
 export class StagedLayoutError extends Error {}
@@ -98,12 +116,12 @@ export function planSite(brief: SettlementBrief, buildings: number, pack: Settin
 }
 
 /** Stages 6 to 9 on a site: ground, the mesh, main streets and wards. */
-export function planWards(site: SitePlan, pack: SettingPack): WardPlan {
+export function planWards(site: SitePlan, pack: SettingPack, more = 1): WardPlan {
   const settings = stagedSettings(pack);
   const { seed, buildings, radius, river, coast, wall, plaza, castle } = site;
   const water = { ...(river && { river }), ...(coast && { coast }) };
   const special = { ...(wall && { wall }), ...(plaza && { plaza }), ...(castle && { castle }) };
-  const ground = takeGround({ settings, rng: stepRng(seed, 'staged-ground'), buildings, radius, roads: site, ...water });
+  const ground = takeGround({ settings, rng: stepRng(seed, 'staged-ground'), buildings, radius, roads: site, more, ...water });
   const mesh = makeMesh({ settings, rng: stepRng(seed, 'staged-mesh'), radius, ground, roads: site, ...(river && { river }), ...special });
   // Main streets move the mesh's corners as they are evened; nothing after them does.
   const streets = layMainStreets({ settings, buildings, mesh, ground, roads: site, ...water, ...special });
@@ -112,20 +130,77 @@ export function planWards(site: SitePlan, pack: SettingPack): WardPlan {
 }
 
 /** The buildings of a city that the pack marks as landmarks, in the city's order. */
-export function landmarksOf(buildings: ReadonlyArray<{ id: string; type: string }>, pack: SettingPack): LandmarkBuilding[] {
+export function landmarksOf(buildings: ReadonlyArray<{ id: string; type: string; districtId?: string }>, pack: SettingPack, districts: ReadonlyArray<{ id: string }> = []): LandmarkBuilding[] {
   const { types } = stagedSettings(pack).landmarks;
-  return buildings.filter((building) => building.type in types).map(({ id, type }) => ({ id, type }));
+  const place = new Map(districts.map((district, index) => [district.id, index]));
+  return buildings
+    .filter((building) => building.type in types)
+    .map(({ id, type, districtId }) => ({ id, type, ...(districtId !== undefined && place.has(districtId) && { district: place.get(districtId) as number }) }));
 }
 
-/** Every stage built so far, for a town of so many buildings, of which some are landmarks. */
-export function planTown(brief: SettlementBrief, buildings: number, pack: SettingPack, seed: number = brief.seed, landmarks: readonly LandmarkBuilding[] = []): TownPlan {
+/** What the staged generator reads of a city. */
+export function townInput(city: { buildings: ReadonlyArray<{ id: string; type: string; districtId: string }>; districts: ReadonlyArray<{ id: string; kind: string; buildingIds: readonly string[] }> }, pack: SettingPack): TownInput {
+  return {
+    buildings: city.buildings.length,
+    districts: city.districts.map((district) => ({ id: district.id, kind: district.kind, buildings: district.buildingIds.length })),
+    landmarks: landmarksOf(city.buildings, pack, city.districts),
+  };
+}
+
+/**
+ * Every stage built so far, for a city, or for a bare number of buildings in one district of the pack's first
+ * kind. If the town turns out to have too few houses, more ground is taken and the stages from the ground on are
+ * made again: the only loop in the generator.
+ */
+export function planTown(brief: SettlementBrief, town: number | TownInput, pack: SettingPack, seed: number = brief.seed, landmarks?: readonly LandmarkBuilding[]): TownPlan {
   const settings = stagedSettings(pack);
-  const wards = planWards(planSite(brief, buildings, pack, seed), pack);
-  const { blocks, lanes } = cutBlocks(wards.wards, settings, seed);
-  // Reservations first: ordinary houses fill only the blocks that are left.
-  const roads = [...wards.highways.map((highway) => highway.points), ...wards.streets.map((street) => street.points)];
-  const { placed, unplaced } = reserve({ settings, rng: stepRng(seed, 'staged-landmarks'), landmarks, wards: wards.wards, blocks, roads, ...(wards.harbour && { quay: wards.harbour.quay }) });
-  const reserved = new Set(placed.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
-  const { houses, passages } = layRows(blocks, wards.wards, settings, seed, reserved);
-  return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages };
+  const input: TownInput = typeof town === 'number' ? { buildings: town, districts: [{ id: 'district', kind: pack.districts.kinds[0]?.id ?? '', buildings: town }], landmarks: [...(landmarks ?? [])] } : town;
+  const placements = new Map(pack.districts.kinds.map((kind) => [kind.id, kind.placement as Placement]));
+  const site = planSite(brief, input.buildings, pack, seed);
+  let more = 1;
+  for (let attempt = 0; ; attempt++) {
+    const wards = planWards(site, pack, more);
+    const variation = wards.wards.map((ward) => wardVariation(seed, ward, settings));
+    const districtPlan = growDistricts({ settings, districts: input.districts, variation, placementOf: (kind) => placements.get(kind) ?? 'middle', buildings: input.buildings, wards: wards.wards, mesh: wards.mesh, roads: site, streets: wards.streets, ...(site.river && { river: site.river }), ...(site.coast && { coast: site.coast }), ...(site.wall && { wall: site.wall }) });
+    const characters = wards.wards.map((_, index) => characterOf(settings, districtPlan.of[index] === undefined ? undefined : input.districts[districtPlan.of[index] as number]?.kind));
+    const { blocks, lanes } = cutBlocks(wards.wards, settings, seed, (_, index) => characters[index] as Character);
+    // Reservations first: ordinary houses fill only the blocks that are left. A landmark stands in its own district.
+    const roads = [...wards.highways.map((highway) => highway.points), ...wards.streets.map((street) => street.points)];
+    const wardsIn = input.districts.map((_, district) => new Set(districtPlan.of.flatMap((of, ward) => (of === district ? [ward] : []))));
+    // A landmark stands among the innermost blocks of its district: those that have room for most of its buildings.
+    const inFar = blocks.map(() => false);
+    input.districts.forEach((district, index) => {
+      const scale = characterOf(settings, district.kind).scale;
+      const own = blocks.map((block, at) => ({ at, block, rank: wards.ground.rank(polygonCentroid(block.polygon)) })).filter(({ block }) => districtPlan.of[block.ward] === index).sort((a, b) => a.rank - b.rank || a.at - b.at);
+      let room = 0;
+      for (const { at, block } of own) {
+        if (room >= settings.landmarks.block.within * district.buildings) inFar[at] = true;
+        room += roomIn(block, settings, scale);
+      }
+    });
+    const { placed, unplaced } = reserve({
+      settings,
+      rng: stepRng(seed, 'staged-landmarks'),
+      landmarks: input.landmarks,
+      wards: wards.wards,
+      blocks,
+      roads,
+      ...(wards.harbour && { quay: wards.harbour.quay }),
+      wardsOf: (landmark) => (landmark.district === undefined || (wardsIn[landmark.district]?.size ?? 0) === 0 ? undefined : wardsIn[landmark.district]),
+      blockOk: (_, block) => !inFar[block],
+    });
+    const reserved = new Set(placed.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
+    const { houses, passages } = layRows(blocks, wards.wards, settings, seed, reserved, (_, index) => characters[index] as Character);
+    // A landmark with a ward or a block of its own is one of its district's buildings, and needs no house.
+    const wanted = input.districts.map((district, index) => district.buildings - placed.filter((landmark) => landmark.district === index).length);
+    const selection = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: districtPlan, wanted, ground: wards.ground, ...(site.wall && { wall: site.wall }) });
+    if (selection.short > 0 && attempt < settings.selection.tries) {
+      more *= settings.selection.moreGround;
+      continue;
+    }
+    if (selection.short > 0) {
+      throw new StagedLayoutError(`${brief.name} (${brief.id}): ${houses.length} houses were made for ${input.buildings} buildings and the town is ${selection.short} short, after taking ${more.toFixed(2)} times the ground in ${attempt} further tries; raise layout.staged.ground.factor or layout.staged.selection.tries`);
+    }
+    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt };
+  }
 }
