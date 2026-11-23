@@ -196,12 +196,10 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   };
   for (const line of throughLines) cuts.push({ points: toWater(line), closed: false, splits: true });
   for (const road of trunks) if (!used.has(road)) cuts.push({ points: toWater(road.points), closed: false, splits: true });
-  for (const road of plan.roads) {
-    // Every road's strip at its own width; quays, bank streets and arterials split the ground as well.
-    const splits = road.kind === 'quay' || road.kind === 'bank' || road.kind === 'arterial';
-    cuts.push({ points: road.points, closed: false, strip: roadStrip(road.points, road.width), splits: false });
-    if (splits) cuts.push({ points: toWater(road.points), closed: false, splits: true });
-  }
+  // Quays and bank streets split the ground next, then arterials, which may end on them, in the order they were laid.
+  for (const kinds of [['quay', 'bank'], ['arterial']]) for (const road of plan.roads) if (kinds.includes(road.kind)) cuts.push({ points: toWater(road.points), closed: false, splits: true });
+  // Every road's strip at its own width.
+  for (const road of plan.roads) cuts.push({ points: road.points, closed: false, strip: roadStrip(road.points, road.width), splits: false });
   const roadLines = plan.roads.map((road) => road.points);
   const wards = layWards({
     settings: grown,
