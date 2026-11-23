@@ -3,15 +3,17 @@
  * (darker is older), the faces they stand on, and its roads at their widths. For checking the method of phase 6D.3
  * step by step.
  *
- * Usage: node scripts/preview-town.ts <settlement name> <out.svg> [--buildings]
+ * Usage: node scripts/preview-town.ts <settlement name> <out.svg> [--buildings | --districts]
  * With --buildings each ward is cut into buildings by the plain method, the counts not yet matched to the city.
+ * With --districts the wards are given districts and cut into exactly the city's buildings.
  */
 import { writeFileSync } from 'node:fs';
 import { generateCity, lotSizeOf, riverOutline } from '../packages/core/src/index.ts';
 import { stepRng } from '../packages/core/src/city/random.ts';
 import { cutWard } from '../packages/core/src/layout/buildings.ts';
 import { area as areaOf, inset, interiorPoint } from '../packages/core/src/layout/cutting.ts';
-import { layTown } from '../packages/core/src/layout/town.ts';
+import { allot } from '../packages/core/src/layout/allot.ts';
+import { layTown, waysOf } from '../packages/core/src/layout/town.ts';
 import type { Point } from '../packages/core/src/schema.ts';
 import { lomiaWorld, medievalPack } from '../packages/core/test/pack.ts';
 
@@ -89,6 +91,32 @@ if (process.argv.includes('--buildings')) {
   });
   parts.push(...pieces, ...lanes);
 }
+let fixes = '';
+if (process.argv.includes('--districts')) {
+  const palette = ['#e6b8af', '#f9cb9c', '#ffe599', '#b6d7a8', '#a2c4c9', '#a4c2f4', '#d5a6bd', '#b4a7d6', '#ea9999', '#93c47d', '#76a5af', '#c27ba0'];
+  const held = new Set([plaza?.id, ...city.buildings.filter((building) => brief.flags.walls && building.type === grown.wall.gatehouse).map((building) => building.id)]);
+  const started2 = performance.now();
+  const result = allot({
+    city,
+    pack,
+    grown,
+    town,
+    rng: (step) => stepRng(brief.seed, step),
+    held: (building) => held.has(building.id),
+    ways: waysOf(town, grown),
+    ...(town.river && { river: town.river.line }),
+    atWater: (polygon) => polygon.some((point) => town.dryBy(point) <= pack.layout.watersideReach),
+  });
+  const districtIndex = new Map(city.districts.map((district, index) => [district.id, index]));
+  for (const lot of result.placed) {
+    const colour = palette[(districtIndex.get(lot.building.districtId) as number) % palette.length];
+    const polygon = lot.loose ? (inset(lot.polygon, 1.2) ?? lot.polygon) : lot.polygon;
+    parts.push(`<path d="${path(polygon, true)}" fill="${colour}" stroke="#3a3a36" stroke-width="0.4"/>`);
+    built++;
+  }
+  for (const lane of result.lanes) parts.push(`<path d="${path(lane, false)}" fill="none" stroke="#c9a86b" stroke-width="0.5"/>`);
+  fixes = `${JSON.stringify(result.fixes)}, ${((performance.now() - started2) / 1000).toFixed(2)} s`;
+}
 for (const face of faces) parts.push(`<path d="${path(face, true)}" fill="none" stroke="#c44" stroke-width="1.2" stroke-dasharray="4,3"/>`);
 for (const road of town.plan.roads) {
   const colour = road.kind === 'arterial' ? '#d8c9a8' : road.kind === 'bank' ? '#e0d4bb' : '#d2bd94';
@@ -98,4 +126,4 @@ for (const road of town.plan.roads) {
 for (const street of streets) parts.push(`<path d="${path(street, false)}" fill="none" stroke="#e8dcc4" stroke-width="${grown.widths.street}"/>`);
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-extent} ${-extent} ${2 * extent} ${2 * extent}" width="1400" height="1400">${parts.join('')}<text x="${-extent * 0.97}" y="${-extent * 0.93}" font-size="${extent / 40}" font-family="sans-serif">${name}: ${wards.length} wards, ${built} buildings (target ${city.buildings.length}), ${(took / 1000).toFixed(2)} s</text></svg>`;
 writeFileSync(out, svg);
-console.log(`${name}: ${wards.length} wards in ${faces.length} faces, ${streets.length} ward streets, ${town.plan.roads.length} roads, ${built} buildings (target ${city.buildings.length}), ${(took / 1000).toFixed(2)} s`);
+console.log(`${name}: ${wards.length} wards in ${faces.length} faces, ${streets.length} ward streets, ${town.plan.roads.length} roads, ${built} buildings (target ${city.buildings.length}), ${(took / 1000).toFixed(2)} s ${fixes}`);

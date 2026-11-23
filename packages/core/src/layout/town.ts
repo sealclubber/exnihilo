@@ -213,3 +213,11 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   return { ...(river && { river }), ...(coast && { coast }), dryBy, plan, ground, radius, cuts, removed, wards };
 }
 
+
+/** Every road and street of a town's ground plan, with what each is: the ways a lot may open onto. */
+export function waysOf(town: Town, grown: GrownSettings): Array<{ points: Point[]; width: number; kind: 'highway' | 'quay' | 'arterial' | 'street' }> {
+  return [
+    ...town.plan.roads.map((road) => ({ points: road.points, width: road.width, kind: road.kind === 'highway' || road.kind === 'local' ? ('highway' as const) : road.kind === 'quay' ? ('quay' as const) : road.kind === 'arterial' ? ('arterial' as const) : ('street' as const) })),
+    ...town.wards.streets.map((points) => ({ points, width: grown.widths.street, kind: 'street' as const })),
+  ];
+}
