@@ -213,7 +213,7 @@ function measure(brief: SettlementBrief, city: City, layout: Layout) {
     walls: layout.walls.length,
     gates: layout.summary.counts.gates,
     'gatehouse furthest from its gate': gatehouses.length === 0 ? 'n/a' : `${Math.max(...gatehouses).toFixed(0)} m`,
-    'lots outside the wall': layout.walls.some((wall) => wall.closed) ? layout.lots.filter((lot) => !layout.walls.some((wall) => wall.closed && geometry.pointInPolygon(geometry.polygonCentroid(lot.polygon), wall.line))).length : 'n/a',
+    'lots outside the wall': layout.walls.some((wall) => wall.closed) ? layout.lots.filter((lot) => !layout.walls.some((wall) => wall.closed && geometry.pointInPolygon(geometry.polygonCentroid(lot.polygon), wall.lines[0]!))).length : 'n/a',
     'plaza area': layout.places[0] ? `${polygonArea(layout.places[0].polygon).toFixed(0)} m²` : 'none',
     ...(riverFigures ?? {}),
     ...(sea && sea.kind === 'sea' && { 'least bow of a 200 m stretch of coast near the town': `${leastBow(sea.polygon.slice(0, -2), 200, (point) => inBounds(point, 200)).toFixed(1)} m` }),

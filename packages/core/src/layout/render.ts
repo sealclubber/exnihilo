@@ -87,7 +87,7 @@ export function renderLayoutSvg(layout: Layout, options: RenderOptions = {}): st
   }
   // The wall, a thick dark line, with a gap and a marker at each gate.
   for (const wall of layout.walls) {
-    lines.push(`<path d="${path(wall.line, wall.closed)}" fill="none" stroke="${WALL}" stroke-width="${round(wall.width)}" stroke-linejoin="round"/>`);
+    lines.push(`<path d="${wall.lines.map((line) => path(line, wall.closed)).join('')}" fill="none" stroke="${WALL}" stroke-width="${round(wall.width)}" stroke-linejoin="round"/>`);
     for (const gate of wall.gates) {
       const at = junctions.get(gate.junctionId)?.position;
       if (!at) continue;
@@ -106,7 +106,8 @@ export function renderLayoutSvg(layout: Layout, options: RenderOptions = {}): st
     const at = junctions.get(exit.junctionId)?.position;
     if (!at) return;
     const lead = brief?.routes[position]?.leadsTo;
-    const label = `${exit.name ?? exit.kind.replace('-', ' ')}${lead ? ` to ${lead.name}` : ''}`;
+    // With neither a name nor a destination, a route is told apart by the way it leaves: "road south".
+    const label = `${exit.name ?? exit.kind.replace('-', ' ')}${lead ? ` to ${lead.name}` : exit.name === undefined ? ` ${compass(exit.bearing)}` : ''}`;
     lines.push(`<circle cx="${round(at[0])}" cy="${round(at[1])}" r="4" fill="${INK}"/>`);
     // The label is set toward the middle of the picture, so that it stays in it.
     const anchor = at[0] > minX + width / 2 ? 'end' : 'start';
@@ -118,4 +119,10 @@ export function renderLayoutSvg(layout: Layout, options: RenderOptions = {}): st
   lines.push(`<path d="M${round(minX + 12)} ${round(minY + height - 14)}h100" stroke="${INK}" stroke-width="2"/><text x="${round(minX + 118)}" y="${round(minY + height - 9)}" font-size="${LETTER - 2}" fill="${INK}">100 m</text>`);
   lines.push('</svg>');
   return `${lines.join('\n')}\n`;
+}
+
+/** The nearest of the eight points of the compass to a bearing. */
+function compass(bearing: number): string {
+  const points = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  return points[Math.round((((bearing % 360) + 360) % 360) / 45) % 8] as string;
 }

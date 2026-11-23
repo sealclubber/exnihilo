@@ -77,6 +77,8 @@ function stopAtWater(points: Point[], dryBy: (point: Point) => number, margin: n
 export function planRoads(input: RoadInput): RoadPlan {
   const { brief, settings, far, radius, dryBy, river, coast } = input;
   const widths = settings.widths;
+  // A village's branches are streets in all but name.
+  const arterialWidth = brief.population < settings.arterials.streetBelow ? widths.street : widths.arterial;
   const roads: Road[] = [];
   const trunks: number[] = [];
   const ray = (bearing: number, reach: number): Point => {
@@ -250,7 +252,7 @@ export function planRoads(input: RoadInput): RoadPlan {
       const onBridge = road.bridges.some(([a, b]) => distance(a, base) + distance(base, b) < distance(a, b) + 30);
       if (reach >= arterials.shortest && !seaward && !onBridge && dryBy(base) > arterials.bank) {
         const end: Point = [base[0] + (direction[0] / size) * reach, base[1] + (direction[1] / size) * reach];
-        drawn.push({ kind: 'arterial', points: wander(branch, base, end, arterials.wander), width: widths.arterial, from: trunk, bridges: [] });
+        drawn.push({ kind: 'arterial', points: wander(branch, base, end, arterials.wander), width: arterialWidth, from: trunk, bridges: [] });
       }
       at += arterials.spacing.min + (arterials.spacing.max - arterials.spacing.min) * branch.next();
       side = -side;
@@ -341,9 +343,9 @@ export function planRoads(input: RoadInput): RoadPlan {
       });
       if (!start || dryBy(b) < settings.bridges.landing / 2) continue;
       const toBridge = wander(bridgeRng, start, a, settings.bridges.wander);
-      if (toBridge.some((point, at) => at < toBridge.length - 1 && dryBy(point) < widths.arterial / 2)) continue;
+      if (toBridge.some((point, at) => at < toBridge.length - 1 && dryBy(point) < arterialWidth / 2)) continue;
       const points = [...simplify(toBridge, THIN).slice(0, -1), a, ...beyondBridge(a, b)];
-      roads.push({ kind: 'arterial', points, width: widths.arterial, from, bridges: [[a, b]] });
+      roads.push({ kind: 'arterial', points, width: arterialWidth, from, bridges: [[a, b]] });
       break;
     }
   }

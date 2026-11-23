@@ -136,9 +136,11 @@ describe('the avatar\'s actions', () => {
     const toBuilding = (await main.post('walk-to-building', { buildingId: building.id })).body.avatar as Extract<AvatarState, { kind: 'walking' }>;
     expect(toBuilding.destination).toEqual({ kind: 'building', buildingId: building.id });
     expect(geometry.distance(toBuilding.path.points[0]!, here.point)).toBeLessThan(1e-6);
-    main.clock.setTime(T0 + 130);
+    // Halfway there, however far the market stall is in this layout.
+    const midway = (toBuilding.departAt + arrivalTime(toBuilding)) / 2;
+    main.clock.setTime(midway);
     const turned = (await main.post('walk-to-point', { point: [0, 0] })).body.avatar as Extract<AvatarState, { kind: 'walking' }>;
-    expect(geometry.distance(turned.path.points[0]!, (avatarPosition(toBuilding, T0 + 130) as { point: [number, number] }).point)).toBeLessThan(1e-6);
+    expect(geometry.distance(turned.path.points[0]!, (avatarPosition(toBuilding, midway) as { point: [number, number] }).point)).toBeLessThan(1e-6);
 
     const again = (await main.post('walk-to-building', { buildingId: building.id })).body.avatar as Extract<AvatarState, { kind: 'walking' }>;
     main.clock.setTime(arrivalTime(again) + 1);

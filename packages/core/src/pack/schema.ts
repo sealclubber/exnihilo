@@ -372,8 +372,10 @@ const GrownSettingsSchema = z.strictObject({
    * along the highway from the centre, times a share drawn from `spread`. It leaves square to the highway, leaning
    * along it by about `lean`, and strays aside by `wander` metres. It stops `bank` metres from water. Once the
    * ground is known each is cut back to within `trim` metres of it, and one left shorter than `shortest` is dropped.
+   * In a settlement of fewer than `streetBelow` residents, arterials are as wide as streets.
    */
   arterials: z.strictObject({
+    streetBelow: wholeNumber,
     spacing: span,
     span: z.number().positive(),
     reach: z.number().positive(),
@@ -431,10 +433,14 @@ const GrownSettingsSchema = z.strictObject({
    * a half within `bigMatch` of one's size going to it. The last `loose.share` of wards by growth are loose: a
    * piece is left open with a chance rising from `loose.open.min` to `loose.open.max` toward the very edge, and
    * each building is drawn in from its lot by a distance drawn from `loose.pull`. A ward's buildings are no more
-   * than the ground within `frontDepth` metres of the ways along it would hold.
+   * than the ground within `frontDepth` metres of the ways along it would hold. No cut leaves a lot narrower than
+   * `leastWidth` metres, but for a building whose pack lot is itself narrower, nor more than `longest` times as long
+   * as it is wide, both measured on its smallest enclosing rectangle.
    */
   buildings: z.strictObject({
     frontDepth: metres,
+    leastWidth: metres,
+    longest: z.number().positive(),
     alleyAbove: z.number().positive(),
     squareBelow: z.number().positive(),
     pieceShare: z.number().positive(),

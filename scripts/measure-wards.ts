@@ -21,7 +21,7 @@ for (const name of names) {
   console.log(`\n${name}, ${brief.population.toLocaleString('en')} residents, ${city.buildings.length} buildings, ${(took / 1000).toFixed(2)} s`);
   console.log(`  lots: ${layout.lots.length}; rules broken: ${checkLayout(layout, city, brief, pack).length}`);
   const shapes = lotShapes(layout);
-  console.log(`  lot length over width: median ${shapes.median.toFixed(2)}, over 4: ${pct(shapes.overFour)}`);
+  console.log(`  lot length over width: median ${shapes.median.toFixed(2)}, over 4: ${pct(shapes.overFour)}, over 6: ${shapes.overSix}; under 4 m wide ${shapes.under4}; narrowest ${shapes.narrowest.toFixed(1)} m`);
   const spread = [...sizeSpread(layout).values()];
   console.log(`  lot area spread by district: least ${Math.min(...spread).toFixed(2)}, most ${Math.max(...spread).toFixed(2)}`);
   const list = wards(layout);

@@ -381,7 +381,7 @@ centre, x east and y south.
 | Water | A river as a centre line with its mean width and, where the width varies, one width for each point of the line; or the sea as a polygon |
 | Lot | Its building, a polygon, its district, an entrance (a segment and a point on it), and its footprints: the outlines of the buildings on it |
 | District area | The polygons that enclose a district's lots, and a label point |
-| Wall | A line, closed or open, with a width, and its gates: each a junction on the line and the gatehouse that keeps it |
+| Wall | One per walled town: its lines, one closed line or open lines ending at the banks where water parts it, with a width, and its gates: each a junction on a line and the gatehouse that keeps it |
 | Place | Open ground: a `plaza`, the lot of its building, or a `green`, ground inside the town that belongs to no building |
 | Block | The ground between streets that lots are cut from, its district, and its `growthRank`: 0 for the first ground built on, 1 for the last |
 | Summary | Counts, the bounding box, the outline's area, built area, residents per hectare, `ringShare`, the roads out of the centre, the layout version, the generator's name, the pack and the seed |
@@ -488,7 +488,9 @@ every number is in the `grown` block of `layout.yaml`.
    past the town, to their exits.
 6. **The plaza and the wall.** A plaza stands where the highways meet, with a
    street all round it, or beside the road where one road runs through the
-   centre. A wall follows a contour of the oldest ground, blurred over 60 m;
+   centre. A wall follows a contour of the oldest ground, blurred over 60 m,
+   never along the water nor a quay: where it comes within a quay's reach of a
+   bank it runs straight to the bank and the water closes the gap;
    in a town under 1,000 residents it goes round all of it. A street runs
    along the outside of the wall.
 7. **Wards** (`layout/wards.ts`). The ground is split along the centre line
@@ -510,7 +512,15 @@ every number is in the `grown` block of `layout.yaml`.
    along it joins a neighbour, too few pieces and the largest are cut again,
    too many and some are left open and the smallest joined to a neighbour.
    Buildings and pieces are paired by size, and buildings of a trade then
-   change places to stand together.
+   change places to stand together. No cut leaves a lot narrower than the
+   pack's `leastWidth` (5 m), but for a building whose own pack lot is
+   narrower, nor more than `longest` (3.5) times as long as it is wide; a cut
+   that would leave a piece with no way along it leaves an alley instead, and
+   a piece still without one has an alley run out from it to the nearest way.
+   Each ward is first cut once to count the lots it can make that keep every
+   rule, and a district's buildings are shared among its wards in proportion
+   to those counts; a district short of lots is cut again with a building size
+   a tenth smaller, up to five times, and then laid out on more ground.
 10. **Streets, lanes and gates** (`layout/network.ts`). Every road, street
     and lane is cut at its junctions into segments. Gates stand where the
     highways cross the wall, then arterials and streets, as many as there are
@@ -540,6 +550,7 @@ npm run render -- settlement-641 [--generator grid|grown] [--seed <number>] [--o
 ```
 
 `docs/renders/` holds each of the five towns above as `-grown` and `-grid`,
+the grown layouts as they were at phase 6D.3 as `-grown-6d3`, for comparison,
 and Badanos at each of the first three steps of phase 6D.3
 (`badanos-step1-wards.svg`, `-step2-buildings`, `-step3-districts`).
 

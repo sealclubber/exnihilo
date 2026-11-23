@@ -34,6 +34,20 @@ export interface WardCut {
   /** Buildings to be cut for first, largest first: a half within `match` of one's area goes to it. */
   big: number[];
   match: number;
+  /** No cut leaves a piece narrower than this, nor longer than `longest` times its width unless no longer than before. */
+  leastWidth: number;
+  longest: number;
+  /** Whether a piece has a way along it, the lanes cut so far counted; a cut that would leave one without is made with an alley, or not at all. */
+  fronts?: (polygon: Point[], lanes: Point[][]) => boolean;
+  /** Whether a lane reaches a way, or one of the lanes cut so far, at one end at least. */
+  reaches?: (lane: Point[], lanes: Point[][]) => boolean;
+}
+
+/** A piece's width and its length over width, on its smallest rectangle. */
+export function shapeOf(polygon: Point[]): { width: number; ratio: number } {
+  const rect = smallestRectangle(polygon);
+  const width = Math.hypot(rect.short[0], rect.short[1]);
+  return { width, ratio: Math.hypot(rect.long[0], rect.long[1]) / Math.max(width, 1e-9) };
 }
 
 export interface Piece {
@@ -55,14 +69,16 @@ const SLIVER = 6;
 const DEEPEST = 40;
 
 /** Cuts a piece across its long axis at a share along it, turned by an angle, leaving a gap; returns the parts and the lane down the gap. */
-export function cutAcross(polygon: Point[], at: number, angle: number, gap: number): { parts: Point[][]; lanes: Point[][] } {
+export function cutAcross(polygon: Point[], at: number, angle: number, gap: number, along = false): { parts: Point[][]; lanes: Point[][] } {
   const rect = smallestRectangle(polygon);
-  const middle: Point = [rect.corner[0] + rect.long[0] * at + rect.short[0] * 0.5, rect.corner[1] + rect.long[1] * at + rect.short[1] * 0.5];
-  const run = Math.hypot(rect.long[0], rect.long[1]) || 1;
-  const across: Point = [-rect.long[1] / run, rect.long[0] / run];
+  // Across the long axis, or along it: then the short side is the one cut at a share along.
+  const [long, short] = along ? [rect.short, rect.long] : [rect.long, rect.short];
+  const middle: Point = [rect.corner[0] + long[0] * at + short[0] * 0.5, rect.corner[1] + long[1] * at + short[1] * 0.5];
+  const run = Math.hypot(long[0], long[1]) || 1;
+  const across: Point = [-long[1] / run, long[0] / run];
   const direction: Point = [across[0] * Math.cos(angle) - across[1] * Math.sin(angle), across[1] * Math.cos(angle) + across[0] * Math.sin(angle)];
   const normal: Point = [-direction[1], direction[0]];
-  const reach = run + Math.hypot(rect.short[0], rect.short[1]) + 10;
+  const reach = run + Math.hypot(short[0], short[1]) + 10;
   const side = (point: Point, offset: number) => (point[0] - middle[0]) * normal[0] + (point[1] - middle[1]) * normal[1] - offset;
   if (gap <= 0) {
     const { pieces } = splitAlong(polygon, lineThrough(middle, direction, reach));
@@ -80,20 +96,61 @@ export function cutAcross(polygon: Point[], at: number, angle: number, gap: numb
 }
 
 /** Cuts a ward into pieces by the plain method, with big buildings cut for first. */
-export function cutWard(plan: WardCut, rng: Rng): CutWard {
+export function cutWard(plan: WardCut, rng: Rng): CutWard & { tryCut: (polygon: Point[]) => { parts: Point[][]; lanes: Point[][] } | undefined } {
   const pieces: Piece[] = [];
   const lanes: Point[][] = [];
   const waiting = plan.big.map((size, index) => ({ size, index })).sort((a, b) => b.size - a.size || a.index - b.index);
+  /** Whether a cut's parts all keep the floor: wide enough, and no longer than allowed unless no longer than the piece cut. */
+  const keepsFloor = (parts: Point[][], parent: Point[]) => {
+    const before = shapeOf(parent).ratio;
+    return parts.every((part) => {
+      const { width, ratio } = shapeOf(part);
+      return width >= plan.leastWidth && (ratio <= plan.longest || ratio <= before);
+    });
+  };
+  /**
+   * A cut of a piece that keeps the floor and leaves every part with a way along it: at the share drawn and turned as
+   * drawn, then at other shares square, then along the other axis; with an alley where one is wanted, or where none
+   * would leave a part with no way. Nothing if no cut will do.
+   */
+  const tryCut = (polygon: Point[], at: number, angle: number, alley: boolean) => {
+    const shares = [at, 0.5, 0.42, 0.58, 0.34, 0.66];
+    // Failing every cut that leaves each part a way, the first that keeps the floor: a part left with no way joins a
+    // neighbour that has one afterwards.
+    let fallback: ReturnType<typeof cutAcross> | undefined;
+    for (const along of [false, true]) {
+      for (const [index, share] of shares.entries()) {
+        const turn = !along && index === 0 ? angle : 0;
+        for (const gap of alley ? [plan.alley, 0] : [0, plan.alley]) {
+          const made = cutAcross(polygon, share, turn, gap, along);
+          if (made.parts.length < 2 || !keepsFloor(made.parts, polygon)) continue;
+          if (gap > 0 && plan.reaches && !made.lanes.every((lane) => (plan.reaches as NonNullable<WardCut['reaches']>)(lane, lanes))) continue;
+          // A cut meant to leave an alley is made without one only as a last resort.
+          if (alley && gap === 0) {
+            if (!fallback) fallback = made;
+            continue;
+          }
+          if (plan.fronts && !made.parts.every((part) => (plan.fronts as NonNullable<WardCut['fronts']>)(part, [...lanes, ...made.lanes]))) {
+            if (!fallback && gap === 0) fallback = made;
+            continue;
+          }
+          return made;
+        }
+      }
+    }
+    return fallback;
+  };
   const cut = (polygon: Point[], alley: boolean, depth: number) => {
     const spread = 0.8 * plan.gridChaos;
     const at = (1 - spread) / 2 + rng.next() * spread;
     const angle = (rng.next() - 0.5) * (Math.PI / 6) * plan.gridChaos * (area(polygon) < plan.size * plan.squareBelow ? 0 : 1);
-    const { parts, lanes: made } = cutAcross(polygon, at, angle, alley ? plan.alley : 0);
-    if (parts.length < 2 || depth > DEEPEST) {
+    const made = depth > DEEPEST ? undefined : tryCut(polygon, at, angle, alley);
+    if (!made) {
       pieces.push({ polygon, open: false });
       return;
     }
-    lanes.push(...made);
+    const { parts, lanes: cutLanes } = made;
+    lanes.push(...cutLanes);
     for (const part of parts) {
       const size = area(part);
       // A half near the size of the next big building goes to it.
@@ -109,9 +166,9 @@ export function cutWard(plan: WardCut, rng: Rng): CutWard {
         continue;
       }
       const draw = rng.next() * rng.next();
-      cut(part, alley && size > (plan.size * plan.alleyAbove) / Math.max(draw, 1e-9), depth + 1);
+      cut(part, alley && cutLanes.length > 0 && size > (plan.size * plan.alleyAbove) / Math.max(draw, 1e-9), depth + 1);
     }
   };
   cut(plan.polygon, true, 0);
-  return { pieces, lanes };
+  return { pieces, lanes, tryCut: (polygon) => tryCut(polygon, 0.5, 0, false) };
 }

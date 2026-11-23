@@ -91,6 +91,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   });
   const outlines = town.ground.outlines;
   /** Out of town: not on the ground nor within the trim of it, and not over water. */
+  /** The wall's lines as polylines, a closed one returning to its start. */
+  const wallLines: Point[][] = town.wall ? (town.wall.closed ? [[...town.wall.loop, town.wall.loop[0] as Point]] : town.wall.lines) : [];
+  const nearWall = (point: Point) => Math.min(Infinity, ...wallLines.map((line) => toLine(point, line)));
   const outOfTown = (point: Point) => town.dryBy(point) > 0 && outlines.every((outline) => !inside(point, outline) && toEdge(point, outline) > grown.arterials.trim);
 
   // ---- Lines of the street graph --------------------------------------------------------------------------------
@@ -138,12 +141,11 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   for (const line of town.wallStreet ?? []) lines.push({ points: line, kind: 'street', width: widths.street });
   // A street that runs up to the wall stops short of it, so that its roadway does not reach past the wall.
   if (town.wall) {
-    const loop = [...town.wall, town.wall[0] as Point];
     for (const line of lines) {
       if (line.kind !== 'street' || line.points.length < 2) continue;
       for (const end of [0, 1]) {
         const points = end === 0 ? line.points : [...line.points].reverse();
-        if (toLine(points[0] as Point, loop) > 1e-3) continue;
+        if (nearWall(points[0] as Point) > 1e-3) continue;
         const along = alongOf(points);
         const total = along[along.length - 1] as number;
         const back = grown.wall.width / 2 + line.width / 2 + VERGE;
@@ -165,8 +167,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   // Where fewer roads cross the wall than there are gatehouses, a street that ends near the wall is carried on through
   // it, where that passes no ward, so that it can have a gate.
   if (town.wall) {
-    const loop = [...town.wall, town.wall[0] as Point];
-    const crosses = (line: Line) => line.points.some((point, k) => k > 0 && loop.some((corner, m) => m > 0 && crossingOf(line.points[k - 1] as Point, point, loop[m - 1] as Point, corner) !== undefined && town.dryBy(point) > 0));
+    const crosses = (line: Line) => line.points.some((point, k) => k > 0 && wallLines.some((loop) => loop.some((corner, m) => m > 0 && crossingOf(line.points[k - 1] as Point, point, loop[m - 1] as Point, corner) !== undefined)));
     let crossing = lines.filter((line) => line.kind !== 'lane' && crosses(line)).length;
     const clearOfWards = (a: Point, b: Point, width: number) => {
       const steps = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2);
@@ -177,33 +178,39 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       }
       return true;
     };
-    const ends = lines
-      .flatMap((line) => (line.kind === 'street' && !crosses(line) ? [0, 1].map((end) => ({ line, end })) : []))
-      .map(({ line, end }) => {
-        const points = end === 0 ? [...line.points].reverse() : line.points;
-        const tip = points[points.length - 1] as Point;
-        const before = points[points.length - 2] as Point;
-        const run = Math.hypot(tip[0] - before[0], tip[1] - before[1]) || 1;
-        const direction: Point = [(tip[0] - before[0]) / run, (tip[1] - before[1]) / run];
-        const far: Point = [tip[0] + direction[0] * WALL_REACH, tip[1] + direction[1] * WALL_REACH];
-        let hit: number | undefined;
-        for (let m = 1; m < loop.length; m++) {
-          const found = crossingOf(tip, far, loop[m - 1] as Point, loop[m] as Point);
-          if (found && (hit === undefined || found.t < hit)) hit = found.t;
-        }
-        const onOther = lines.some((other) => other !== line && toLine(tip, other.points) < 1e-3);
-        if (hit === undefined || onOther) return undefined;
-        const beyond = hit * WALL_REACH + grown.wall.width + line.width;
-        const out: Point = [tip[0] + direction[0] * beyond, tip[1] + direction[1] * beyond];
-        return clearOfWards(tip, out, line.width) ? { line, end, out, reach: hit * WALL_REACH } : undefined;
-      })
-      .filter((entry): entry is { line: Line; end: number; out: Point; reach: number } => entry !== undefined)
-      .sort((a, b) => a.reach - b.reach);
-    for (const entry of ends) {
+    // Streets within the usual reach first; then, still short, streets and arterials from further.
+    for (const [reachOf, kinds] of [[WALL_REACH, ['street']], [3 * WALL_REACH, ['street', 'arterial']]] as const) {
       if (crossing >= gatehouses.length) break;
-      if (crosses(entry.line)) continue;
-      entry.line.points = entry.end === 0 ? [entry.out, ...entry.line.points] : [...entry.line.points, entry.out];
-      crossing++;
+      const ends = lines
+        .flatMap((line) => ((kinds as readonly string[]).includes(line.kind) && line.route === undefined && !crosses(line) ? [0, 1].map((end) => ({ line, end })) : []))
+        .map(({ line, end }) => {
+          const points = end === 0 ? [...line.points].reverse() : line.points;
+          const tip = points[points.length - 1] as Point;
+          const before = points[points.length - 2] as Point;
+          const run = Math.hypot(tip[0] - before[0], tip[1] - before[1]) || 1;
+          const direction: Point = [(tip[0] - before[0]) / run, (tip[1] - before[1]) / run];
+          const far: Point = [tip[0] + direction[0] * reachOf, tip[1] + direction[1] * reachOf];
+          let hit: number | undefined;
+          for (const loop of wallLines) {
+            for (let m = 1; m < loop.length; m++) {
+              const found = crossingOf(tip, far, loop[m - 1] as Point, loop[m] as Point);
+              if (found && (hit === undefined || found.t < hit)) hit = found.t;
+            }
+          }
+          const onOther = lines.some((other) => other !== line && toLine(tip, other.points) < 1e-3);
+          if (hit === undefined || onOther) return undefined;
+          const beyond = hit * reachOf + grown.wall.width + line.width;
+          const out: Point = [tip[0] + direction[0] * beyond, tip[1] + direction[1] * beyond];
+          return clearOfWards(tip, out, line.width) ? { line, end, out, reach: hit * reachOf } : undefined;
+        })
+        .filter((entry): entry is { line: Line; end: number; out: Point; reach: number } => entry !== undefined)
+        .sort((a, b) => a.reach - b.reach);
+      for (const entry of ends) {
+        if (crossing >= gatehouses.length) break;
+        if (crosses(entry.line)) continue;
+        entry.line.points = entry.end === 0 ? [entry.out, ...entry.line.points] : [...entry.line.points, entry.out];
+        crossing++;
+      }
     }
   }
   // A gate whose road turns out to reach nowhere is given up, and the gates chosen again without it.
@@ -217,17 +224,16 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     lines.push(...snapshot.map((line) => ({ ...line })));
     gates.length = 0;
     if (town.wall) {
-      const loop = [...town.wall, town.wall[0] as Point];
       type Crossing = { line: number; at: number; point: Point };
       const crossings: Crossing[] = [];
       lines.forEach((line, id) => {
         const along = alongOf(line.points);
         for (let k = 1; k < line.points.length; k++) {
-          for (let m = 1; m < loop.length; m++) {
-            // Where the wall stands in water there is no wall to cross.
-            if (town.dryBy(loop[m - 1] as Point) < 0 || town.dryBy(loop[m] as Point) < 0) continue;
-            const found = crossingOf(line.points[k - 1] as Point, line.points[k] as Point, loop[m - 1] as Point, loop[m] as Point);
-            if (found) crossings.push({ line: id, at: (along[k - 1] as number) + found.t * ((along[k] as number) - (along[k - 1] as number)), point: found.point });
+          for (const loop of wallLines) {
+            for (let m = 1; m < loop.length; m++) {
+              const found = crossingOf(line.points[k - 1] as Point, line.points[k] as Point, loop[m - 1] as Point, loop[m] as Point);
+              if (found) crossings.push({ line: id, at: (along[k - 1] as number) + found.t * ((along[k] as number) - (along[k - 1] as number)), point: found.point });
+            }
           }
         }
       });
@@ -260,8 +266,8 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         line.stops = [...(line.stops ?? []), crossing.point];
         gates.push({ point: crossing.point, main: line.route !== undefined, key: `${crossing.line}:${crossing.at}` });
       }
-      // Every other crossing: the line is cut either side of the wall.
-      const clear = grown.wall.width / 2 + 1;
+      // Every other crossing: the line is cut either side of the wall, its roadway a verge clear of it.
+      const clear = grown.wall.width / 2 + widths.arterial / 2 + VERGE;
       const cutLines = new Map<number, number[]>();
       for (const crossing of crossings) if (!chosen.has(crossing)) cutLines.set(crossing.line, [...(cutLines.get(crossing.line) ?? []), crossing.at]);
       const replaced: Line[] = [];
@@ -275,7 +281,20 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
         for (const stop of [...stops, Infinity]) {
           const to = stop === Infinity ? total : stop - clear;
           if (to - from > 5) {
-            const points = sliceLine(line.points, along, from, to);
+            // A cut end goes back to the last place another line meets it, so that the road ends at a junction and
+            // not against the wall; with no such place the piece goes.
+            const meets = meetingsAlong(line, lines, along);
+            const cutStart = from > 0;
+            const cutEnd = stop !== Infinity;
+            let start = from;
+            let end = to;
+            if (cutStart) start = meets.find((at) => at >= from - 1e-6 && at <= to) ?? Infinity;
+            if (cutEnd) end = [...meets].reverse().find((at) => at <= to + 1e-6 && at >= start) ?? -Infinity;
+            if (!(end - start > 5)) {
+              from = stop + clear;
+              continue;
+            }
+            const points = sliceLine(line.points, along, start, end);
             // Past the wall an arterial no longer leaves a highway: what is left of it is a street.
           const kind = from > 0 && line.kind === 'arterial' && line.route === undefined && line.width !== widths.highway ? 'street' : line.kind;
           replaced.push({ ...line, kind, points, bridges: (line.bridges ?? []).filter(([a, b]) => points.includes(a) && points.includes(b)), stops: (line.stops ?? []).filter((point) => points.some((p) => p === point) || isOn(point, points)) });
@@ -323,7 +342,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     let best = 0;
     let gap = Infinity;
     wardList.forEach((ward, at) => {
-      const within = town.wall ? inside(interiorPoint(ward.polygon), town.wall) : true;
+      const within = town.wall ? inside(interiorPoint(ward.polygon), town.wall.loop) : true;
       const away = (inside(point, ward.polygon) ? 0 : toEdge(point, ward.polygon)) + (within ? 0 : 1000);
       if (away < gap) {
         gap = away;
@@ -347,7 +366,7 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
       ...(town.river && { river: town.river.line }),
       atWater: (polygon) => polygon.some((point) => town.dryBy(point) <= pack.layout.watersideReach),
       dryBy: town.dryBy,
-      ...(town.wall && { barrier: town.wall }),
+      ...(town.wall && { barrier: wallLines }),
       extra: gates.map((gate, k) => ({ ward: nearestWard(gate.point), building: gatehouses[k] as Building })),
       ...(plazaBuilding && town.wards.plazaFace !== undefined && { besidePlaza: { wards: besidePlaza, district: city.districts.findIndex((district) => district.id === plazaBuilding.districtId) } }),
     });
@@ -551,7 +570,9 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
     return [{ districtId: district.id, polygons, labelPoint: label }];
   });
   const outlineArea = outlines.reduce((sum, outline) => sum + area(outline), 0);
-  const byRank = wards.map((_, at) => at).filter((at) => (allotment.districtOf[at] as number) >= 0).sort((a, b) => (allotment.rank[a] as number) - (allotment.rank[b] as number) || a - b);
+  // Blocks are the wards that hold lots: one that could make no lot that keeps the floor holds none, and is open ground.
+  const holding = new Set(placed.map((lot) => lot.ward));
+  const byRank = wards.map((_, at) => at).filter((at) => (allotment.districtOf[at] as number) >= 0 && holding.has(at)).sort((a, b) => (allotment.rank[a] as number) - (allotment.rank[b] as number) || a - b);
   const blocks: Block[] = byRank.map((at, index) => {
     const district = allotment.districtOf[at] as number;
     return {
@@ -565,40 +586,34 @@ function attemptLayout(city: City, brief: SettlementBrief, pack: SettingPack, gr
   const waterId = () => `water-${number}-${pad(waters.length + 1, 3)}`;
   if (town.river) waters.push({ id: waterId(), kind: 'river', centreLine: town.river.line, width: town.river.width, widths: town.river.widths });
   if (town.coast) waters.push({ id: waterId(), kind: 'sea', polygon: town.coast.polygon });
-  // The wall: its line, in pieces where it crosses water, each with the gates on it.
+  // The wall: one record, its lines, and every gate on them.
   const walls: Wall[] = [];
   if (town.wall) {
-    const loop = town.wall;
-    const wet = loop.map((point) => town.dryBy(point) < 0);
-    const runs: Point[][] = [];
-    if (!wet.some(Boolean)) runs.push(loop);
-    else {
-      const start = wet.findIndex(Boolean);
-      let run: Point[] = [];
-      for (let k = 1; k <= loop.length; k++) {
-        const at = (start + k) % loop.length;
-        if (wet[at]) {
-          if (run.length >= 2) runs.push(run);
-          run = [];
-        } else run.push(loop[at] as Point);
-      }
-      if (run.length >= 2) runs.push(run);
-    }
-    runs.forEach((run, index) => {
-      const closed = runs.length === 1 && !wet.some(Boolean);
-      const line = closed ? [...run, run[0] as Point] : run;
-      const own = gates.map((gate, k) => ({ gate, k })).filter(({ gate }) => isOn(gate.point, line));
-      walls.push({
-        id: `wall-${number}-${pad(index + 1, 3)}`,
-        line: run,
-        closed,
-        width: grown.wall.width,
-        gates: own.map(({ gate, k }) => {
-          const node = network.nodeAt(gate.point);
-          if (node === undefined || !junctionIds.has(node)) fail('a gate is not on the street graph');
-          return { junctionId: junctionIds.get(node as number) as string, buildingId: (gatehouses[k] as Building).id, arterial: gate.main };
-        }),
-      });
+    const own = gates.map((gate, k) => ({ gate, k })).filter(({ gate }) => nearWall(gate.point) < 1e-6);
+    // Only wall with the town behind it: an open line with no gate on it and few lots inside along it, such as a stretch
+    // across the water from the town, is no part of the wall. A closed wall stands whole.
+    const loop = town.wall.loop;
+    const middles = lots.map((lot) => interiorPoint(lot.polygon)).filter((point) => inside(point, loop));
+    const BEHIND = 30;
+    const standing = town.wall.closed
+      ? [loop]
+      : town.wall.lines.filter((line) => {
+          if (own.some(({ gate }) => toLine(gate.point, line) < 1e-6)) return true;
+          const length = alongOf(line)[line.length - 1] as number;
+          const behind = middles.filter((point) => toLine(point, line) < BEHIND).length;
+          return behind >= length / BEHIND;
+        });
+    if (standing.length === 0) fail('no stretch of the wall has the town behind it');
+    walls.push({
+      id: `wall-${number}-001`,
+      lines: standing,
+      closed: town.wall.closed,
+      width: grown.wall.width,
+      gates: own.map(({ gate, k }) => {
+        const node = network.nodeAt(gate.point);
+        if (node === undefined || !junctionIds.has(node)) fail('a gate is not on the street graph');
+        return { junctionId: junctionIds.get(node as number) as string, buildingId: (gatehouses[k] as Building).id, arterial: gate.main };
+      }),
     });
     const made = walls.reduce((sum, wall) => sum + wall.gates.length, 0);
     if (made !== gatehouses.length) fail(`${gatehouses.length} gatehouses but ${made} gates in the wall`);
@@ -738,4 +753,30 @@ function alongTo(points: readonly Point[], point: Point): number {
     walked += run;
   }
   return best.at;
+}
+
+/** How far along a line each other line meets it: where one ends on it or crosses it, in order. */
+function meetingsAlong(line: Line, all: readonly Line[], along: readonly number[]): number[] {
+  const found: number[] = [];
+  for (const other of all) {
+    if (other === line) continue;
+    for (const end of [other.points[0] as Point, other.points[other.points.length - 1] as Point]) {
+      for (let k = 1; k < line.points.length; k++) {
+        const a = line.points[k - 1] as Point;
+        const b = line.points[k] as Point;
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const span = dx * dx + dy * dy;
+        const t = span === 0 ? 0 : Math.max(0, Math.min(1, ((end[0] - a[0]) * dx + (end[1] - a[1]) * dy) / span));
+        if (Math.hypot(a[0] + dx * t - end[0], a[1] + dy * t - end[1]) < 1e-3) found.push((along[k - 1] as number) + t * Math.sqrt(span));
+      }
+    }
+    for (let k = 1; k < line.points.length; k++) {
+      for (let m = 1; m < other.points.length; m++) {
+        const met = crossingOf(line.points[k - 1] as Point, line.points[k] as Point, other.points[m - 1] as Point, other.points[m] as Point);
+        if (met) found.push((along[k - 1] as number) + met.t * ((along[k] as number) - (along[k - 1] as number)));
+      }
+    }
+  }
+  return found.sort((a, b) => a - b);
 }

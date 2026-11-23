@@ -16,7 +16,7 @@
 import { type Rng, stepRng } from '../city/random.ts';
 import type { GrownSettings, SettingPack } from '../pack/schema.ts';
 import type { Point, SettlementBrief } from '../schema.ts';
-import { inside, offsetLine, simplify, simplifyRing, toEdge, toLine, untangle } from './cutting.ts';
+import { inside, offsetRing, selfCrossing, simplify, simplifyRing, toEdge, toLine, untangle } from './cutting.ts';
 import { type Ground, TooSmall, layGround } from './ground.ts';
 import { alongOf } from './lines.ts';
 import { type Road, type RoadPlan, planRoads } from './roads.ts';
@@ -37,6 +37,13 @@ export interface TownNeeds {
   room: number;
   /** A wall round the oldest share of the ground, smoothed over so many metres; a share of 1 encloses it all. */
   wall?: { share: number; smoothing: number; width: number };
+}
+
+/** A wall: the contour it follows, and the lines it stands on, which are that loop or, where water parts it, open lines ending at the banks. */
+export interface Wall {
+  loop: Point[];
+  lines: Point[][];
+  closed: boolean;
 }
 
 /** The plaza: open ground at the centre, with a street round it, or round three sides where it stands beside a road. */
@@ -61,8 +68,7 @@ export interface Town {
   removed: Point[][];
   wards: Wards;
   plaza?: Plaza;
-  /** The wall's line, a loop. */
-  wall?: Point[];
+  wall?: Wall;
   /** The street along the outside of the wall, in stretches where the town and dry ground are. */
   wallStreet?: Point[][];
 }
@@ -232,45 +238,95 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   }
 
   // ---- The wall ------------------------------------------------------------------------------------------------
-  let wall: Point[] | undefined;
+  // A contour of the oldest ground. It never runs along water: where it comes within a quay's reach of a bank it
+  // stops, running straight to the bank, and the water closes the gap.
+  let wall: Wall | undefined;
+  /** The way to the nearest water from a point. */
+  const towardWater = (point: Point): Point => {
+    if (river && (!coast || river.gap(point) <= coast.gap(point))) {
+      const near = river.nearest(point).point;
+      const run = Math.hypot(near[0] - point[0], near[1] - point[1]) || 1;
+      return [(near[0] - point[0]) / run, (near[1] - point[1]) / run];
+    }
+    return coast ? coast.seaward : [0, 1];
+  };
+  /** A line's ends carried straight on to the water's edge, and `beyond` metres into it. */
+  const toBank = (line: Point[], beyond: number): Point[] => {
+    const end = (point: Point): Point => {
+      const way = towardWater(point);
+      const reach = Math.max(0, dryBy(point)) + beyond;
+      // With no water at all the end stays where it is.
+      if (!Number.isFinite(reach)) return point;
+      return [point[0] + way[0] * reach, point[1] + way[1] * reach];
+    };
+    return [end(line[0] as Point), ...line, end(line[line.length - 1] as Point)];
+  };
+  const bankClear = grown.quays.offset + widths.street / 2;
   if (needs.wall) {
-    wall = ground.oldest(needs.wall.share, needs.wall.smoothing);
-    if (!wall || !inside([0, 0], wall)) throw new TooSmall('the wall');
-    if (plaza && plaza.ring.some((point) => !inside(point, wall as Point[]) || toEdge(point, wall as Point[]) < needs.wall!.width)) throw new TooSmall('the wall');
+    const contour = ground.oldest(needs.wall.share, needs.wall.smoothing);
+    if (!contour || !inside([0, 0], contour)) throw new TooSmall('the wall');
+    const loop = clearOfRoads(contour, plan.roads, needs.wall.width, grown.buildings.leastWidth);
+    if (plaza && plaza.ring.some((point) => !inside(point, loop) || toEdge(point, loop) < needs.wall!.width)) throw new TooSmall('the wall');
+    // Nor on a quay or a street along a bank: where it would be, it stops as at the water.
+    const alongShore = plan.roads.filter((road) => road.kind === 'quay' || road.kind === 'bank');
+    // Clear of the far side of a quay: its offset from the water, half its width and half the wall's.
+    const wallClear = grown.quays.offset + widths.highway / 2 + needs.wall.width / 2;
+    const clearOfShore = (point: Point) => dryBy(point) >= wallClear && alongShore.every((road) => toLine(point, road.points) >= road.width / 2 + needs.wall!.width / 2 + VERGE);
+    // Judged every few metres, not only at the loop's corners, which may be far apart where it runs straight.
+    const runs = runsOf(densify(loop, 10), clearOfShore);
+    if (runs === 'all') wall = { loop, lines: [loop], closed: true };
+    else {
+      // A run that never leaves the water's side by more than twice its clearance only hugs the bank: it is no wall.
+      const lines = runs
+        .filter((run) => run.length >= 2 && (alongOf(run)[run.length - 1] as number) >= grown.arterials.shortest)
+        .filter((run) => Math.max(...run.map((point) => dryBy(point))) >= 2 * wallClear)
+        // Across the river from the centre only where a highway passes through it: else the river is the town's edge.
+        .filter((run) => {
+          if (!river) return true;
+          const middle = run[Math.floor(run.length / 2)] as Point;
+          if (!piecesCrossLine([0, 0], middle, river.line)) return true;
+          return plan.roads.some((road) => road.route !== undefined && road.points.some((point, k) => k > 0 && run.some((corner, m) => m > 0 && piecesCross(road.points[k - 1] as Point, point, run[m - 1] as Point, corner))));
+        })
+        .map((run) => toBank(simplify(run, 0.25), 0));
+      if (lines.length === 0) throw new TooSmall('the wall');
+      wall = { loop, lines, closed: false };
+    }
   }
-  // A street along the outside of the wall, linking the roads outside it to the gates.
+  // A street along the outside of the wall, linking the roads outside it to the gates, ending at the bank street.
   let wallStreet: Point[][] | undefined;
   if (wall && needs.wall && needs.wall.share < 1) {
-    const loop = wall;
-    const reach = needs.wall.width / 2 + widths.street / 2 + 2 * VERGE;
-    let outer = offsetLine([...loop, loop[0] as Point, loop[1] as Point], reach).slice(1, -1);
-    if (inside(outer[0] as Point, loop)) outer = offsetLine([...loop, loop[0] as Point, loop[1] as Point], -reach).slice(1, -1);
-    // Up to the street along a bank, and a little way past the town's edge, to meet the roads that end there.
+    const { loop } = wall;
+    const reach = needs.wall.width / 2 + widths.street / 2 + 4 * VERGE;
+    // Outward: whichever side of the loop is outside it.
+    let outer = offsetRing(loop, reach);
+    if (outer.filter((point) => inside(point, loop)).length * 2 > outer.length) outer = offsetRing(loop, -reach);
+    const lines = wall.lines;
+    // Only beside wall that stands, and a little way past the town's edge, to meet the roads that end there.
     const farOut = (point: Point) => outlines.every((outline) => !inside(point, outline) && toEdge(point, outline) > 5 * grown.arterials.trim);
-    const keep = (point: Point) => !farOut(point) && dryBy(point) > grown.ground.waterClear && !inside(point, loop);
-    const runs: Point[][] = [];
-    let run: Point[] = [];
-    const start = outer.findIndex((point) => !keep(point));
-    if (start < 0) runs.push([...outer, outer[0] as Point]);
-    else {
-      for (let k = 1; k <= outer.length; k++) {
-        const point = outer[(start + k) % outer.length] as Point;
-        const last = run[run.length - 1];
-        // A stretch whose straight line from the last corner touches water starts afresh.
-        const wetBetween = last !== undefined && [0.25, 0.5, 0.75].some((t) => dryBy([last[0] + (point[0] - last[0]) * t, last[1] + (point[1] - last[1]) * t]) <= grown.ground.waterClear);
-        if (wetBetween) {
-          if (run.length >= 2) runs.push(run);
-          run = [];
-        }
-        if (keep(point)) run.push(point);
-        else {
-          if (run.length >= 2) runs.push(run);
-          run = [];
-        }
+    // Beside the wall and no nearer any part of it than that, which a pinch in the wall's line would bring it.
+    const keep = (point: Point) => !farOut(point) && dryBy(point) >= bankClear && !inside(point, loop) && lines.some((line) => toLine(point, line) < reach + 1) && lines.every((line) => toLine(point, line) >= reach - 2 * VERGE);
+    const runs = runsOf(outer, keep);
+    wallStreet = (runs === 'all' ? [[...outer, outer[0] as Point]] : runs)
+      .filter((line) => line.length >= 2 && (alongOf(line)[line.length - 1] as number) > grown.arterials.shortest)
+      .map((line) => (line[0] === line[line.length - 1] ? line : toBankStreet(line)));
+  }
+  /** A street's ends carried on to the street along the bank, at the quay's offset from the water, where that keeps clear of the wall. */
+  function toBankStreet(line: Point[]): Point[] {
+    const clear = (needs.wall?.width ?? 0) / 2 + widths.street / 2 + VERGE;
+    const end = (point: Point): Point => {
+      const way = towardWater(point);
+      const reach = Math.max(0, dryBy(point) - grown.quays.offset);
+      const to: Point = [point[0] + way[0] * reach, point[1] + way[1] * reach];
+      // No water near, or none at all: the street ends where it is.
+      if (!Number.isFinite(reach) || reach > 5 * grown.arterials.trim || !wall) return point;
+      for (let step = 1; step <= 8; step++) {
+        const at: Point = [point[0] + ((to[0] - point[0]) * step) / 8, point[1] + ((to[1] - point[1]) * step) / 8];
+        if (wall.lines.some((wallLine) => toLine(at, wallLine) < clear)) return point;
       }
-      if (run.length >= 2) runs.push(run);
-    }
-    wallStreet = runs.filter((line) => (alongOf(line)[line.length - 1] as number) > grown.arterials.shortest);
+      return to;
+    };
+    const ends = [end(line[0] as Point), end(line[line.length - 1] as Point)];
+    return [...(ends[0] === line[0] ? [] : [ends[0] as Point]), ...line, ...(ends[1] === line[line.length - 1] ? [] : [ends[1] as Point])];
   }
 
   // ---- 8. Wards ------------------------------------------------------------------------------------------------
@@ -345,11 +401,15 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
   for (const kinds of [['quay', 'bank'], ['arterial']]) for (const road of plan.roads) if (kinds.includes(road.kind)) cuts.push({ points: toWater(road.points), closed: false, splits: true });
   // A plaza beside the road: the street round it splits the ground after the road it leaves.
   if (plaza && !plaza.closed) cuts.push({ points: plaza.ring, closed: false, splits: true });
-  // The wall, last: a loop; and the street outside it.
-  if (wall) cuts.push({ points: wall, closed: true, splits: true });
+  // The wall, last: a loop, or lines run on into the water to part the ground right up to the bank; and the street
+  // outside it.
+  if (wall) {
+    if (wall.closed) cuts.push({ points: wall.loop, closed: true, splits: true });
+    else for (const line of wall.lines) cuts.push({ points: toBank(line, 2), closed: false, splits: true });
+  }
   for (const line of wallStreet ?? []) {
     const loop = line.length > 3 && line[0] === line[line.length - 1];
-    cuts.push({ points: loop ? line.slice(0, -1) : toWater(line), closed: loop, splits: true });
+    cuts.push({ points: loop ? line.slice(0, -1) : toBank(line, 2), closed: loop, splits: true });
     for (const piece of inPieces(line, loop)) cuts.push({ points: piece, closed: false, strip: roadStrip(piece, widths.street), splits: false });
   }
   // Every road's strip at its own width, the street round the plaza's, and the wall's in pieces.
@@ -358,7 +418,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
     const ring = plaza.closed ? [...plaza.ring, plaza.ring[0] as Point] : plaza.ring;
     for (const piece of inPieces(ring, plaza.closed)) cuts.push({ points: piece, closed: false, strip: roadStrip(piece, widths.street), splits: false });
   }
-  if (wall && needs.wall) for (const piece of inPieces([...wall, wall[0] as Point], true)) cuts.push({ points: piece, closed: false, strip: roadStrip(piece, needs.wall.width), splits: false });
+  if (wall && needs.wall) for (const line of wall.closed ? [[...wall.loop, wall.loop[0] as Point]] : wall.lines) for (const piece of inPieces(line, wall.closed)) cuts.push({ points: piece, closed: false, strip: roadStrip(piece, needs.wall.width), splits: false });
   const roadLines = [...plan.roads.map((road) => road.points), ...(plaza ? [plaza.closed ? [...plaza.ring, plaza.ring[0] as Point] : plaza.ring] : []), ...(wallStreet ?? [])];
   const wards = layWards({
     settings: grown,
@@ -369,6 +429,7 @@ export function layTown(brief: SettlementBrief, pack: SettingPack, grown: GrownS
     ...(plaza && { reserved: plaza.polygon, ...(plaza.closed && { reservedRing: plaza.ring }) }),
     streetWidth: widths.street,
     dryBy,
+    ...(wall && needs.wall && { avoid: { lines: wall.closed ? [[...wall.loop, wall.loop[0] as Point]] : wall.lines, clear: widths.street / 2 + needs.wall.width / 2 + 2 * VERGE } }),
     onRoad: (point) => roadLines.some((line) => toLine(point, line) < 1e-4 + VERGE),
   });
   return { ...(river && { river }), ...(coast && { coast }), dryBy, plan, ground, radius, cuts, removed, wards, ...(plaza && { plaza }), ...(wall && { wall }), ...(wallStreet && { wallStreet }) };
@@ -485,4 +546,111 @@ function stopShort(line: Point[], out: (point: Point) => boolean, dryBy: (point:
     reach = along;
   }
   return reach < 10 ? [] : [from, [from[0] + ((to[0] - from[0]) * reach) / run, from[1] + ((to[1] - from[1]) * reach) / run]];
+}
+
+/**
+ * The stretches of a loop whose points pass a test, each in order; or 'all' where every point does. A stretch that
+ * wraps past the loop's first point is one stretch.
+ */
+function runsOf(loop: readonly Point[], keep: (point: Point) => boolean): Point[][] | 'all' {
+  const start = loop.findIndex((point) => !keep(point));
+  if (start < 0) return 'all';
+  const runs: Point[][] = [];
+  let run: Point[] = [];
+  for (let k = 1; k <= loop.length; k++) {
+    const point = loop[(start + k) % loop.length] as Point;
+    if (keep(point)) run.push(point);
+    else {
+      if (run.length >= 2) runs.push(run);
+      run = [];
+    }
+  }
+  if (run.length >= 2) runs.push(run);
+  return runs;
+}
+
+/**
+ * A wall's line moved off the roads it would run along: wherever it passes within a roadway's half width, the wall's
+ * half width, a verge and a lot's least width of a road running within 30 degrees of its own direction, it is moved
+ * square to that road, on the side it was already on, until it is clear, so that what lies between is a row of lots. A few rounds, and the line as it was if moving it would make it
+ * cross itself. A road the wall crosses is left to its gates.
+ */
+function clearOfRoads(loop: Point[], roads: readonly Road[], wallWidth: number, lotWidth: number): Point[] {
+  const PARALLEL = Math.cos(Math.PI / 6);
+  const ROUNDS = 4;
+  const pieces = roads.flatMap((road) =>
+    road.points.slice(1).map((to, k) => {
+      const from = road.points[k] as Point;
+      const run = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
+      return { from, to, along: [(to[0] - from[0]) / run, (to[1] - from[1]) / run] as Point, clear: road.width / 2 + wallWidth / 2 + VERGE + lotWidth };
+    }),
+  );
+  // Corners every few metres, so that no stretch between them is left on a road.
+  let ring = densify(loop, 4);
+  for (let round = 0; round < ROUNDS; round++) {
+    let moved = false;
+    ring = ring.map((point, at) => {
+      const before = ring[(at - 1 + ring.length) % ring.length] as Point;
+      const after = ring[(at + 1) % ring.length] as Point;
+      const run = Math.hypot(after[0] - before[0], after[1] - before[1]) || 1;
+      const own: Point = [(after[0] - before[0]) / run, (after[1] - before[1]) / run];
+      let here = point;
+      for (const piece of pieces) {
+        if (Math.abs(piece.along[0] * own[0] + piece.along[1] * own[1]) < PARALLEL) continue;
+        const dx = piece.to[0] - piece.from[0];
+        const dy = piece.to[1] - piece.from[1];
+        const span = dx * dx + dy * dy;
+        const t = span === 0 ? 0 : ((here[0] - piece.from[0]) * dx + (here[1] - piece.from[1]) * dy) / span;
+        if (t <= 0 || t >= 1) continue;
+        const near: Point = [piece.from[0] + dx * t, piece.from[1] + dy * t];
+        const away = Math.hypot(here[0] - near[0], here[1] - near[1]);
+        if (away >= piece.clear) continue;
+        // Square to the road, on the wall's side of it; a wall exactly on the road's line goes to its left.
+        const side = away > 1e-9 ? ([(here[0] - near[0]) / away, (here[1] - near[1]) / away] as Point) : ([-piece.along[1], piece.along[0]] as Point);
+        here = [near[0] + side[0] * piece.clear, near[1] + side[1] * piece.clear];
+        moved = true;
+      }
+      return here;
+    });
+    if (!moved) break;
+  }
+  // No two corners within a hair of each other, the last and the first included.
+  const kept: Point[] = [];
+  for (const point of ring) {
+    const last = kept[kept.length - 1];
+    if (!last || Math.hypot(point[0] - last[0], point[1] - last[1]) > 0.05) kept.push(point);
+  }
+  while (kept.length > 3 && Math.hypot((kept[0] as Point)[0] - (kept[kept.length - 1] as Point)[0], (kept[0] as Point)[1] - (kept[kept.length - 1] as Point)[1]) <= 0.05) kept.pop();
+  // The corners added for the moving taken out again where the line runs straight.
+  const simple = simplifyRing(kept, 0.25);
+  return simple.length < 3 || selfCrossing(simple) ? loop : simple;
+}
+
+/** A ring with corners added so that none is more than `spacing` metres from the next. */
+function densify(loop: readonly Point[], spacing: number): Point[] {
+  const ring: Point[] = [];
+  for (let at = 0; at < loop.length; at++) {
+    const a = loop[at] as Point;
+    const b = loop[(at + 1) % loop.length] as Point;
+    const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / spacing));
+    for (let step = 0; step < steps; step++) ring.push([a[0] + ((b[0] - a[0]) * step) / steps, a[1] + ((b[1] - a[1]) * step) / steps]);
+  }
+  return ring;
+}
+
+/** Whether two pieces of line cross. */
+function piecesCross(a: Point, b: Point, c: Point, d: Point): boolean {
+  const ab: Point = [b[0] - a[0], b[1] - a[1]];
+  const cd: Point = [d[0] - c[0], d[1] - c[1]];
+  const denominator = ab[0] * cd[1] - ab[1] * cd[0];
+  if (Math.abs(denominator) < 1e-12) return false;
+  const t = ((c[0] - a[0]) * cd[1] - (c[1] - a[1]) * cd[0]) / denominator;
+  const u = ((c[0] - a[0]) * ab[1] - (c[1] - a[1]) * ab[0]) / denominator;
+  return t > 0 && t < 1 && u > 0 && u < 1;
+}
+
+/** Whether a piece of line crosses a polyline. */
+function piecesCrossLine(a: Point, b: Point, line: readonly Point[]): boolean {
+  for (let k = 1; k < line.length; k++) if (piecesCross(a, b, line[k - 1] as Point, line[k] as Point)) return true;
+  return false;
 }

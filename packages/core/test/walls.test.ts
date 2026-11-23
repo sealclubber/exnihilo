@@ -45,7 +45,7 @@ function fixture(): { layout: Layout; city: City; brief: SettlementBrief } {
       { id: 'lot-1-000003', buildingId: 'building-1-000003', polygon: [[-58, 5.6], [-30, 5.6], [-30, 30], [-58, 30]], districtId: 'district-1-001', entrance: { segmentId: 'segment-1-000001', point: [-44, 0] }, footprints: [] },
     ],
     districtAreas: [{ districtId: 'district-1-001', polygons: [[[-60, 0], [70, 0], [70, 40], [-60, 40]]], labelPoint: [0, 20] }],
-    walls: [{ id: 'wall-1-001', line: [[0, -80], [0, 80]], closed: false, width: 3, gates: [{ junctionId: 'junction-1-000002', buildingId: 'building-1-000001', arterial: true }] }],
+    walls: [{ id: 'wall-1-001', lines: [[[0, -80], [0, 80]]], closed: false, width: 3, gates: [{ junctionId: 'junction-1-000002', buildingId: 'building-1-000001', arterial: true }] }],
     places: [{ id: 'place-1-001', kind: 'plaza', polygon: [[-58, 5.6], [-30, 5.6], [-30, 30], [-58, 30]], buildingId: 'building-1-000003' }],
     summary: {
       settlementId: 'settlement-1',
@@ -74,13 +74,13 @@ describe('walls, gates and places in the format', () => {
     const { layout, city, brief } = fixture();
     expect(LayoutSchema.safeParse(layout).success).toBe(true);
     expect(checkLayout(layout, city, brief, pack)).toEqual([]);
-    expect(LAYOUT_VERSION).toBe(8);
+    expect(LAYOUT_VERSION).toBe(9);
   });
 
   type Parts = ReturnType<typeof fixture>;
   const broken: Array<[string, (parts: Parts) => void, RegExp]> = [
     ['a street that crosses the wall where there is no gate', ({ layout }) => (layout.walls[0]!.gates = []), /segment-1-00000\d crosses wall-1-001 where there is no gate|is marked as a gate but no wall has it/],
-    ['a gate that is not on the wall\'s line', ({ layout }) => (layout.walls[0]!.line = [[5, -80], [5, 80]]), /has a gate at junction-1-000002, which is not on the wall's line/],
+    ['a gate that is not on the wall\'s line', ({ layout }) => (layout.walls[0]!.lines = [[[5, -80], [5, 80]]]), /has a gate at junction-1-000002, which is not on the wall's line/],
     ['a gate at a junction not marked as one', ({ layout }) => (layout.junctions[1]!.kind = 'crossing'), /which is not marked as a gate/],
     ['a gate kept by a building that does not exist', ({ layout }) => (layout.walls[0]!.gates[0]!.buildingId = 'building-1-000009'), /kept by building-1-000009, which does not exist/],
     ['a lot that overlaps the wall', ({ layout }) => (layout.lots[1]!.polygon = [[-1, 5.6], [30, 5.6], [30, 24], [-1, 24]]), /lot-1-000002 overlaps wall-1-001/],

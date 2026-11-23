@@ -27,8 +27,9 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * gates and open places to the format, and a second generator, `grown`. Version 6 lets a river's width vary along
  * its length, and has the grown generator scatter blocks and leave streets between them. Version 7 lays the grown
  * generator's roads first. Version 8 cuts its ground into wards along the roads, and each ward into its buildings.
+ * Version 9 gives a wall several lines where water parts it, and keeps lots to a least width.
  */
-export const LAYOUT_VERSION = 8;
+export const LAYOUT_VERSION = 9;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -113,12 +114,12 @@ export const GateSchema = z.strictObject({
 export type Gate = z.infer<typeof GateSchema>;
 
 /**
- * A town wall: a line with a width. The line is closed where the wall runs all the way round, and open where it
- * stops at water. Streets cross it only at its gates.
+ * A town wall: lines with a width. A wall that runs all the way round is one closed line; one that stops at water is
+ * one or more open lines, each ending at a bank, the water closing the gaps. Streets cross it only at its gates.
  */
 export const WallSchema = z.strictObject({
   id: WallIdSchema,
-  line: polyline,
+  lines: z.array(polyline).min(1),
   closed: z.boolean(),
   width: metres,
   gates: z.array(GateSchema),

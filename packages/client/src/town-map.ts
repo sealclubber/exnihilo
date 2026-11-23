@@ -856,7 +856,7 @@ export function createTownMap(root: HTMLElement, handlers: TownMapHandlers): Tow
           return position ? [{ position, gap: (widest.get(gate.junctionId) ?? wall.width) + wall.width }] : [];
         });
         const standing = new Path2D();
-        for (const run of wallRuns(wall.line, wall.closed, gates)) trace(standing, run, false);
+        for (const line of wall.lines) for (const run of wallRuns(line, wall.closed, gates)) trace(standing, run, false);
         const frames = new Path2D();
         for (const { position: [x, y], gap } of gates) {
           frames.moveTo(x + gap / 2, y);

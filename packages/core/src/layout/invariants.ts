@@ -268,13 +268,15 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
   const gateJunctions = new Set<string>();
   const gatehouses = new Set<string>();
   for (const wall of walls) {
-    const line = wall.closed ? [...wall.line, wall.line[0] as Point] : wall.line;
+    if (wall.closed && wall.lines.length !== 1) problem(`${wall.id} is closed but has ${wall.lines.length} lines`);
+    const lines = wall.closed ? [[...(wall.lines[0] as Point[]), (wall.lines[0] as Point[])[0] as Point]] : wall.lines;
+    const onWall = (point: Point) => Math.min(...lines.map((line) => distanceToPolyline(point, line)));
     for (const gate of wall.gates) {
       const junction = junctionById.get(gate.junctionId);
       if (!junction) problem(`${wall.id} has a gate at ${gate.junctionId}, which does not exist`);
       else {
         if (junction.kind !== 'gate') problem(`${wall.id} has a gate at ${junction.id}, which is not marked as a gate`);
-        if (distanceToPolyline(junction.position, line) > EPSILON) problem(`${wall.id} has a gate at ${junction.id}, which is not on the wall's line`);
+        if (onWall(junction.position) > EPSILON) problem(`${wall.id} has a gate at ${junction.id}, which is not on the wall's line`);
       }
       if (gateJunctions.has(gate.junctionId)) problem(`${gate.junctionId} is a gate more than once`);
       gateJunctions.add(gate.junctionId);
@@ -289,10 +291,10 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       const from = ownGates.has(segment.fromJunctionId) ? Math.min(GATE_REACH, length / 2) : 0;
       const to = length - (ownGates.has(segment.toJunctionId) ? Math.min(GATE_REACH, length / 2) : 0);
       const points = from === 0 && to === length ? segment.points : slicePolyline(segment.points, from, to);
-      if (points.some((point, at) => at > 0 && crossingsOfPolyline(points[at - 1] as Point, point, line) > 0)) problem(`${segment.id} crosses ${wall.id} where there is no gate`);
+      if (points.some((point, at) => at > 0 && lines.some((line) => crossingsOfPolyline(points[at - 1] as Point, point, line) > 0))) problem(`${segment.id} crosses ${wall.id} where there is no gate`);
     }
     for (const lot of lots) {
-      if (distancePolygonToPolyline(lot.polygon, line) < wall.width / 2 - EPSILON) problem(`${lot.id} overlaps ${wall.id}`);
+      if (lines.some((line) => distancePolygonToPolyline(lot.polygon, line) < wall.width / 2 - EPSILON)) problem(`${lot.id} overlaps ${wall.id}`);
     }
   }
   for (const junction of junctions) {

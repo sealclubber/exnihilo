@@ -73,6 +73,8 @@ export interface WardInput {
   streetWidth: number;
   /** Whether a point lies on a road a street may end at, rather than the ground's edge or the wall. */
   onRoad: (point: Point) => boolean;
+  /** Lines a street may end on but never run beside, such as the wall's, and how far clear of them it keeps. */
+  avoid?: { lines: Point[][]; clear: number };
   /** How far a point is from water: a street keeps its roadway out of it. */
   dryBy: (point: Point) => number;
   /** The plaza: the face that holds it is no ward. */
@@ -95,7 +97,8 @@ export function layWards(input: WardInput): Wards {
   faces = faces.filter((face) => area(face) > 1);
   if (input.reservedRing) {
     const ring = input.reservedRing;
-    const within = faces.filter((face) => inside(interiorPoint(face), ring));
+    // Inside it: every corner within the ring, or on it.
+    const within = faces.filter((face) => face.every((point) => inside(point, ring) || toEdge(point, ring) < 1e-3));
     let joined = within[0];
     let left = within.slice(1);
     for (let guard = 0; joined && left.length > 0 && guard < 20; guard++) {
@@ -138,7 +141,9 @@ export function layWards(input: WardInput): Wards {
       const line = streetAcross(ward, rng, settings, turn, attempt >= 6);
       // Only the stretches of it that pass through the ward, ending on a road at one end at least.
       const { pieces, chords } = splitAlong(face, line);
-      if (chords.length === 0 || pieces.length < 2) continue;
+      if (chords.length === 0 || pieces.length < 2) {
+        continue;
+      }
       const through = chords.filter((chord) => chord.some((point, at) => at > 0 && inside(midpoint(chord[at - 1] as Point, point), ward)));
       const wet = through.some((chord) => chord.some((point, at) => {
         if (at === 0) return false;
@@ -147,19 +152,73 @@ export function layWards(input: WardInput): Wards {
         for (let step = 0; step <= steps; step++) if (input.dryBy([from[0] + ((point[0] - from[0]) * step) / steps, from[1] + ((point[1] - from[1]) * step) / steps]) < input.streetWidth / 2 + VERGE) return true;
         return false;
       }));
-      if (wet) continue;
+      // Nor beside the wall: but for where it ends on it, no stretch of it nearer the wall than a roadway and the wall's half.
+      const avoid = input.avoid;
+      const besideWall = avoid !== undefined && through.some((chord) => {
+        const along = chord.reduce<number[]>((list, point, at) => [...list, at === 0 ? 0 : (list[at - 1] as number) + Math.hypot(point[0] - (chord[at - 1] as Point)[0], point[1] - (chord[at - 1] as Point)[1])], []);
+        const total = along[along.length - 1] as number;
+        for (let at = 1; at < chord.length; at++) {
+          const a = chord[at - 1] as Point;
+          const b = chord[at] as Point;
+          const steps = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2);
+          for (let step = 0; step <= steps; step++) {
+            const t = step / steps;
+            const reach = (along[at - 1] as number) + t * ((along[at] as number) - (along[at - 1] as number));
+            if (reach < avoid.clear * 3 || reach > total - avoid.clear * 3) continue;
+            const point: Point = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            if (avoid.lines.some((line) => toLine(point, line) < avoid.clear)) return true;
+          }
+        }
+        return false;
+      });
+      if (besideWall) continue;
+      if (wet) {
+        continue;
+      }
       const reaches = (point: Point) => input.onRoad(point) || streets.some((street) => toLine(point, street) < 1e-4);
-      if (through.length === 0 || !through.every((chord) => reaches(chord[0] as Point) || reaches(chord[chord.length - 1] as Point))) continue;
+      if (through.length === 0 || !through.every((chord) => reaches(chord[0] as Point) || reaches(chord[chord.length - 1] as Point))) {
+        continue;
+      }
       // Split along the chords that pass through the ward and no others.
       let parts: Point[][] = [face];
       for (const chord of through) parts = parts.flatMap((part) => splitAlong(part, lengthened(chord, 1e-3)).pieces);
       if (parts.length < 2) continue;
-      const strip = through.map((chord) => ({ outline: roadStrip(chord, input.streetWidth), box: boxAround(roadStrip(chord, input.streetWidth)) }));
+      // An end that reaches no road is drawn back until its roadway is a verge clear of the face's edge, so that it ends
+      // in its own ward and not in the next one's lots. The ground it leaves is the seam between the two halves.
+      const clearOfEdge = input.streetWidth / 2 + 2 * VERGE;
+      const drawnBack = (chord: Point[]): Point[] => {
+        let line = chord;
+        for (const end of [0, 1] as const) {
+          if (reaches((end === 0 ? line[0] : line[line.length - 1]) as Point)) continue;
+          const ordered = end === 0 ? [...line].reverse() : line;
+          const total = ordered.slice(1).reduce((sum, point, at) => sum + Math.hypot(point[0] - (ordered[at] as Point)[0], point[1] - (ordered[at] as Point)[1]), 0);
+          let back = 0;
+          for (let step = 0; step < 40; step++) {
+            const tip = pointBack(ordered, back);
+            if (toEdge(tip, face) >= clearOfEdge || back > total / 3) break;
+            back += 0.5;
+          }
+          const kept = sliceTo(ordered, total - back);
+          line = end === 0 ? kept.reverse() : kept;
+        }
+        return line;
+      };
+      const drawn = through.map(drawnBack);
+      const strip = drawn.map((chord) => ({ outline: roadStrip(chord, input.streetWidth), box: boxAround(roadStrip(chord, input.streetWidth)) }));
       let halves = [ward];
       for (const one of strip) halves = halves.flatMap((part) => (boxesMeet(boxAround(part), one.box) ? subtract(part, one.outline).pieces : [part]));
+      // Parted along the whole of each line too, where a drawn-back end leaves the halves joined: by a seam two verges
+      // wide, so that no lot lies on the line between the two faces.
+      for (const chord of through) {
+        const seam = roadStrip(chord, 0);
+        const seamBox = boxAround(seam);
+        halves = halves.flatMap((part) => (boxesMeet(boxAround(part), seamBox) ? subtract(part, seam).pieces : [part]));
+      }
       halves = halves.filter((half) => area(half) >= least);
-      if (halves.length < 2) continue;
-      streets.push(...through);
+      if (halves.length < 2) {
+        continue;
+      }
+      streets.push(...drawn);
       extras.push(...strip);
       for (const part of parts) {
         const own = halves.filter((half) => inside(interiorPoint(half), part));
@@ -236,3 +295,38 @@ export function onAnyLine(lines: readonly Point[][]): (point: Point) => boolean 
 }
 
 export { toEdge };
+
+/** The point `back` metres from a line's last corner, walking back along it. */
+function pointBack(line: readonly Point[], back: number): Point {
+  let left = back;
+  for (let at = line.length - 1; at > 0; at--) {
+    const b = line[at] as Point;
+    const a = line[at - 1] as Point;
+    const run = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (left <= run) {
+      const t = run === 0 ? 0 : left / run;
+      return [b[0] + (a[0] - b[0]) * t, b[1] + (a[1] - b[1]) * t];
+    }
+    left -= run;
+  }
+  return line[0] as Point;
+}
+
+/** A line from its start to `length` metres along it. */
+function sliceTo(line: readonly Point[], length: number): Point[] {
+  const out: Point[] = [line[0] as Point];
+  let walked = 0;
+  for (let at = 1; at < line.length; at++) {
+    const a = line[at - 1] as Point;
+    const b = line[at] as Point;
+    const run = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (walked + run >= length) {
+      const t = run === 0 ? 0 : (length - walked) / run;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      return out;
+    }
+    out.push(b);
+    walked += run;
+  }
+  return out;
+}

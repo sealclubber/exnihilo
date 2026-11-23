@@ -25,7 +25,7 @@ current phase before starting, and the README for how things run today.
 | Measure the shape of laid-out towns | `node scripts/measure-layout.ts --all` |
 
 **How long things take** (measured 2026-11-23 on the development machine, phase
-6D.3). Plan around these; run a single test file with `npx vitest run <file>`
+6D.4). Plan around these; run a single test file with `npx vitest run <file>`
 while working, and the full check once at the end.
 
 | Task | Time |
@@ -36,7 +36,7 @@ while working, and the full check once at the end.
 | `packages/core/test/outsiders.test.ts`, `districts.test.ts` | about 2 to 3 minutes each |
 | `packages/core/test/grown.test.ts` (the five test towns) | about 1 minute |
 | `npm run test:viewer` | about 1.5 minutes |
-| Grown layout of one town | Badanos 1 s, Cevilefon 2 s, Pombal 8 s, the slowest of Lomia about 17 s |
+| Grown layout of one town | Badanos 1 s, Cevilefon 2 s, Pombal 5 s, the slowest of Lomia (Tames, five attempts) about 16 s |
 | All of Lomia laid out once, one core | about 7 minutes |
 
 The two whole-Lomia tests carry a 900-second limit of their own. Commands
@@ -193,7 +193,8 @@ centre, x east and y south; bearings are degrees clockwise from north.
   the district's lots.
 - **Footprints** are the outlines of a lot's buildings: they lie inside the
   lot and do not overlap each other, and the rest of the lot is open ground.
-- **Walls and places.** A wall is a line with gates on it, each a junction
+- **Walls and places.** A town has at most one wall: one closed line, or open
+  lines that end at the banks where water parts it, with gates on them, each a junction
   kept by a gatehouse; no segment crosses a wall but at a gate. A plaza is a
   place: open ground that is also the lot of its building. Only a brief
   flagged for either has one.
@@ -228,7 +229,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 8 and 5.
+  inputs would change. Today they are 6, 9 and 5.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

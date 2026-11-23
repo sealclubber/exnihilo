@@ -21,7 +21,7 @@ const TRIES = 12;
 const sub = (a: Point, b: Point): Point => [a[0] - b[0], a[1] - b[1]];
 const cross = (a: Point, b: Point) => a[0] * b[1] - a[1] * b[0];
 const dot = (a: Point, b: Point) => a[0] * b[0] + a[1] * b[1];
-const length = (a: Point) => Math.hypot(a[0], a[1]);
+const length = (a: Point) => Math.sqrt(a[0] * a[0] + a[1] * a[1]);
 const lerp = (a: Point, b: Point, t: number): Point => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 
 /** Twice the signed area: positive when the points run anticlockwise with y up (clockwise as drawn, y down). */
@@ -494,6 +494,61 @@ export function offsetLine(line: readonly Point[], by: number): Point[] {
 
 /** How many pieces the round end of a strip is drawn with. */
 const CAP_PIECES = 8;
+
+/**
+ * A closed ring moved sideways by `by` metres, to its left as it runs, each corner where the moved edges either side
+ * meet. Small loops on the inside of tight bends are taken out, looking only a short way along the ring.
+ */
+export function offsetRing(ring: readonly Point[], by: number, window = 24): Point[] {
+  const n = ring.length;
+  const normals = ring.map((point, i) => {
+    const d = sub(ring[(i + 1) % n] as Point, point);
+    const run = length(d) || 1;
+    return [-d[1] / run, d[0] / run] as Point;
+  });
+  let out: Point[] = ring.map((point, i) => {
+    const before = normals[(i + n - 1) % n] as Point;
+    const after = normals[i] as Point;
+    const a: Point = [point[0] + before[0] * by, point[1] + before[1] * by];
+    const b: Point = [point[0] + after[0] * by, point[1] + after[1] * by];
+    // A sharp corner is cut off rather than mitred to a spike.
+    if (dot(before, after) < 0.5) return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    return meet(a, [before[1], -before[0]], b, [after[1], -after[0]]) ?? a;
+  });
+  for (let guard = 0; guard < n; guard++) {
+    let found = false;
+    search: for (let i = 0; i < out.length; i++) {
+      const a = out[i] as Point;
+      const b = out[(i + 1) % out.length] as Point;
+      for (let step = 2; step <= window && step < out.length - 1; step++) {
+        const j = (i + step) % out.length;
+        const c = out[j] as Point;
+        const d = out[(j + 1) % out.length] as Point;
+        const ab = sub(b, a);
+        const cd = sub(d, c);
+        const denominator = cross(ab, cd);
+        if (Math.abs(denominator) < 1e-12) continue;
+        const t = cross(sub(c, a), cd) / denominator;
+        const u = cross(sub(c, a), ab) / denominator;
+        if (t > 0 && t < 1 && u > 0 && u < 1) {
+          const point = lerp(a, b, t);
+          // The corners from after i up to j go, replaced by the crossing.
+          const keep: Point[] = [];
+          for (let k = 0; k < out.length; k++) {
+            const within = j > i ? k > i && k <= j : k > i || k <= j;
+            if (!within) keep.push(out[k] as Point);
+            if (k === i) keep.push(point);
+          }
+          out = keep;
+          found = true;
+          break search;
+        }
+      }
+    }
+    if (!found) break;
+  }
+  return out;
+}
 
 /** The outline of a line drawn `width` metres wide, its ends rounded as a roadway's are. */
 export function stripOutline(line: readonly Point[], width: number): Point[] {

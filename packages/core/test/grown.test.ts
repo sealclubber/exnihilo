@@ -26,11 +26,12 @@ import {
   generateGrownLayout,
   generateLayout,
   geometry,
+  lotSizeOf,
   riverOutline,
   riverWidthAt,
 } from '../src/index.ts';
 import { lomiaWorld, medievalPack, medievalPackBefore6D } from './pack.ts';
-import { arterialOverrun, arterials, bridgeAngles, highwayChains, laneShare, lotShapes, ringDistricts, sizeSpread, stretch, wallShape, wards } from './shape.ts';
+import { arterialOverrun, arterials, bridgeAngles, highwayChains, laneShare, lotShapes, ringDistricts, sizeSpread, stretch, wallShape, wallStretches, wards, width } from './shape.ts';
 
 const pack = medievalPack();
 const grown = pack.layout.grown!;
@@ -66,6 +67,12 @@ function leastBow(line: Point[], span: number, layout: Layout): number {
   return least;
 }
 
+/** Seen from the centre: beyond the wall where a line from the centre to the point crosses its lines an odd number of times. */
+function beyondWall(layout: Layout, point: Point): boolean {
+  const lines = layout.walls.flatMap((wall) => (wall.closed ? wall.lines.map((line) => [...line, line[0]!]) : wall.lines));
+  return lines.reduce((sum, line) => sum + geometry.crossingsOfPolyline([0, 0], point, line), 0) % 2 === 1;
+}
+
 beforeAll(() => {
   for (const name of NAMES) {
     const brief = lomiaWorld().settlements.find((entry) => entry.name === name)!;
@@ -80,7 +87,7 @@ describe('the grown generator', () => {
     const { brief, city, layout } = town('Flupines');
     expect(layout.summary.generator).toBe(GROWN_GENERATOR);
     expect(layout.summary.layoutVersion).toBe(LAYOUT_VERSION);
-    expect(LAYOUT_VERSION).toBe(8);
+    expect(LAYOUT_VERSION).toBe(9);
     expect(generateLayout(city, brief, pack, { generator: 'grid' }).summary.generator).toBe('grid');
     // A pack that says nothing is laid out on the grid, as before the choice existed.
     expect(generateLayout(generateCity(brief, medievalPackBefore6D()), brief, medievalPackBefore6D()).summary.generator).toBe('grid');
@@ -110,7 +117,7 @@ describe('the grown generator', () => {
     const other = generateLayout(city, brief, pack, { seed: 12345 });
     expect(JSON.stringify(other.segments)).not.toBe(JSON.stringify(layout.segments));
     expect(checkLayout(other, city, brief, pack)).toEqual([]);
-    const saved = JSON.parse(readFileSync(new URL('./baselines/layout-grown-v8.json', import.meta.url), 'utf8')) as { towns: Record<string, string> };
+    const saved = JSON.parse(readFileSync(new URL('./baselines/layout-grown-v9.json', import.meta.url), 'utf8')) as { towns: Record<string, string> };
     for (const name of NAMES) expect(createHash('sha256').update(JSON.stringify(town(name).layout)).digest('hex'), name).toBe(saved.towns[name]);
   });
 
@@ -278,6 +285,16 @@ describe('walls, gates and the plaza', () => {
     expect(town('Flupines').layout.places).toEqual([]);
   });
 
+  it('gives a walled town one wall, never along the water nor on a road', () => {
+    for (const name of ['Pombal', 'Cevilefon', 'Vereceldo']) {
+      const { layout } = town(name);
+      expect(layout.walls, name).toHaveLength(1);
+      const stretches = wallStretches(layout);
+      expect(stretches.alongWater, name).toBeLessThanOrEqual(10);
+      expect(stretches.onRoad, name).toBeLessThanOrEqual(10);
+    }
+  });
+
   it('keeps a plaza within the pack\'s bounds, as the open lot of its building', () => {
     for (const name of ['Pombal', 'Cevilefon']) {
       const { city, layout } = town(name);
@@ -312,10 +329,8 @@ describe('walls, gates and the plaza', () => {
         expect([...reached].some((id) => geometry.distanceToPolygonEdge(junctions.get(id)!.position, plaza.polygon) <= reach), `${name} ${exit.id}`).toBe(true);
       }
       // From a lot outside the wall to one inside, the way passes a gate.
-      const ring = layout.walls.reduce((longest, wall) => (wall.line.length > longest.line.length ? wall : longest));
-      const line = ring.closed ? [...ring.line, ring.line[0]!] : ring.line;
       const gatehouses = new Set(layout.walls.flatMap((wall) => wall.gates.map((gate) => gate.buildingId)));
-      const beyond = (lot: Layout['lots'][number]) => geometry.crossingsOfPolyline([0, 0], polygonCentroid(lot.polygon), line) % 2 === 1;
+      const beyond = (lot: Layout['lots'][number]) => beyondWall(layout, polygonCentroid(lot.polygon));
       const lots = layout.lots.filter((lot) => !gatehouses.has(lot.buildingId));
       const inside = lots.find((lot) => !beyond(lot))!;
       const outside = lots.filter(beyond);
@@ -333,9 +348,7 @@ describe('walls, gates and the plaza', () => {
     const outside = (name: string) => {
       const { layout } = town(name);
       const gatehouses = new Set(layout.walls.flatMap((wall) => wall.gates.map((gate) => gate.buildingId)));
-      const ring = layout.walls.reduce((longest, wall) => (wall.line.length > longest.line.length ? wall : longest));
-      // Seen from the centre: beyond the wall where a line from the centre to the lot crosses it.
-      return layout.lots.filter((lot) => !gatehouses.has(lot.buildingId) && geometry.crossingsOfPolyline([0, 0], polygonCentroid(lot.polygon), ring.closed ? [...ring.line, ring.line[0]!] : ring.line) % 2 === 1).length;
+      return layout.lots.filter((lot) => !gatehouses.has(lot.buildingId) && beyondWall(layout, polygonCentroid(lot.polygon))).length;
     };
     expect(outside('Pombal')).toBeGreaterThan(100);
     expect(outside('Cevilefon')).toBeGreaterThan(100);
@@ -344,13 +357,18 @@ describe('walls, gates and the plaza', () => {
 });
 
 describe('wards and buildings', () => {
-  it('cuts lots of many sizes, few of them long and thin', () => {
-    for (const name of ['Badanos', 'Pombal']) {
-      const shapes = lotShapes(town(name).layout);
-      console.log(`${name}: lot length over width, median ${shapes.median.toFixed(2)}, over four ${(shapes.overFour * 100).toFixed(1)}%`);
-      // Estimates: a median under 2 and under 3% over 4 times as long as wide. Held a little looser.
-      expect(shapes.median, name).toBeLessThan(2);
-      expect(shapes.overFour, name).toBeLessThan(0.08);
+  it('cuts lots of many sizes, none of them slivers', () => {
+    for (const name of ['Badanos', 'Cevilefon', 'Pombal', 'Vereceldo']) {
+      const { city, layout } = town(name);
+      const shapes = lotShapes(layout);
+      console.log(`${name}: lot length over width, median ${shapes.median.toFixed(2)}, over four ${(shapes.overFour * 100).toFixed(2)}%, over six ${shapes.overSix}, narrowest ${shapes.narrowest.toFixed(1)} m`);
+      expect(shapes.overFour, name).toBeLessThan(0.01);
+      expect(shapes.overSix, name).toBe(0);
+      expect(shapes.median, name).toBeGreaterThanOrEqual(1.4);
+      expect(shapes.median, name).toBeLessThanOrEqual(1.8);
+      // None narrower than the pack's least width, but a building whose own pack lot is narrower.
+      const typeOf = new Map(city.buildings.map((building) => [building.id, building.type]));
+      for (const lot of layout.lots) expect(width(lot.polygon), lot.id).toBeGreaterThanOrEqual(Math.min(grown.buildings.leastWidth, lotSizeOf(typeOf.get(lot.buildingId)!, pack).frontage) - 1e-6);
     }
     for (const [district, spread] of sizeSpread(town('Badanos').layout)) expect(spread, district).toBeGreaterThanOrEqual(0.4);
   });

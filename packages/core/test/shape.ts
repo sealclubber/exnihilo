@@ -139,15 +139,15 @@ export function ringDistricts(layout: Layout): string[] {
     .map((area) => area.districtId);
 }
 
-/** A wall's sharpest turn between consecutive points away from its gates, and its longest diameter over its shortest width. */
+/** Each line of a wall: its sharpest turn between consecutive points away from its gates and its ends, and its longest diameter over its shortest width. */
 export function wallShape(layout: Layout): Array<{ worstTurn: number; diameters: number }> {
   const junctions = new Map(layout.junctions.map((junction) => [junction.id, junction.position]));
-  return layout.walls.map((wall) => {
+  return layout.walls.flatMap((wall) => wall.lines.map((line) => ({ wall, line }))).map(({ wall, line }) => {
     const gates = wall.gates.map((gate) => junctions.get(gate.junctionId) as Point);
-    const line = wall.line;
     let worstTurn = 0;
     const count = line.length;
-    for (let index = 1; index < count - (wall.closed ? 0 : 1); index++) {
+    // An open line's last stretches run square to the bank: its two ends are left out.
+    for (let index = wall.closed ? 1 : 2; index < count - (wall.closed ? 0 : 2); index++) {
       const [a, b, c] = [line[(index - 1 + count) % count] as Point, line[index] as Point, line[(index + 1) % count] as Point];
       if (gates.some((gate) => distance(gate, b) < 1e-6)) continue;
       worstTurn = Math.max(worstTurn, turnBetween(a, b, c));
@@ -170,10 +170,23 @@ export function aspect(polygon: Point[]): number {
   return Math.hypot(...rect.long) / Math.max(1e-9, Math.hypot(...rect.short));
 }
 
-/** The median lot's length over width, and the share of lots more than four times as long as wide. */
-export function lotShapes(layout: Layout): { median: number; overFour: number } {
+/** A lot's width: the short side of the smallest rectangle round it. */
+export function width(polygon: Point[]): number {
+  const rect = smallestRectangle(polygon);
+  return Math.hypot(...rect.short);
+}
+
+/** The median lot's length over width; the share more than four times as long as wide and the number more than six; how many are under 4 m wide, and the narrowest. */
+export function lotShapes(layout: Layout): { median: number; overFour: number; overSix: number; under4: number; narrowest: number } {
   const values = layout.lots.map((lot) => aspect(lot.polygon)).sort((a, b) => a - b);
-  return { median: values[Math.floor(values.length / 2)] ?? 0, overFour: values.filter((value) => value > 4).length / (values.length || 1) };
+  const widths = layout.lots.map((lot) => width(lot.polygon));
+  return {
+    median: values[Math.floor(values.length / 2)] ?? 0,
+    overFour: values.filter((value) => value > 4).length / (values.length || 1),
+    overSix: values.filter((value) => value > 6).length,
+    under4: widths.filter((value) => value < 4).length,
+    narrowest: Math.min(...widths),
+  };
 }
 
 /** For each district, the spread of its lots' areas: their standard deviation over their mean. */
@@ -235,4 +248,74 @@ export function bridgeAngles(layout: Layout): number[] {
     const between = Math.abs(((((across - flow) * 180) / Math.PI + 540) % 180));
     return Math.abs(90 - Math.min(between, 180 - between));
   });
+}
+
+/**
+ * The longest stretch of wall, in metres, that runs within `near` metres of water, and the longest that runs along a
+ * roadway (within half the wall's and half the road's width of its centre line, the road running within 30 degrees
+ * of the wall's line), away from the gates. Sampled every metre. An open line's last stretch at each end, which runs
+ * square to the bank to meet it, is not counted as running along the water.
+ */
+export function wallStretches(layout: Layout, near = 12): { alongWater: number; onRoad: number } {
+  const junctions = new Map(layout.junctions.map((junction) => [junction.id, junction.position]));
+  const river = layout.waters.find((water) => water.kind === 'river');
+  const sea = layout.waters.find((water) => water.kind === 'sea');
+  const toWater = (point: Point) =>
+    Math.min(
+      river && river.kind === 'river' ? distanceToPolyline(point, river.centreLine) - river.width / 2 : Infinity,
+      sea && sea.kind === 'sea' ? (pointInPolygon(point, sea.polygon) ? 0 : geometry.distanceToPolygonEdge(point, sea.polygon)) : Infinity,
+    );
+  /** The direction of a polyline where it passes nearest a point. */
+  const directionNear = (points: readonly Point[], point: Point): Point => {
+    let best: Point = [1, 0];
+    let gap = Infinity;
+    for (let k = 1; k < points.length; k++) {
+      const [a, b] = [points[k - 1] as Point, points[k] as Point];
+      const away = geometry.distanceToPiece(point, a, b);
+      if (away < gap) {
+        gap = away;
+        const run = distance(a, b) || 1;
+        best = [(b[0] - a[0]) / run, (b[1] - a[1]) / run];
+      }
+    }
+    return best;
+  };
+  let alongWater = 0;
+  let onRoad = 0;
+  for (const wall of layout.walls) {
+    const gates = wall.gates.map((gate) => junctions.get(gate.junctionId) as Point);
+    for (const raw of wall.lines) {
+      const line = wall.closed ? [...raw, raw[0] as Point] : raw;
+      const total = polylineLength(line);
+      let water = 0;
+      let road = 0;
+      let walked = 0;
+      for (let k = 1; k < line.length; k++) {
+        const [a, b] = [line[k - 1] as Point, line[k] as Point];
+        const run = distance(a, b);
+        const along: Point = [(b[0] - a[0]) / (run || 1), (b[1] - a[1]) / (run || 1)];
+        const steps = Math.max(1, Math.round(run));
+        for (let step = 0; step < steps; step++) {
+          const point: Point = [a[0] + (b[0] - a[0]) * ((step + 0.5) / steps), a[1] + (b[1] - a[1]) * ((step + 0.5) / steps)];
+          const at = walked + (run * (step + 0.5)) / steps;
+          const piece = run / steps;
+          const end = !wall.closed && (at < 15 || at > total - 15);
+          water = !end && toWater(point) < near ? water + piece : 0;
+          const atGate = gates.some((gate) => distance(gate, point) < 10);
+          const alongRoad =
+            !atGate &&
+            layout.segments.some((segment) => {
+              if (distanceToPolyline(point, segment.points) >= segment.width / 2 + wall.width / 2) return false;
+              const direction = directionNear(segment.points, point);
+              return Math.abs(direction[0] * along[0] + direction[1] * along[1]) > Math.cos(Math.PI / 6);
+            });
+          road = alongRoad ? road + piece : 0;
+          alongWater = Math.max(alongWater, water);
+          onRoad = Math.max(onRoad, road);
+        }
+        walked += run;
+      }
+    }
+  }
+  return { alongWater, onRoad };
 }

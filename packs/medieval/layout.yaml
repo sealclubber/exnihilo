@@ -178,8 +178,10 @@ grown:
   # leaves square, leaning along the highway by about `lean`, and strays by
   # `wander` metres; it stops `bank` metres from water. Once the ground is
   # known it is cut back to `trim` metres past it, and dropped if shorter than
-  # `shortest`.
+  # `shortest`. In a settlement of fewer than `streetBelow` residents they
+  # are as wide as streets.
   arterials:
+    streetBelow: 1000
     spacing: {min: 130, max: 220}
     span: 1.25
     reach: 1.5
@@ -237,9 +239,13 @@ grown:
   # loose: more pieces left open toward the edge, and buildings drawn in from
   # their lots by `loose.pull` metres. A ward with little road along it is
   # given no more buildings than `frontDepth` metres of ground behind that
-  # road would hold.
+  # road would hold. No cut leaves a lot narrower than `leastWidth` metres
+  # (but for a building whose own lot is narrower, such as a market stall),
+  # nor more than `longest` times as long as it is wide.
   buildings:
     frontDepth: 60
+    leastWidth: 5
+    longest: 3.5
     alleyAbove: 1
     squareBelow: 4
     pieceShare: 0.7
