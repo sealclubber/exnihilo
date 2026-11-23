@@ -22,7 +22,7 @@ current phase before starting, and the README for how things run today.
 | Generate one city | `npm run generate -- <settlement id>` |
 | Print a settlement's day | `npm run day -- <settlement id> --day <number>` |
 | Draw a town's layout to SVG | `npm run render -- <settlement id>` |
-| Draw the staged generator's plan of a town | `node scripts/render-stages.ts <out folder> <suffix> <name>...` |
+| Draw the staged generator's plan of a town | `node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <name>...` |
 
 **How long things take** (measured 2026-11-23 on the development machine,
 with the grid laying every town out). Run a single test file with
@@ -33,6 +33,7 @@ with the grid laying every town out). Run a single test file with
 | `npm run check` (type-check and every test) | about 2 minutes |
 | `npm run test:viewer` | about 1 minute |
 | `packages/core/test/staged-roads.test.ts` (stages 1 to 3 for all 682 settlements) | about 10 seconds |
+| `packages/core/test/staged-wall.test.ts` (stages 4 and 5 for all 682 settlements) | about 10 seconds |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.

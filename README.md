@@ -492,10 +492,28 @@ and each stage draws on streams named `staged-…`. So far:
    but no port flag has a landing with a single jetty. The sea routes are
    one highway from the centre to the quay, and each has its exit at an end
    of the quay.
+4. **The wall** (`staged/wall.ts`), for towns flagged `walls`. One rounded
+   ring about the centre, holding ground for half the town's buildings: an
+   oval along the road where one road runs through, nearly round where
+   several meet. Towers stand about every 85 m and the wall runs straight
+   between them. At water it ends at the bank, and at a quay at its edge.
+   Where under 30% of the ring lies across a river, or the town has no
+   bridge, the far part is left out and the river closes that side. A gate
+   stands wherever a highway or main street crosses the wall, and at every
+   bridge into a bank the river closes.
+5. **Special wards** (`staged/special.ts`). The plaza of a town flagged
+   `plaza` lies where the highways meet. The castle of a town flagged
+   `citadel` stands just off it in the widest gap between the roads that
+   leave the centre, inside the wall and clear of roads and water. Both are
+   sized per building between a least and a most, and never more than a
+   share of the ground the town needs, so that a village's are small.
 
-`node scripts/render-stages.ts <out folder> <suffix> <settlement name>...`
-draws the plan as far as the stages go; `docs/renders/*-6e-step1.svg` are
-seven towns at this stage.
+`node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...`
+draws the plan as far as the stages go; `--as walls,plaza,citadel` draws a
+town as if its brief had those flags too. `docs/renders/*-6e-step1.svg` and
+`*-6e-step2.svg` are seven towns after each step, and
+`badanos-6e-step2-as-walled.svg` is Badanos, which the world gave no wall,
+drawn with one for comparison with the prototype.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
@@ -513,7 +531,7 @@ npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <fi
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1`).
+and the staged generator's plans step by step (`-6e-step1`, `-6e-step2`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

@@ -72,3 +72,71 @@ export function tidy(points: readonly Point[]): Point[] {
   }
   return out;
 }
+
+/** Every point at which one line crosses another, as distances along the first. */
+export function crossingsAlong(line: readonly Point[], other: readonly Point[]): number[] {
+  const out: number[] = [];
+  let at = 0;
+  for (let k = 1; k < line.length; k++) {
+    const [a, b] = [line[k - 1] as Point, line[k] as Point];
+    const piece = distance(a, b);
+    for (let index = 1; index < other.length; index++) {
+      const [c, d] = [other[index - 1] as Point, other[index] as Point];
+      const denominator = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0]);
+      if (denominator === 0) continue;
+      const t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / denominator;
+      const u = ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])) / denominator;
+      // Half-open, so that a crossing at a shared corner is counted once.
+      if (t >= 0 && t < 1 && u >= 0 && u < 1) out.push(at + t * piece);
+    }
+    at += piece;
+  }
+  return out.sort((x, y) => x - y);
+}
+
+/** The ways roads leave the centre: for each highway that passes through it, the direction `probe` metres along, each way it runs. */
+export function armsAt(roads: ReadonlyArray<readonly Point[]>, within: number, probe: number): Point[] {
+  const arms: Point[] = [];
+  for (const road of roads) {
+    const length = polylineLength(road);
+    let along = 0;
+    let least = Infinity;
+    let walked = 0;
+    for (let k = 1; k < road.length; k++) {
+      const [a, b] = [road[k - 1] as Point, road[k] as Point];
+      const piece = distance(a, b);
+      const t = piece === 0 ? 0 : Math.min(Math.max(-(a[0] * (b[0] - a[0]) + a[1] * (b[1] - a[1])) / (piece * piece), 0), 1);
+      const away = Math.hypot(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+      if (away < least) {
+        least = away;
+        along = walked + t * piece;
+      }
+      walked += piece;
+    }
+    if (least > within) continue;
+    for (const sign of [1, -1]) {
+      const room = sign > 0 ? length - along : along;
+      if (room < probe / 2) continue;
+      const point = pointAlongPolyline(road, along + sign * Math.min(probe, room));
+      const far = Math.hypot(point[0], point[1]);
+      if (far > 0) arms.push([point[0] / far, point[1] / far]);
+    }
+  }
+  return arms;
+}
+
+/** A polygon of `sides` corners about a point, each corner up to `jitter` nearer or further, then sized to an area exactly. */
+export function cornered(rng: Rng, centre: Point, wanted: number, sides: number, turn: number, jitter: number): Point[] {
+  const raw = Array.from({ length: sides }, (_, k): Point => {
+    const reach = 1 + (2 * rng.next() - 1) * jitter;
+    const angle = turn + (2 * Math.PI * k) / sides;
+    return [reach * Math.cos(angle), reach * Math.sin(angle)];
+  });
+  let twice = 0;
+  raw.forEach((point, k) => {
+    const next = raw[(k + 1) % sides] as Point;
+    twice += point[0] * next[1] - next[0] * point[1];
+  });
+  const scale = Math.sqrt(wanted / (Math.abs(twice) / 2));
+  return raw.map((point) => add(centre, point, scale));
+}

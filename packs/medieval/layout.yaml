@@ -207,8 +207,9 @@ staged:
   # in steps of `step` metres. Beside a river it keeps `waterClear` metres
   # from the bank, and where it came nearer it is moved `waterPush` times that
   # far out; an exit that would fall in the water is turned by up to
-  # `exitShift` degrees away from it.
-  highways: {through: 150, wander: 0.04, step: 45, waterClear: 12, waterPush: 1.25, exitShift: 15}
+  # `exitShift` degrees away from it. Which way a highway leaves the centre is
+  # read `armProbe` metres along it.
+  highways: {through: 150, wander: 0.04, step: 45, waterClear: 12, waterPush: 1.25, exitShift: 15, armProbe: 60}
 
   # Bridges stand only where a route crosses the river or the town is astride
   # it, and are placed before the roads that use them. A town is astride its
@@ -258,10 +259,45 @@ staged:
     veer: 0.6
     beyond: 0.5
 
-  # The plaza of a town flagged for one: so many square metres for each
-  # building, between a least and a most. A river never passes nearer the
-  # centre than the plaza reaches, with a highway's width to spare.
-  plaza: {perBuilding: 1.3, min: 1200, max: 6500}
+  # The wall of a town flagged `walls`: one rounded ring about the centre,
+  # enclosing `perBuilding` square metres for `share` of the town's buildings.
+  # Where at most two roads leave the centre it is an oval `long` times as
+  # long as wide, along the road; otherwise `round` times. Each `wobble`
+  # swells and narrows it `waves` times round by `size` of its radius, so
+  # that it is not a perfect ellipse. Towers stand about every
+  # `towers.spacing` metres, at least `towers.least`, each moved along by up
+  # to `towers.jitter` of a spacing, and the wall runs straight between them.
+  # At water the wall ends at the bank; a length under `shortest` metres is
+  # left out. Where less than `dropFarBelow` of the ring's area lies across a
+  # river, or the town has no bridge, the far part is left out and the river
+  # closes that side.
+  wall:
+    share: 0.5
+    perBuilding: 330
+    long: 1.4
+    round: 1.12
+    wobble: [{waves: 2, size: 0.06}, {waves: 3, size: 0.04}]
+    towers: {spacing: 85, least: 8, jitter: 0.15}
+    shortest: 30
+    dropFarBelow: 0.3
+
+  # Special wards, placed by rule before ordinary wards exist. Each has
+  # `perBuilding` square metres for each of the town's buildings, between
+  # `min` and `max`, but never more than `groundShare` of the ground the
+  # town's buildings need, so that a village's plaza is a green and its
+  # castle a tower house. Each has `sides` corners, moved in or out by up to
+  # `jitter` of the radius.
+  # The plaza, for a town flagged `plaza`, lies where the highways meet. The
+  # river is never nearer the centre than its reach and a highway's width.
+  plaza: {perBuilding: 1.3, min: 1200, max: 6500, groundShare: 0.03, sides: 4, jitter: 0.1}
+
+  # The castle, for a town flagged `citadel`, stands just off the plaza in the
+  # widest gap between the roads that leave the centre: `offPlaza` metres
+  # clear of the plaza, then `step` metres further out at a time until it is
+  # inside the wall and `fromWall` metres from it, `fromWater` metres from
+  # water and `fromRoad` metres from the edge of any road. If no gap between
+  # roads has room, every `turn` degrees round is tried.
+  castle: {perBuilding: 3.2, min: 3500, max: 14000, groundShare: 0.05, sides: 5, jitter: 0.1, offPlaza: 30, step: 15, fromWall: 12, fromWater: 15, fromRoad: 3, turn: 15}
 
   # The harbour. A sea route is a highway from the centre that ends at the
   # quay, and its exit is at the end of the quay: ships leave by water.

@@ -11,6 +11,8 @@ const LAND = '#bfbfb5';
 const WATER = '#8d9a9c';
 const ROAD = '#e1dbd5';
 const INK = '#3f322c';
+const CASTLE = '#9a9486';
+const GATE = '#d9a441';
 
 const round = (value: number) => String(Math.round(value * 10) / 10);
 const path = (points: readonly Point[], closed: boolean) => `${points.map(([x, y], at) => `${at === 0 ? 'M' : 'L'}${round(x)} ${round(y)}`).join('')}${closed ? 'Z' : ''}`;
@@ -30,6 +32,7 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     lines.push(`<path d="${path(points, false)}" fill="none" stroke="${INK}" stroke-width="${round(width)}" stroke-linejoin="round"/>`);
     lines.push(`<path d="${path(points, false)}" fill="none" stroke="${ROAD}" stroke-width="${round(width - 1.4)}" stroke-linejoin="round"/>`);
   };
+  if (plan.plaza) lines.push(`<path d="${path(plan.plaza.polygon, true)}" fill="${ROAD}" stroke="${INK}" stroke-width="1"/>`);
   for (const street of plan.mainStreets) road(street, mainStreetWidth - 2);
   for (const highway of plan.highways) road(highway.points, highwayWidth - 2);
   if (plan.harbour) {
@@ -37,7 +40,17 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     road(plan.harbour.quay, plan.harbour.width);
   }
   for (const bridge of plan.bridges) road([bridge.a, bridge.b], highwayWidth + 1);
-  lines.push(`<circle cx="0" cy="0" r="${round(letter / 3)}" fill="${INK}"/>`);
+  const tower = (point: Point, half: number) => lines.push(`<rect x="${round(point[0] - half)}" y="${round(point[1] - half)}" width="${round(2 * half)}" height="${round(2 * half)}" fill="${INK}"/>`);
+  if (plan.castle) {
+    lines.push(`<path d="${path(plan.castle.polygon, true)}" fill="${CASTLE}" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>`);
+    for (const corner of plan.castle.polygon) tower(corner, 4.5);
+  }
+  if (plan.wall) {
+    for (const part of plan.wall.parts) lines.push(`<path d="${path(part.points, part.closed)}" fill="none" stroke="${INK}" stroke-width="5" stroke-linejoin="round"/>`);
+    for (const point of plan.wall.towers) tower(point, 6);
+    for (const gate of plan.wall.gates) lines.push(`<circle cx="${round(gate.point[0])}" cy="${round(gate.point[1])}" r="9" fill="${GATE}" stroke="${INK}" stroke-width="2.5"/>`);
+  }
+  if (!plan.plaza) lines.push(`<circle cx="0" cy="0" r="${round(letter / 3)}" fill="${INK}"/>`);
   for (const exit of plan.exits) {
     const route = brief.routes[exit.route];
     if (exit.atQuay) lines.push(`<circle cx="${round(exit.point[0])}" cy="${round(exit.point[1])}" r="${round(letter / 3)}" fill="${INK}"/>`);
@@ -56,6 +69,9 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     ...(plan.mainStreets.length > 0 ? [`${plan.mainStreets.length} main street${plan.mainStreets.length === 1 ? '' : 's'} beyond the bridges`] : []),
     ...(plan.river && !plan.farBank ? ['no ground across the river'] : []),
     ...(plan.harbour ? [`${plan.harbour.kind} on the ${plan.harbour.on}`] : []),
+    ...(plan.wall ? [`wall ${Math.round(2 * plan.wall.long)} by ${Math.round(2 * plan.wall.short)} m, ${plan.wall.towers.length} towers, ${plan.wall.gates.length} gates${plan.wall.farDropped ? ', closed by the river' : ''}`] : []),
+    ...(plan.plaza ? [`plaza ${Math.round(plan.plaza.area).toLocaleString('en-US')} m²`] : []),
+    ...(plan.castle ? [`castle ${Math.round(plan.castle.area).toLocaleString('en-US')} m²`] : []),
   ].join(' · ');
   lines.push(`<text x="${round(-extent * 0.97)}" y="${round(-extent * 0.93)}" font-size="${round(letter * 1.5)}" font-weight="700" fill="${INK}">${escape(title)}</text>`);
   lines.push(`<text x="${round(-extent * 0.97)}" y="${round(-extent * 0.93 + letter * 1.6)}" font-size="${round(letter)}" fill="${INK}">${escape(facts)}</text>`);

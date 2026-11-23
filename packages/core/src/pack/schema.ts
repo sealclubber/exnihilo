@@ -382,9 +382,10 @@ const StagedSettingsSchema = z.strictObject({
    * Highways: two exits more than `through` degrees apart are one road through the centre. A highway strays aside
    * by `wander` times the reach and is evened in steps of `step` metres. It keeps `waterClear` metres from a
    * river it runs beside, being moved `waterPush` times that far out where it came nearer, and an exit that would
-   * fall in the water is turned by up to `exitShift` degrees.
+   * fall in the water is turned by up to `exitShift` degrees. Which way a highway leaves the centre is read
+   * `armProbe` metres along it.
    */
-  highways: z.strictObject({ through: z.number().min(90).max(180), wander: z.number().nonnegative(), step: metres, waterClear: metres, waterPush: share, exitShift: z.number().nonnegative() }),
+  highways: z.strictObject({ through: z.number().min(90).max(180), wander: z.number().nonnegative(), step: metres, waterClear: metres, waterPush: share, exitShift: z.number().nonnegative(), armProbe: metres }),
   /**
    * Bridges stand only where a route crosses the river or the town is astride it: where the river passes within
    * `astrideWithin` times the town's radius of the centre. `counts` gives the number by the town's buildings: the
@@ -422,8 +423,51 @@ const StagedSettingsSchema = z.strictObject({
     veer: z.number().nonnegative(),
     beyond: share,
   }),
-  /** The plaza of a town flagged for one: `perBuilding` square metres for each building, between `min` and `max`. */
-  plaza: z.strictObject({ perBuilding: z.number().nonnegative(), min: metres, max: metres }),
+  /**
+   * The wall of a town flagged for one: a rounded ring about the centre enclosing `perBuilding` square metres for
+   * `share` of the town's buildings. It is `long` times as long as wide, along the road, where at most two roads
+   * leave the centre, and `round` times otherwise. Each entry of `wobble` swells and narrows it `waves` times round
+   * by `size` of its radius. Towers stand about every `towers.spacing` metres, at least `towers.least` of them,
+   * each moved along by up to `towers.jitter` of a spacing; the wall runs straight between them and ends at a
+   * bank. A length shorter than `shortest` metres is left out. Where less than `dropFarBelow` of the ring's area
+   * lies across a river, the far part is left out and the river closes that side.
+   */
+  wall: z.strictObject({
+    share: probability,
+    perBuilding: metres,
+    long: z.number().min(1),
+    round: z.number().min(1),
+    wobble: z.array(z.strictObject({ waves: wholeNumber.min(1), size: probability })),
+    towers: z.strictObject({ spacing: metres, least: wholeNumber.min(3), jitter: z.number().min(0).max(0.45) }),
+    shortest: z.number().nonnegative(),
+    dropFarBelow: probability,
+  }),
+  /**
+   * The plaza of a town flagged for one, where the highways meet: `perBuilding` square metres for each building,
+   * between `min` and `max`, and never more than `groundShare` of the ground the town's buildings need, so that
+   * a village's is a green and not a parade ground. It has `sides` corners, each up to `jitter` nearer or further.
+   */
+  plaza: z.strictObject({ perBuilding: z.number().nonnegative(), min: metres, max: metres, groundShare: probability, sides: wholeNumber.min(3), jitter: z.number().min(0).max(0.3) }),
+  /**
+   * The castle of a town flagged for a citadel, sized as the plaza is. It stands in the widest gap between the
+   * roads that leave the centre, `offPlaza` metres clear of the plaza and then `step` metres further out at a time
+   * until it fits: inside the wall and `fromWall` metres from it, `fromWater` from water, `fromRoad` from the edge
+   * of any road. Where no gap between roads has room, every `turn` degrees round is tried.
+   */
+  castle: z.strictObject({
+    perBuilding: z.number().nonnegative(),
+    min: metres,
+    max: metres,
+    groundShare: probability,
+    sides: wholeNumber.min(3),
+    jitter: z.number().min(0).max(0.3),
+    offPlaza: z.number().nonnegative(),
+    step: metres,
+    fromWall: z.number().nonnegative(),
+    fromWater: z.number().nonnegative(),
+    fromRoad: z.number().nonnegative(),
+    turn: z.number().positive().max(180),
+  }),
   /**
    * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
    * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,

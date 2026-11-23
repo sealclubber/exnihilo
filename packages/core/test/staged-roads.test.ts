@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { generateCity } from '../src/index.ts';
 import { bearingDifference, bearingVector, distance, exactBearing, pointAlongPolyline, polylineLength } from '../src/layout/geometry.ts';
-import { type TownPlan, planTown, plazaRadius, stagedSettings } from '../src/layout/staged/plan.ts';
+import { type TownPlan, planTown, stagedSettings } from '../src/layout/staged/plan.ts';
+import { plazaRadius } from '../src/layout/staged/special.ts';
 import type { Point, SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
 import { parsePack } from '../src/index.ts';
