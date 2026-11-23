@@ -227,8 +227,9 @@ centre, x east and y south; bearings are degrees clockwise from north.
   before ordinary houses are laid, and are never clipped. Which building
   types are landmarks, what each reserves and its footprint template are
   pack data (`layout.staged.landmarks`): code must not name a temple.
-- **Make too many, keep the best.** More houses are made than the town has,
-  and each district keeps exactly its own number. Counts are never met by
+- **Make too many, keep the best.** More houses are made than the town has;
+  the town keeps exactly its number, chosen as one town, and each
+  district's count is then made exact at its borders. Counts are never met by
   cutting, moving or remaking houses. A district is a group of wards; its
   border may shift by whole blocks, and a house may be borrowed, but
   nothing is generated again.

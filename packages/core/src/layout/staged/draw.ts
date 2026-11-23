@@ -18,6 +18,8 @@ const WARD = '#a9a79b';
 /** A tint for each district in turn, as the prototype drew them. */
 const DISTRICTS = ['#6f6485', '#5c7688', '#666a7e', '#806a7c', '#5f8079', '#73708f', '#7a7868', '#8a6f63', '#5d6d5c', '#84789a'];
 const LANDMARK = '#3d3d3d';
+/** How far from a kept house the street beside it is drawn, in metres. */
+const STREET_REACH = 11;
 const GATE = '#d9a441';
 
 const round = (value: number) => String(Math.round(value * 10) / 10);
@@ -48,7 +50,10 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     // Streets are found, not made: the ground between blocks wherever a kept house or a landmark stands.
     const built = new Set([...plan.houses.filter((_, index) => plan.selection.district[index] !== undefined).map((house) => house.block), ...plan.landmarks.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block]))]);
     const street = plan.blocks.filter((_, index) => built.has(index)).flatMap((block) => grown([block.polygon], wardBorder / 2 + 0.6).rings);
-    lines.push(`<path d="${street.map((ring) => path(ring, true)).join('')}" fill="${ROAD}"/>`);
+    // Only within a few metres of a kept house or a landmark: a lane beside nothing is not drawn.
+    const beside = [...plan.houses.filter((_, index) => plan.selection.district[index] !== undefined).map((house) => house.outline), ...plan.landmarks.filter((landmark) => landmark.block !== undefined).map((landmark) => landmark.outline)];
+    lines.push(`<clipPath id="beside"><path d="${grown(beside, STREET_REACH, true).rings.map((ring) => path(ring, true)).join('')}"/></clipPath>`);
+    lines.push(`<path d="${street.map((ring) => path(ring, true)).join('')}" fill="${ROAD}" clip-path="url(#beside)"/>`);
     lines.push(`<path d="${plan.blocks.filter((_, index) => built.has(index)).map((block) => path(block.polygon, true)).join('')}" fill="${LAND}"/>`);
     lines.push(`<path d="${plan.passages.filter((passage) => built.has(passage.block)).map((passage) => path(cornersOf(passage.rect), true)).join('')}" fill="${ROAD}"/>`);
     if (kindOf && plan.fitting) {

@@ -1,13 +1,14 @@
 /**
  * Stage 11 of the staged generator: selection. Make too many, keep the best.
  *
- * More houses were made than the town has. Each district keeps exactly its
- * own number from the houses in its own wards, the best-placed first: the
- * innermost are always kept, as is everything inside the wall, and further
- * out keeping a house is more and more a matter of chance. The rest never
- * existed. A district whose wards hold too few houses first takes whole
- * blocks from the edges of its neighbours; failing that it takes unkept
- * houses from the nearest wards beside it, and those houses change district.
+ * More houses were made than the town has. The town keeps exactly as many
+ * as it has buildings, the best-placed first: the innermost are always
+ * kept, as is everything inside the wall, and further out keeping a house
+ * is more and more a matter of chance. The rest never existed. Each kept
+ * house then belongs to the district of its block, and each district's
+ * count is made exact at its borders: whole blocks change district first,
+ * from one with too many kept houses to a neighbour with too few, and what
+ * remains is settled house by house.
  */
 import type { StagedSettings } from '../../pack/schema.ts';
 import { type Block, wardRng } from './blocks.ts';
@@ -58,23 +59,39 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
     luck[index] = -Math.log(1 - rng.next()) * rules.luck;
   });
 
-  // ---- Borders adjusted: a district with too few houses takes whole blocks from the edges of its neighbours ----
-  // Wards are coarse, and a district's wards may hold a little less than it needs. It takes the nearest blocks
-  // of the wards beside it, but never from a neighbour that would then be short itself. Nothing is made again.
+  // ---- The town's houses, chosen as one town --------------------------------------------------------------------
+  // The innermost of the town's count are solid, as is everything inside the wall; beyond that edge, luck.
+  const total = wanted.reduce((sum, want) => sum + want, 0);
+  const inOrder = houses.map((_, index) => index).sort((a, b) => (base[a] as number) - (base[b] as number) || a - b);
+  const edge = base[inOrder[Math.min(inOrder.length - 1, Math.floor(rules.solid * total))] as number] ?? 0;
+  const score = new Float64Array(houses.length);
+  houses.forEach((_, index) => (score[index] = (base[index] as number) + (walled[index] ? 0 : Math.max((base[index] as number) - edge, 0) * (luck[index] as number))));
+  const chosen = houses.map((_, index) => index).sort((a, b) => (score[a] as number) - (score[b] as number) || a - b).slice(0, total);
+  const short = total - chosen.length;
+  const isKept = new Uint8Array(houses.length);
+  for (const index of chosen) isKept[index] = 1;
+
+  // ---- Each district's count made exact -----------------------------------------------------------------------
+  // A kept house belongs to the district of its block. Wards are coarse, so a district may hold more kept houses
+  // than it has buildings, or fewer. Whole blocks at the borders change district first, from a district with
+  // too many to a neighbour with too few; what remains is settled house by house. Nothing is made again.
   const blockDistrict = blocks.map((block) => plan.of[block.ward]);
-  const housesIn = blocks.map(() => 0);
-  for (const house of houses) housesIn[house.block] = (housesIn[house.block] as number) + 1;
+  const keptIn = blocks.map(() => 0);
+  for (const index of chosen) keptIn[(houses[index] as House).block] = (keptIn[(houses[index] as House).block] as number) + 1;
   const have = wanted.map(() => 0);
   blockDistrict.forEach((of, block) => {
-    if (of !== undefined) have[of] = (have[of] as number) + (housesIn[block] as number);
+    if (of !== undefined) have[of] = (have[of] as number) + (keptIn[block] as number);
   });
   const middles = blocks.map((block) => polygonCentroid(block.polygon));
-  let moved = 0;
-  wanted.forEach((want, of) => {
-    let need = want - (have[of] as number);
-    if (need <= 0) return;
+  const nearestOwn = (of: number) => {
     const own = middles.filter((_, block) => blockDistrict[block] === of);
-    if (own.length === 0) return;
+    return (point: readonly [number, number]) => (own.length === 0 ? Math.hypot(point[0], point[1]) : Math.min(...own.map((middle) => Math.hypot(middle[0] - point[0], middle[1] - point[1]))));
+  };
+  // Several rounds, in each of which a district takes the nearest blocks of a neighbour that has more to spare
+  // than it has itself, so long as the neighbour is left no worse off than the district then is. Surpluses and
+  // shortages so even out from neighbour to neighbour, wherever in the town they began.
+  for (let round = 0; round < rules.rounds; round++) wanted.forEach((want, of) => {
+    const away = nearestOwn(of);
     // The wards beside the district's own, and those beside them.
     const near = new Set<number>();
     plan.of.forEach((district, ward) => {
@@ -86,73 +103,49 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
     });
     const candidates = blocks
       .map((block, index) => ({ index, ward: block.ward }))
-      .filter(({ index, ward }) => blockDistrict[index] !== of && (housesIn[index] as number) > 0 && near.has(ward))
-      .map(({ index }) => ({ index, away: Math.min(...own.map((middle) => Math.hypot(middle[0] - (middles[index] as [number, number])[0], middle[1] - (middles[index] as [number, number])[1]))) }))
+      .filter(({ index, ward }) => blockDistrict[index] !== of && (keptIn[index] as number) > 0 && near.has(ward))
+      .map(({ index }) => ({ index, away: away(middles[index] as [number, number]) }))
       .sort((a, b) => a.away - b.away || a.index - b.index);
     for (const { index } of candidates) {
-      if (need <= 0) break;
       const donor = blockDistrict[index];
-      if (donor !== undefined && (have[donor] as number) - (housesIn[index] as number) < (wanted[donor] as number)) continue;
-      if (donor !== undefined) have[donor] = (have[donor] as number) - (housesIn[index] as number);
+      const count = keptIn[index] as number;
+      const balance = (have[of] as number) - want;
+      // From a ward in no district only what the district is short of.
+      if (donor === undefined ? count > -balance : (have[donor] as number) - count - (wanted[donor] as number) < balance + count) continue;
+      if (donor !== undefined) have[donor] = (have[donor] as number) - count;
       blockDistrict[index] = of;
-      have[of] = (have[of] as number) + (housesIn[index] as number);
-      need -= housesIn[index] as number;
+      have[of] = (have[of] as number) + count;
     }
   });
-  moved = blockDistrict.filter((of, block) => of !== plan.of[(blocks[block] as Block).ward]).length;
+  const moved = blockDistrict.filter((of, block) => of !== plan.of[(blocks[block] as Block).ward]).length;
 
+  // House by house: a district with too many gives up those of its kept houses that lie nearest a district with
+  // too few, and those houses change district.
   const district: Array<number | undefined> = houses.map(() => undefined);
-  const score = new Float64Array(houses.length);
-  const own: number[][] = wanted.map(() => []);
-  const loose: number[] = [];
-  houses.forEach((house, index) => {
-    const of = blockDistrict[house.block];
-    if (of === undefined) loose.push(index);
-    else (own[of] as number[]).push(index);
-    score[index] = base[index] as number;
-  });
-  const kept = wanted.map(() => 0);
+  for (const index of chosen) district[index] = blockDistrict[(houses[index] as House).block];
   const borrowed = wanted.map(() => 0);
-  own.forEach((candidates, of) => {
-    const want = wanted[of] as number;
-    const inOrder = [...candidates].sort((a, b) => (base[a] as number) - (base[b] as number) || a - b);
-    // The innermost of the district's count are solid; beyond that edge, luck.
-    const edge = base[inOrder[Math.min(inOrder.length - 1, Math.floor(rules.solid * want))] as number] ?? 0;
-    for (const index of candidates) score[index] = (base[index] as number) + (walled[index] ? 0 : Math.max((base[index] as number) - edge, 0) * (luck[index] as number));
-    const ranked = [...candidates].sort((a, b) => (score[a] as number) - (score[b] as number) || a - b);
-    for (const index of ranked.slice(0, want)) district[index] = of;
-    kept[of] = Math.min(want, ranked.length);
-  });
-
-  // ---- Districts with too few: unkept houses of the nearest wards beside them -----------------------------------
-  const byWard = new Map<number, number[]>();
-  houses.forEach((house, index) => byWard.set(house.ward, [...(byWard.get(house.ward) ?? []), index]));
-  let short = 0;
   wanted.forEach((want, of) => {
-    let need = want - (kept[of] as number);
+    const need = want - (have[of] as number);
     if (need <= 0) return;
-    // Wards in order of how near they are, across the ground between: the district's own first, at no distance.
-    const away = wards.map(() => Infinity);
-    const starts = wards.map((_, index) => index).filter((index) => plan.of[index] === of);
-    // A district with no ward of its own looks from the heart of the town outward.
-    const from = starts.length > 0 ? starts : wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind === 'ordinary').sort((a, b) => a.ward.growthRank - b.ward.growthRank || a.index - b.index).slice(0, 1).map(({ index }) => index);
-    for (const index of from) away[index] = 0;
-    const done = new Set<number>();
-    for (;;) {
-      let next = -1;
-      for (let index = 0; index < wards.length; index++) if (!done.has(index) && (away[index] as number) < Infinity && (next < 0 || (away[index] as number) < (away[next] as number))) next = index;
-      if (next < 0 || need <= 0) break;
-      done.add(next);
-      const spare = (byWard.get(next) ?? []).filter((index) => district[index] === undefined).sort((a, b) => (score[a] as number) - (score[b] as number) || a - b);
-      for (const index of spare.slice(0, need)) {
-        district[index] = of;
-        kept[of] = (kept[of] as number) + 1;
-        borrowed[of] = (borrowed[of] as number) + 1;
-        need--;
+    const away = nearestOwn(of);
+    const spare = chosen
+      .filter((index) => district[index] === undefined || (have[district[index] as number] as number) > (wanted[district[index] as number] as number))
+      .map((index) => ({ index, away: away((houses[index] as House).centre) }))
+      .sort((a, b) => a.away - b.away || a.index - b.index);
+    let taken = 0;
+    for (const { index } of spare) {
+      if (taken >= need) break;
+      const donor = district[index];
+      if (donor !== undefined) {
+        if ((have[donor] as number) <= (wanted[donor] as number)) continue;
+        have[donor] = (have[donor] as number) - 1;
       }
-      for (const beside of plan.beside[next] ?? []) away[beside.ward] = Math.min(away[beside.ward] as number, (away[next] as number) + beside.cost);
+      district[index] = of;
+      taken++;
     }
-    short += Math.max(need, 0);
+    have[of] = (have[of] as number) + taken;
+    borrowed[of] = taken;
   });
+  const kept = wanted.map((_, of) => district.filter((held) => held === of).length);
   return { blockDistrict, moved, district, kept, borrowed, short };
 }

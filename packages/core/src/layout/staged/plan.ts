@@ -174,17 +174,14 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     // Reservations first: ordinary houses fill only the blocks that are left. A landmark stands in its own district.
     const roads = [...wards.highways.map((highway) => highway.points), ...wards.streets.map((street) => street.points)];
     const wardsIn = input.districts.map((_, district) => new Set(districtPlan.of.flatMap((of, ward) => (of === district ? [ward] : []))));
-    // A landmark stands among the innermost blocks of its district: those that have room for most of its buildings.
+    // A landmark stands where the town will be built up: among the innermost blocks that have room for most of
+    // its buildings, never out in the fringe where few houses are kept.
     const inFar = blocks.map(() => false);
-    input.districts.forEach((district, index) => {
-      const scale = characterOf(settings, district.kind).scale;
-      const own = blocks.map((block, at) => ({ at, block, rank: wards.ground.rank(polygonCentroid(block.polygon)) })).filter(({ block }) => districtPlan.of[block.ward] === index).sort((a, b) => a.rank - b.rank || a.at - b.at);
-      let room = 0;
-      for (const { at, block } of own) {
-        if (room >= settings.landmarks.block.within * district.buildings) inFar[at] = true;
-        room += roomIn(block, settings, scale);
-      }
-    });
+    let room = 0;
+    for (const { at, block } of blocks.map((block, at) => ({ at, block, rank: wards.ground.rank(polygonCentroid(block.polygon)) })).sort((a, b) => a.rank - b.rank || a.at - b.at)) {
+      if (room >= settings.landmarks.block.within * input.buildings) inFar[at] = true;
+      room += roomIn(block, settings, block.scale);
+    }
     const { placed, unplaced } = reserve({
       settings,
       rng: stepRng(seed, 'staged-landmarks'),

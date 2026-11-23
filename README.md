@@ -537,8 +537,8 @@ and each stage draws on streams named `staged-…`. So far:
     building types that do and what each reserves: a ward (the citadel in
     the castle, with a keep; the market square, which is the plaza), a
     block, a slot or a gate. A block landmark takes a whole block, the one
-    nearest the plaza, a highway or main street, or the harbour, at least
-    90 m from any other; its footprint is a template from the pack (a
+    nearest the plaza, a highway or main street, or the harbour, within the
+    built-up town, at least 90 m from any other (30 m within one district); its footprint is a template from the pack (a
     cross, a hall round a yard, an L, a plain range) scaled down until it
     fits whole inside. It is never clipped. One that finds no block is
     reported and will be an ordinary house. Slots and gates are not
@@ -559,20 +559,23 @@ and each stage draws on streams named `staged-…`. So far:
     their band of the town) and takes neighbouring wards, nearest and
     innermost first. Crossing a highway, a main street, the wall or the
     river (only at a bridge) costs extra, so those become district borders.
-    A district stops when its wards have room for its buildings and some to
-    spare, and what is left over goes to the nearest district. A district
+    A district stops when its wards have room for its buildings, and what
+    is left over goes to the nearest district. A district
     sets its wards' character from the pack: how large houses and blocks
     are, how many lanes, how often a rear wing or a passage. A landmark
     stands in its own district, among its inner blocks.
-    **Selection** (`staged/selection.ts`). Each district keeps exactly its
-    own number of houses from its own blocks: the innermost 62% always,
-    everything inside the wall first, and beyond that by a score that luck
-    inflates with distance, so the town thins toward its edge. Wards are
-    coarse, so a district that would be short first takes whole blocks from
-    the edges of neighbours that have houses to spare; failing that it
-    borrows unkept houses from the nearest wards. If the whole town has too
-    few houses, ground is taken again half as large again, at most three
-    times: the generator's only loop, which no settlement of Lomia needs.
+    **Selection** (`staged/selection.ts`). The town keeps exactly as many
+    houses as it has buildings, chosen as one town: the innermost 62%
+    always, everything inside the wall first, and beyond that by a score
+    that luck inflates with distance, so the centre is solid and the town
+    thins toward its edge. A kept house belongs to the district of its
+    block. Wards are coarse, so each district's count is then made exact at
+    its borders: over a few rounds a district takes the nearest whole
+    blocks of a neighbour that has more to spare than it has, and what
+    remains is settled house by house (under 1% of houses). If the whole
+    town has too few houses, ground is taken again half as large again, at
+    most three times: the generator's only loop, which no settlement of
+    Lomia needs.
     **Which building goes where** (`staged/fitting.ts`). Every building the
     city made gets exactly one place, and none is added, removed or
     changed. A landmark with a ward or a block has its place already.

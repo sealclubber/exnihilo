@@ -129,6 +129,8 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
   });
   const roomy = blocks.map((block, index) => block.area > rules.area.min && block.area < rules.area.max && (shapes[index] as { long: number }).long >= rules.long && (shapes[index] as { narrow: number }).narrow >= rules.short);
   const reserved = new Set<number>();
+  /** The district of the landmark each reserved block holds. */
+  const holds = new Map<number, number | undefined>();
   const lines = new LineIndex();
   for (const road of roads) lines.add(road);
   // Those that want the plaza choose first, then the harbour, then the rest; within each, in the city's order.
@@ -160,8 +162,9 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
     search: for (const scales of [larger, rules.scales]) {
       for (const { index } of candidates) {
         const block = blocks[index] as Block;
-        // Landmarks stand apart from each other.
-        if ([...reserved].some((other) => distance((shapes[other] as { middle: Point }).middle, (shapes[index] as { middle: Point }).middle) < 4 * rules.apart && distanceBetweenPolygons((blocks[other] as Block).polygon, block.polygon) < rules.apart)) continue;
+        // Landmarks stand apart from each other, though those of one district may stand nearer.
+        const apart = (other: number) => (landmark.district !== undefined && holds.get(other) === landmark.district ? rules.apartWithin : rules.apart);
+        if ([...reserved].some((other) => distance((shapes[other] as { middle: Point }).middle, (shapes[index] as { middle: Point }).middle) < 4 * rules.apart && distanceBetweenPolygons((blocks[other] as Block).polygon, block.polygon) < apart(other))) continue;
         const shape = shapes[index] as { long: number; narrow: number; along: Point; middle: Point };
         const outline = outlineOf(block.polygon);
         let found: Fitted | undefined;
@@ -175,6 +178,7 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
         // Where a template's rectangles overlap, as a nave and a transept do, the outline's area is the footprint's.
         if (!found || polygonArea(found.outline) < rules.leastArea) continue;
         reserved.add(index);
+        holds.set(index, landmark.district);
         placed.push({ building: landmark.id, type: landmark.type, ...(landmark.district !== undefined && { district: landmark.district }), reservation: 'block', ward: block.ward, block: index, parts: found.parts, outline: found.outline, area: polygonArea(found.outline) });
         done = true;
         break search;

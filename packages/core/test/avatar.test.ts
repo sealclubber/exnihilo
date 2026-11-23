@@ -42,10 +42,16 @@ import {
   walkToBuilding,
   walkToPoint,
 } from '../src/index.ts';
+import { yardstick } from './cost.ts';
 import { BEFORE_6B5, medievalPack, medievalPackBefore6B, rawMedievalPack, settlement } from './pack.ts';
 
 /** A limit for the tests that plan whole towns, with headroom for a slower machine. */
 const SLOW = 60_000;
+/**
+ * A nearby query is quick: under 10 milliseconds on the development machine, whose yardstick (cost.ts) is about a
+ * third of a second. Measured against the yardstick, not the clock, so that a busy machine cannot fail it.
+ */
+const QUICK = 0.035;
 
 const pack = medievalPack();
 const { distance, polylineLength, projectOnPolyline, crossingsOfPolyline, distanceToPolyline } = geometry;
@@ -491,11 +497,12 @@ describe('perception', () => {
     for (const [hours, minutes] of [[7, 50], [12, 30]] as const) {
       const time = at(2, hours, minutes);
       life.nearby([0, 0], RADIUS, time);
+      const before = yardstick();
       const started = performance.now();
       for (const point of points) life.nearby(point, RADIUS, time);
       const each = (performance.now() - started) / points.length;
       report.push(`${String(hours).padStart(2, '0')}:${minutes} ${each.toFixed(3)} ms`);
-      expect(each).toBeLessThan(10);
+      expect(each / 1000 / Math.min(before, yardstick())).toBeLessThan(QUICK);
     }
     console.log(`A nearby query in Badanos: ${report.join(', ')}`);
   });
@@ -509,11 +516,12 @@ describe('perception', () => {
       const building = performance.now();
       pombal.life.nearby([0, 0], RADIUS, time);
       const built = performance.now() - building;
+      const before = yardstick();
       const started = performance.now();
       for (const point of points) pombal.life.nearby(point, RADIUS, time);
       const each = (performance.now() - started) / points.length;
       report.push(`${String(hours).padStart(2, '0')}:${minutes} ${each.toFixed(3)} ms (first ${built.toFixed(0)} ms)`);
-      expect(each).toBeLessThan(10);
+      expect(each / 1000 / Math.min(before, yardstick())).toBeLessThan(QUICK);
     }
     console.log(`A nearby query in Pombal: ${report.join(', ')}`);
   });
