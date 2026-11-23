@@ -521,3 +521,110 @@ describe('determinism, the one loop, and pack edits', () => {
     expect(grand.selection.kept).toEqual(plan.selection.kept);
   });
 });
+
+describe('which building goes where', () => {
+  /** Pairs of kept houses that stand next door to each other on one edge of a block. */
+  const nextDoor = (plan: TownPlan): Array<[number, number]> => {
+    const pairs: Array<[number, number]> = [];
+    const rows = new Map<string, number[]>();
+    plan.houses.forEach((house, index) => {
+      if (plan.fitting?.holder[index] === undefined) return;
+      const key = `${house.block}|${house.edge[0][0]}|${house.edge[0][1]}`;
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key)?.push(index);
+    });
+    const along = (index: number) => Math.hypot((plan.houses[index] as TownPlan['houses'][number]).front[0][0] - (plan.houses[index] as TownPlan['houses'][number]).edge[0][0], (plan.houses[index] as TownPlan['houses'][number]).front[0][1] - (plan.houses[index] as TownPlan['houses'][number]).edge[0][1]);
+    for (const row of rows.values()) {
+      row.sort((a, b) => along(a) - along(b));
+      for (let at = 1; at < row.length; at++) {
+        const first = plan.houses[row[at - 1] as number] as TownPlan['houses'][number];
+        if (along(row[at] as number) - (along(row[at - 1] as number) + Math.hypot(first.front[1][0] - first.front[0][0], first.front[1][1] - first.front[0][1])) < 1.5) pairs.push([row[at - 1] as number, row[at] as number]);
+      }
+    }
+    return pairs;
+  };
+  const typeOf = (input: TownInput) => new Map((input.list ?? []).map((building) => [building.id, building]));
+
+  it('every building of every city has exactly one place: a house or a reservation, in its own district', () => {
+    for (const { brief, input, plan } of everyPlan()) {
+      const buildings = typeOf(input);
+      const places = [...plan.landmarks.map((landmark) => landmark.building), ...(plan.fitting?.holder ?? []).filter((id): id is string => id !== undefined)];
+      expect(places.length, brief.name).toBe(buildings.size);
+      expect(new Set(places).size, brief.name).toBe(buildings.size);
+      for (const id of places) expect(buildings.has(id), brief.name).toBe(true);
+      plan.houses.forEach((_, index) => {
+        const held = plan.fitting?.holder[index];
+        const of = plan.selection.district[index];
+        expect(held !== undefined, brief.name).toBe(of !== undefined);
+        if (held !== undefined) expect(buildings.get(held)?.districtId, brief.name).toBe(plan.districts[of as number]?.id);
+      });
+    }
+  });
+
+  it('gives the larger houses to the types with the larger lots', () => {
+    const { input, plan } = named('Badanos');
+    const buildings = typeOf(input);
+    const areas = new Map<string, number[]>();
+    plan.houses.forEach((house, index) => {
+      const held = plan.fitting?.holder[index];
+      if (held === undefined) return;
+      const type = buildings.get(held)?.type as string;
+      if (!areas.has(type)) areas.set(type, []);
+      areas.get(type)?.push(house.area);
+    });
+    const median = (type: string) => quantile(areas.get(type) ?? [], 0.5);
+    expect(median('mansion')).toBeGreaterThan(median('townhouse'));
+    expect(median('townhouse')).toBeGreaterThan(median('cottage'));
+    expect(median('cottage')).toBeGreaterThan(median('shack'));
+    expect(median('farmstead')).toBeGreaterThan(median('market-stall'));
+  });
+
+  it('gathers trades along a street and keeps the types the pack spreads apart', () => {
+    let together = 0;
+    let pairs = 0;
+    let spreadPairs = 0;
+    let spreadTogether = 0;
+    const spread = new Set([...pack.workplaces, ...pack.landmarks].filter((type) => type.spread).map((type) => type.id));
+    for (const name of [...TEST_TOWNS, 'Karlen', 'Tames']) {
+      const { input, plan } = named(name);
+      const buildings = typeOf(input);
+      for (const [a, b] of nextDoor(plan)) {
+        const [one, other] = [buildings.get(plan.fitting?.holder[a] as string)?.type as string, buildings.get(plan.fitting?.holder[b] as string)?.type as string];
+        if (spread.has(one) || spread.has(other)) {
+          spreadPairs++;
+          if (one === other) spreadTogether++;
+        } else {
+          pairs++;
+          if (one === other) together++;
+        }
+      }
+    }
+    // Next-door neighbours are of one type far more often than chance would have it; spread types almost never.
+    expect(together / pairs).toBeGreaterThan(0.3);
+    expect(spreadTogether / spreadPairs).toBeLessThan(0.02);
+  });
+
+  it('puts the types the pack wants on a road on a highway or main street more often than other buildings', () => {
+    let fronting = 0;
+    let loving = 0;
+    for (const { plan } of everyPlan()) {
+      fronting += plan.fitting?.onRoads.fronting ?? 0;
+      loving += plan.fitting?.onRoads.of ?? 0;
+    }
+    const raw = rawMedievalPack();
+    raw.layout.staged.fitting.onRoads = [];
+    const { brief, input, plan } = named('Badanos');
+    const without = planTown(brief, input, parsePack(raw));
+    const wanted = new Set(settings.fitting.onRoads);
+    const buildings = typeOf(input);
+    const near = (other: TownPlan) => other.houses.filter((house, index) => wanted.has(buildings.get(other.fitting?.holder[index] as string)?.type as string) && other.ground.toRoad([(house.front[0][0] + house.front[1][0]) / 2, (house.front[0][1] + house.front[1][1]) / 2]) <= settings.fitting.roadWithin).length;
+    expect(near(plan)).toBeGreaterThan(near(without));
+    expect(fronting / loving).toBeGreaterThan(0.25);
+    // Which houses are kept does not change.
+    expect(JSON.stringify(without.selection.district)).toBe(JSON.stringify(plan.selection.district));
+  });
+
+  it('is left out where the plan was made for a bare number of buildings', () => {
+    expect(planTown(named('Flupines').brief, 95, pack).fitting).toBeUndefined();
+  });
+});

@@ -566,6 +566,19 @@ staged:
   # at most `tries` times; that is the generator's only loop.
   selection: {solid: 0.62, luck: 1.4, insideWall: 0.2, moreGround: 1.5, tries: 3}
 
+  # Which building goes where. Within a district the buildings are sorted by
+  # the area of their lot above (frontage times depth) and the kept houses by
+  # the area of their footprint, and paired largest to largest: so lot sizes
+  # are targets, not exact sizes. Buildings whose lots are alike then change
+  # places, so that trades gather along a street and the types the pack
+  # spreads stand apart. Last, a type listed in `onRoads` changes places with
+  # another of a like lot so as to front a highway or a main street: its
+  # front within `roadWithin` metres of one. FOR REVIEW: the list is setting
+  # content and a first proposal.
+  fitting:
+    onRoads: [tavern, general-shop, fine-shop, market-stall, bakery, butchery]
+    roadWithin: 16
+
   # The harbour. A sea route is a highway from the centre that ends at the
   # quay, and its exit is at the end of the quay: ships leave by water.
   # On a coast the quay is a strip along the shore with piers square to it,

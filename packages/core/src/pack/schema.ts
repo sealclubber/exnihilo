@@ -677,6 +677,14 @@ const StagedSettingsSchema = z.strictObject({
    */
   selection: z.strictObject({ solid: probability, luck: z.number().nonnegative(), insideWall: probability, moreGround: z.number().min(1), tries: wholeNumber }),
   /**
+   * Which building goes where. Within a district the buildings are sorted by the area of their pack lot and the
+   * kept houses by the area of their footprint, and paired largest to largest: pack lot sizes are targets, not
+   * exact sizes. Buildings with lots alike then change places so that trades gather along a street and spread
+   * types stand apart. A type listed in `onRoads` then changes places with one of a like lot so as to front a
+   * highway or main street: its front within `roadWithin` metres of one.
+   */
+  fitting: z.strictObject({ onRoads: z.array(id), roadWithin: metres }),
+  /**
    * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
    * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,
    * `piers.length` long and `piers.width` wide, the outermost `piers.first` of the quay's length from its ends;
@@ -1151,6 +1159,7 @@ function crossCheck(pack: SettingPack): string[] {
       if (mark.reservation === 'block' && mark.template === undefined) problems.push(`${where} reserves a block, so it needs a template for its footprint`);
     }
     for (const kind of Object.keys(pack.layout.staged.character.kinds)) needKind(kind, 'layout.staged.character.kinds');
+    for (const type of pack.layout.staged.fitting.onRoads) if (!types.has(type)) problems.push(`layout.staged.fitting.onRoads: "${type}" is not a building type of the pack`);
     for (const [name, template] of Object.entries(marks.templates)) {
       for (const [x0, y0, x1, y1] of template.parts) if (!(x0 < x1 && y0 < y1)) problems.push(`layout.staged.landmarks.templates: "${name}" has a part whose corners are not written lowest first`);
     }

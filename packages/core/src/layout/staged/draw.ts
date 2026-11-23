@@ -24,7 +24,10 @@ const round = (value: number) => String(Math.round(value * 10) / 10);
 const path = (points: readonly Point[], closed: boolean) => `${points.map(([x, y], at) => `${at === 0 ? 'M' : 'L'}${round(x)} ${round(y)}`).join('')}${closed ? 'Z' : ''}`;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth: number, mainStreetWidth: number, wardBorder = 6.5): string {
+/** A tint for each kind of building: a dwelling, a workshop with a home, a workplace, a landmark in a row. */
+export const KIND_TINTS: Record<string, string> = { dwelling: '#8c8799', both: '#b08a55', workplace: '#8a5a44', landmark: '#3d5a66' };
+
+export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth: number, mainStreetWidth: number, wardBorder = 6.5, /** Where given, houses are tinted by the kind of building that stands in them, not by district. */ kindOf?: (building: string) => string | undefined): string {
   const extent = Math.max(plan.radius * 2, 330);
   const lines: string[] = [];
   const letter = extent / 55;
@@ -48,7 +51,12 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     lines.push(`<path d="${street.map((ring) => path(ring, true)).join('')}" fill="${ROAD}"/>`);
     lines.push(`<path d="${plan.blocks.filter((_, index) => built.has(index)).map((block) => path(block.polygon, true)).join('')}" fill="${LAND}"/>`);
     lines.push(`<path d="${plan.passages.filter((passage) => built.has(passage.block)).map((passage) => path(cornersOf(passage.rect), true)).join('')}" fill="${ROAD}"/>`);
-    plan.districts.forEach((_, district) => {
+    if (kindOf && plan.fitting) {
+      for (const [kind, tint] of Object.entries(KIND_TINTS)) {
+        const held = plan.houses.filter((_, index) => plan.fitting?.holder[index] !== undefined && kindOf(plan.fitting.holder[index] as string) === kind);
+        if (held.length > 0) lines.push(`<path d="${held.map((house) => path(house.outline, true)).join('')}" fill="${tint}" stroke="${INK}" stroke-width="0.45" stroke-linejoin="miter"/>`);
+      }
+    } else plan.districts.forEach((_, district) => {
       const kept = plan.houses.filter((__, index) => plan.selection.district[index] === district);
       if (kept.length > 0) lines.push(`<path d="${kept.map((house) => path(house.outline, true)).join('')}" fill="${DISTRICTS[district % DISTRICTS.length]}" stroke="${INK}" stroke-width="0.45" stroke-linejoin="miter"/>`);
     });

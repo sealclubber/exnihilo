@@ -9,10 +9,12 @@
  */
 import { stepRng } from '../../city/random.ts';
 import type { SettingPack, StagedSettings } from '../../pack/schema.ts';
+import type { Building } from '../../city/records.ts';
 import type { SettlementBrief } from '../../schema.ts';
 import { type Block, type Lane, cutBlocks, wardVariation } from './blocks.ts';
 import { polygonCentroid } from '../geometry.ts';
 import { type Character, type DistrictPlan, type Placement, type TownDistrict, characterOf, growDistricts, roomIn } from './districts.ts';
+import { type Fitting, fitBuildings } from './fitting.ts';
 import { type Ground, takeGround } from './ground.ts';
 import { type RoadPlan, planRoads } from './highways.ts';
 import { type Mesh, makeMesh } from './mesh.ts';
@@ -69,6 +71,8 @@ export interface TownPlan extends WardPlan {
   selection: Selection;
   /** How many times more ground was taken because the town had too few houses. */
   moreGround: number;
+  /** Which building stands in which house: only where the plan was made for a city's own buildings. */
+  fitting?: Fitting;
 }
 
 /** What the staged generator reads of a city: how many buildings, its districts, and which buildings are landmarks. */
@@ -76,6 +80,8 @@ export interface TownInput {
   buildings: number;
   districts: TownDistrict[];
   landmarks: LandmarkBuilding[];
+  /** The city's buildings, where each is to be given its place. */
+  list?: readonly Building[];
 }
 
 export class StagedLayoutError extends Error {}
@@ -139,11 +145,12 @@ export function landmarksOf(buildings: ReadonlyArray<{ id: string; type: string;
 }
 
 /** What the staged generator reads of a city. */
-export function townInput(city: { buildings: ReadonlyArray<{ id: string; type: string; districtId: string }>; districts: ReadonlyArray<{ id: string; kind: string; buildingIds: readonly string[] }> }, pack: SettingPack): TownInput {
+export function townInput(city: { buildings: readonly Building[]; districts: ReadonlyArray<{ id: string; kind: string; buildingIds: readonly string[] }> }, pack: SettingPack): TownInput {
   return {
     buildings: city.buildings.length,
     districts: city.districts.map((district) => ({ id: district.id, kind: district.kind, buildings: district.buildingIds.length })),
     landmarks: landmarksOf(city.buildings, pack, city.districts),
+    list: city.buildings,
   };
 }
 
@@ -201,6 +208,8 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     if (selection.short > 0) {
       throw new StagedLayoutError(`${brief.name} (${brief.id}): ${houses.length} houses were made for ${input.buildings} buildings and the town is ${selection.short} short, after taking ${more.toFixed(2)} times the ground in ${attempt} further tries; raise layout.staged.ground.factor or layout.staged.selection.tries`);
     }
-    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt };
+    const place = new Map(input.districts.map((district, index) => [district.id, index]));
+    const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, houses, kept: selection.district, roads });
+    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt, ...(fitting && { fitting }) };
   }
 }

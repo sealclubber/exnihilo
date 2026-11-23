@@ -573,8 +573,19 @@ and each stage draws on streams named `staged-…`. So far:
     borrows unkept houses from the nearest wards. If the whole town has too
     few houses, ground is taken again half as large again, at most three
     times: the generator's only loop, which no settlement of Lomia needs.
-    The walking network, building types and the layout format are not built
-    yet.
+    **Which building goes where** (`staged/fitting.ts`). Every building the
+    city made gets exactly one place, and none is added, removed or
+    changed. A landmark with a ward or a block has its place already.
+    Within each district the rest are sorted by the area of their pack lot
+    and the kept houses by the area of their footprint, and paired largest
+    to largest, so that pack lot sizes are targets, not exact sizes. Then
+    the rule the grid also uses (`layout/shared.ts`) lets buildings with
+    lots alike change places, so that trades gather along a street and the
+    types the pack spreads stand apart; and last the types listed under
+    `fitting.onRoads` change places so as to front a highway or main
+    street.
+    The walking network and the layout format are not built yet: the staged
+    generator still makes a plan, and the grid lays every town out.
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
 point, and each block's rows on a stream of the block's own, so that a
@@ -588,10 +599,13 @@ no dependencies, wrapped in `staged/shapes.ts`. It works on whole numbers,
 here millimetres, so the same shapes give the same answer on every machine.
 The mesh is `d3-delaunay`'s Voronoi diagram.
 
-`node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...`
+`node scripts/render-stages.ts <out folder> <suffix> [--kinds] [--as flag,flag] <settlement name>...`
 draws the plan as far as the stages go; `--as walls,plaza,citadel` draws a
-town as if its brief had those flags too. `docs/renders/*-6e-step1.svg`,
-`*-6e-step2.svg` to `*-6e-step6.svg` are seven towns after each step, and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
+town as if its brief had those flags too, and `--kinds` tints houses by the
+kind of building in them and not by district. `docs/renders/*-6e-step1.svg`,
+`*-6e-step2.svg` to `*-6e-step7.svg` are seven towns after each step
+(the last tinted by kind of building: dwelling, workshop with a home,
+workplace, landmark in a row), and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
 the prototype.
 
 `ringShare` is in every layout's summary so that a town falling back into
@@ -610,7 +624,7 @@ npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <fi
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1` to `-6e-step6`).
+and the staged generator's plans step by step (`-6e-step1` to `-6e-step7`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

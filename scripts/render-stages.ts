@@ -1,9 +1,10 @@
 /**
  * Draws the staged generator's plan of a town as far as its stages go, for checking phase 6E step by step.
  *
- * Usage: node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...
+ * Usage: node scripts/render-stages.ts <out folder> <suffix> [--kinds] [--as flag,flag] <settlement name>...
  * Writes <out folder>/<name>-<suffix>.svg for each. `--as walls,plaza,citadel` draws each town as if its brief
- * had those flags too, to judge a stage on a town the world gave none.
+ * had those flags too, to judge a stage on a town the world gave none. `--kinds` tints each house by the kind of
+ * building that stands in it (dwelling, workshop with a home, workplace, landmark) and not by district.
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +14,8 @@ import { planTown, stagedSettings, townInput } from '../packages/core/src/layout
 import { lomiaWorld, medievalPack } from '../packages/core/test/pack.ts';
 
 const [out, suffix, ...rest] = process.argv.slice(2);
+const byKind = rest[0] === '--kinds';
+if (byKind) rest.shift();
 const asIf = rest[0] === '--as' ? (rest[1] ?? '').split(',') : [];
 const names = asIf.length > 0 ? rest.slice(2) : rest;
 if (!out || !suffix || names.length === 0) throw new Error('Usage: node scripts/render-stages.ts <out folder> <suffix> <settlement name>...');
@@ -23,9 +26,10 @@ for (const name of names) {
   const brief = { ...found, flags: { ...found.flags, ...Object.fromEntries(asIf.map((flag) => [flag, true])) } };
   // With `--as`, the city too is the one the flagged brief would have.
   const city = generateCity(brief, pack);
+  const kinds = new Map(city.buildings.map((building) => [building.id, building.kind]));
   const started = performance.now();
   const plan = planTown(brief, townInput(city, pack), pack);
   const took = performance.now() - started;
-  writeFileSync(join(out, `${name.toLowerCase()}-${suffix}.svg`), drawPlanSvg(plan, brief, stagedSettings(pack).widths.highway, stagedSettings(pack).widths.mainStreet, stagedSettings(pack).widths.wardBorder));
+  writeFileSync(join(out, `${name.toLowerCase()}-${suffix}.svg`), drawPlanSvg(plan, brief, stagedSettings(pack).widths.highway, stagedSettings(pack).widths.mainStreet, stagedSettings(pack).widths.wardBorder, byKind ? (id) => kinds.get(id) : undefined));
   console.log(`${name}: ${plan.highways.length} highways, ${plan.bridges.length} bridges, ${plan.wards.length} wards, ${plan.blocks.length} blocks, ${plan.houses.length} houses for ${plan.buildings} buildings, ${plan.selection.district.filter((of) => of !== undefined).length} kept, ${plan.selection.borrowed.reduce((a, b) => a + b, 0)} borrowed, ${plan.selection.moved} blocks moved, ${plan.moreGround} more ground, ${Math.round(took)} ms${plan.notes.length ? ` · ${plan.notes.join('; ')}` : ''}`);
 }
