@@ -6,6 +6,8 @@
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { stripOutline } from '../cutting.ts';
 import type { TownPlan } from './plan.ts';
+import { cornersOf } from './rects.ts';
+import { grown } from './shapes.ts';
 
 const LAND = '#bfbfb5';
 const WATER = '#8d9a9c';
@@ -13,13 +15,14 @@ const ROAD = '#e1dbd5';
 const INK = '#3f322c';
 const CASTLE = '#9a9486';
 const WARD = '#a9a79b';
+const HOUSE = '#6f6485';
 const GATE = '#d9a441';
 
 const round = (value: number) => String(Math.round(value * 10) / 10);
 const path = (points: readonly Point[], closed: boolean) => `${points.map(([x, y], at) => `${at === 0 ? 'M' : 'L'}${round(x)} ${round(y)}`).join('')}${closed ? 'Z' : ''}`;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth: number, mainStreetWidth: number): string {
+export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth: number, mainStreetWidth: number, wardBorder = 6.5): string {
   const extent = Math.max(plan.radius * 2, 330);
   const lines: string[] = [];
   const letter = extent / 55;
@@ -33,8 +36,17 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     lines.push(`<path d="${path(points, false)}" fill="none" stroke="${INK}" stroke-width="${round(width)}" stroke-linejoin="round"/>`);
     lines.push(`<path d="${path(points, false)}" fill="none" stroke="${ROAD}" stroke-width="${round(width - 1.4)}" stroke-linejoin="round"/>`);
   };
-  // Wards as plain cells; the ground between them is the street.
-  for (const ward of plan.wards) if (ward.kind === 'ordinary') lines.push(`<path d="${path(ward.polygon, true)}" fill="${WARD}" stroke="${INK}" stroke-width="0.6"/>`);
+  if (plan.houses.length === 0) {
+    // Wards as plain cells; the ground between them is the street.
+    for (const ward of plan.wards) if (ward.kind === 'ordinary') lines.push(`<path d="${path(ward.polygon, true)}" fill="${WARD}" stroke="${INK}" stroke-width="0.6"/>`);
+  } else {
+    // The ground between blocks is street; the ground within them, behind the houses, is courtyard.
+    const street = plan.wards.filter((ward) => ward.kind === 'ordinary').flatMap((ward) => grown([ward.polygon], wardBorder / 2 + 0.6).rings);
+    lines.push(`<path d="${street.map((ring) => path(ring, true)).join('')}" fill="${ROAD}"/>`);
+    lines.push(`<path d="${plan.blocks.map((block) => path(block.polygon, true)).join('')}" fill="${LAND}"/>`);
+    lines.push(`<path d="${plan.passages.map((passage) => path(cornersOf(passage.rect), true)).join('')}" fill="${ROAD}"/>`);
+    lines.push(`<path d="${plan.houses.map((house) => path(house.outline, true)).join('')}" fill="${HOUSE}" stroke="${INK}" stroke-width="0.45" stroke-linejoin="miter"/>`);
+  }
   if (plan.plaza) lines.push(`<path d="${path(plan.plaza.polygon, true)}" fill="${ROAD}" stroke="${INK}" stroke-width="1"/>`);
   for (const street of plan.streets) road(street.points, mainStreetWidth - 2);
   for (const highway of plan.highways) road(highway.points, highwayWidth - 2);
@@ -70,6 +82,7 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     ...(plan.river ? [`river ${Math.round(plan.river.width)} m wide, set ${Math.round(plan.river.distance)} m from the centre`] : []),
     ...(plan.astride !== undefined ? [plan.astride ? 'astride the river' : 'beside the river'] : []),
     `${plan.wards.filter((ward) => ward.kind === 'ordinary').length} wards`,
+    ...(plan.houses.length > 0 ? [`${plan.blocks.length.toLocaleString('en-US')} blocks`, `${plan.houses.length.toLocaleString('en-US')} houses made`] : []),
     `${plan.streets.length} main street${plan.streets.length === 1 ? '' : 's'}`,
     ...(plan.river && !plan.farBank ? ['no ground across the river'] : []),
     ...(plan.harbour ? [`${plan.harbour.kind} on the ${plan.harbour.on}`] : []),

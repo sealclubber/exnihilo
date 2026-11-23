@@ -372,6 +372,66 @@ staged:
   # beyond half a border. A piece under `least` square metres is no ward.
   wards: {highwayVerge: 1.5, mainStreetVerge: 0.5, fromWater: 7, fromWall: 6.5, roundPlaza: 1, roundCastle: 3, least: 500}
 
+  # Blocks. A ward is cut across its long axis, a share of the way along
+  # drawn from `cut`, by a lane turned about `turn` radians either way, and
+  # its pieces are cut again until each is under a size drawn from `area`
+  # (square metres) times the ward's scale. The limit drifts by a factor
+  # drawn from `drift` at each cut. A ward's scale varies a little about 1:
+  # `wardScale.spread` is the standard deviation of its logarithm, held
+  # between `min` and `max`. A piece under `least` square metres is no block.
+  blocks:
+    area: {min: 2200, max: 4600}
+    cut: {min: 0.38, max: 0.62}
+    turn: 0.10
+    drift: {min: 0.9, max: 1.1}
+    wardScale: {spread: 0.12, min: 0.8, max: 1.25}
+    least: 60
+
+  # Rows of houses along each edge of a block, longest edge first. An edge is
+  # one side of the block's outline evened to within `simplify` metres, and
+  # carries a row if it is at least `edgeLeast` metres long. A house is a
+  # rectangle on the edge.
+  #   width    drawn about `median` metres times the ward's scale (`spread`
+  #            is the standard deviation of its logarithm), between `min` and
+  #            `max`. Where under `endLeast` metres of the edge would be left
+  #            the house takes them too; the row stops `stopShort` metres
+  #            from the end.
+  #   depth    drawn from `min` to `max` metres, times the root of the ward's
+  #            scale and a factor drawn from `vary`.
+  #   court    a block whose narrow side is under `least` metres has one row
+  #            right through. Otherwise a house is at most `share` of the
+  #            narrow side deep, so that a courtyard always remains.
+  #   wing     with this `chance` a house at least `bodyLeast` wide in a
+  #            courtyard block has a rear wing at one end, making an L:
+  #            `width` of the house's width and `depth` metres deep.
+  #   passage  with this `chance` a courtyard block has one passage `width`
+  #            metres wide through a row, on an edge at least `edgeLeast`
+  #            long, `after` of the way along it, and `depth` times as deep
+  #            as the row.
+  # A house lies `inset` metres inside its block and keeps `gap` metres from
+  # any other house or passage. One that does not fit is tried `setBack`
+  # metres back from the edge, then narrower or shallower, but never under
+  # `keep` of its intended area, `narrowest` metres a side or `leastArea`
+  # square metres. Failing that the row moves `step` metres on and leaves
+  # yard: odd-shaped ground is never turned into a house.
+  rows:
+    simplify: 1.2
+    edgeLeast: 7
+    endLeast: 7
+    stopShort: 5
+    width: {median: 12.5, spread: 0.33, min: 6.5, max: 30}
+    depth: {min: 10, max: 14, vary: {min: 0.9, max: 1.12}}
+    court: {least: 26, share: 0.34}
+    wing: {chance: 0.5, bodyLeast: 10, width: {min: 0.4, max: 0.6}, depth: {min: 4, max: 8}}
+    passage: {chance: 0.35, width: 3.6, after: 0.35, edgeLeast: 40, depth: 1.15}
+    inset: 0.25
+    gap: 0.3
+    setBack: 1.2
+    keep: 0.6
+    narrowest: 6.5
+    leastArea: 60
+    step: 2
+
   # The harbour. A sea route is a highway from the centre that ends at the
   # quay, and its exit is at the end of the quay: ships leave by water.
   # On a coast the quay is a strip along the shore with piers square to it,

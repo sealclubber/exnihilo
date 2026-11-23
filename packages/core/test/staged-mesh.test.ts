@@ -7,11 +7,13 @@ import { generateCity, parsePack } from '../src/index.ts';
 import { boxOf, crossingsOfPolyline, distance, distanceBetweenPolygons, distancePolygonToPolyline, distanceToPolyline, pointAlongPolyline, pointInPolygon, polygonArea, polylineLength } from '../src/layout/geometry.ts';
 import { crossingsAlong } from '../src/layout/staged/lines.ts';
 import { cellPolygon, wardCells } from '../src/layout/staged/mesh.ts';
-import { type TownPlan, planTown, stagedSettings } from '../src/layout/staged/plan.ts';
+import { type WardPlan as TownPlan, planSite, planWards, stagedSettings } from '../src/layout/staged/plan.ts';
+import type { SettingPack } from '../src/index.ts';
 import type { Point, SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
 
 const pack = medievalPack();
+const planTown = (brief: SettlementBrief, buildings: number, with_: SettingPack, seed?: number) => planWards(planSite(brief, buildings, with_, seed), with_);
 const settings = stagedSettings(pack);
 let plans: Array<{ brief: SettlementBrief; plan: TownPlan }> | undefined;
 /** Every settlement's plan, made once. */

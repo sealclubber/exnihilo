@@ -528,7 +528,26 @@ and each stage draws on streams named `staged-…`. So far:
 9. **Wards** (`staged/wards.ts`). A ward is its cell less the highways, main
    streets, water, wall and special wards, moved in by half a ward border;
    the plaza and the castle are wards with exactly the shape they were
-   given. Blocks and houses are not built yet.
+   given. Each ward is then split into blocks (`staged/blocks.ts`): cut
+   across its long axis near the middle by a lane, turned slightly, and
+   again until its pieces are small enough. The line of each cut is kept
+   as the lane's centre line.
+10. **Rows of houses** (`staged/rows.ts`). In every block houses are laid
+    along each edge, longest edge first: rectangles facing the street, some
+    with a rear wing that makes an L, a gap apart, with the courtyard
+    behind. A block too shallow for a courtyard has one row right through,
+    and about a third of courtyard blocks have a passage through one row.
+    A house lies wholly inside its block and never overlaps another or a
+    passage; one that does not fit is made a little narrower or shallower,
+    and failing that is not built and the ground is left as yard. About two
+    and a half times as many houses are made as the town has buildings.
+    Choosing among them, landmarks, districts and the walking network are
+    not built yet.
+
+A ward's blocks and rows draw on streams of the ward's own, named by its
+seed point, so that a change to one ward changes no other. Whether a house
+fits is tested directly on rectangles (`staged/rects.ts`), not through the
+polygon library.
 
 Polygon arithmetic (taking shapes out of shapes, moving outlines in, giving
 lines width) goes through `clipper2-ts`, a TypeScript port of Clipper2 with
@@ -539,9 +558,8 @@ The mesh is `d3-delaunay`'s Voronoi diagram.
 `node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...`
 draws the plan as far as the stages go; `--as walls,plaza,citadel` draws a
 town as if its brief had those flags too. `docs/renders/*-6e-step1.svg`,
-`*-6e-step2.svg` and `*-6e-step3.svg` are seven towns after each step, and
-`badanos-6e-step2-as-walled.svg` and `badanos-6e-step3-as-walled.svg` are
-Badanos, which the world gave no wall, drawn with one for comparison with
+`*-6e-step2.svg`, `*-6e-step3.svg` and `*-6e-step4.svg` are seven towns
+after each step, and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
 the prototype.
 
 `ringShare` is in every layout's summary so that a town falling back into
@@ -560,7 +578,7 @@ npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <fi
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1`, `-6e-step2`, `-6e-step3`).
+and the staged generator's plans step by step (`-6e-step1` to `-6e-step4`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

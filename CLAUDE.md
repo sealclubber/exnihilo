@@ -30,11 +30,12 @@ with the grid laying every town out). Run a single test file with
 
 | Task | Time |
 | --- | --- |
-| `npm run check` (type-check and every test) | about 2 minutes |
+| `npm run check` (type-check and every test) | about 2.6 minutes |
 | `npm run test:viewer` | about 1 minute |
 | `packages/core/test/staged-roads.test.ts` (stages 1 to 3 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-wall.test.ts` (stages 4 and 5 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
+| `packages/core/test/staged-houses.test.ts` (blocks and rows for all 682 settlements) | about 85 seconds |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -215,6 +216,12 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - **Polygon arithmetic goes through `staged/shapes.ts`**, which wraps
   `clipper2-ts`. Do not call the library elsewhere, and do not call it once
   per house: rows of rectangles in a block are tested directly.
+- **Houses are rectangles.** A house is a rectangle or an L of rectangles on
+  its block's edge. It is never clipped to fit: one that does not fit is
+  made narrower or shallower, or not built. Test fit with `staged/rects.ts`.
+- **A stream per ward.** A ward's blocks and rows draw only on
+  `wardRng(seed, ward, step)`, named by the ward's seed point. Never draw a
+  ward's randomness from a stream shared with another ward.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
 - **It is not a layout yet.** Until its last stage is built it makes a plan

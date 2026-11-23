@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { generateCity, parsePack } from '../src/index.ts';
 import { crossingsOfPolyline, distance, distanceBetweenPolygons, distancePolygonToPolyline, distanceToPolyline, pointAlongPolyline, pointInPolygon, polygonArea, polylineLength } from '../src/layout/geometry.ts';
 import { crossingsAlong } from '../src/layout/staged/lines.ts';
-import { type TownPlan, planTown, stagedSettings } from '../src/layout/staged/plan.ts';
+import { type SitePlan as TownPlan, planSite as planTown, stagedSettings } from '../src/layout/staged/plan.ts';
 import { specialArea } from '../src/layout/staged/special.ts';
 import type { Wall } from '../src/layout/staged/wall.ts';
 import type { Point, SettlementBrief } from '../src/schema.ts';

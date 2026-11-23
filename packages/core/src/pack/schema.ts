@@ -544,6 +544,56 @@ const StagedSettingsSchema = z.strictObject({
     least: z.number().nonnegative(),
   }),
   /**
+   * Blocks. A ward is cut across its long axis, a share of the way along drawn from `cut`, by a lane turned
+   * `turn` radians either way (one standard deviation), and its pieces cut again, until each is under a size drawn
+   * from `area` in square metres, times the ward's scale; the limit drifts by a factor drawn from `drift` at each
+   * cut. A ward's scale varies about 1 by `wardScale.spread` (the standard deviation of its logarithm), held
+   * between `wardScale.min` and `wardScale.max`. A piece under `least` square metres is no block.
+   */
+  blocks: z.strictObject({
+    area: span,
+    cut: span,
+    turn: z.number().nonnegative(),
+    drift: span,
+    wardScale: z.strictObject({ spread: z.number().nonnegative(), min: share, max: share }),
+    least: z.number().nonnegative(),
+  }),
+  /**
+   * Rows of houses along each edge of a block, longest edge first. An edge is one side of the block's outline
+   * evened to within `simplify` metres, and carries a row if it is at least `edgeLeast` long. A house is a
+   * rectangle on the edge: its width is drawn about `width.median` times the ward's scale (`width.spread` is the
+   * standard deviation of its logarithm), between `width.min` and `width.max`; where less than `endLeast` metres
+   * of the edge would be left it takes them too, and the row stops `stopShort` metres from the end. Its depth is
+   * drawn from `depth`, times the root of the ward's scale and a factor drawn from `depth.vary`. A block whose
+   * narrow side is under `court.least` metres has one row right through; otherwise depth is at most `court.share`
+   * of the narrow side, so that a courtyard remains. With chance `wing.chance` a house at least `wing.bodyLeast`
+   * wide in a courtyard block has a rear wing, `wing.width` of its width and `wing.depth` metres deep, at one end.
+   * With chance `passage.chance` a courtyard block has one passage `passage.width` wide through a row, on an edge
+   * at least `passage.edgeLeast` long and `passage.after` of the way along it, `passage.depth` times as deep as
+   * the row. A house keeps `inset` metres inside its block and `gap` from any other house or passage. One that
+   * does not fit is tried `setBack` metres back, then narrower or shallower, down to `keep` of its intended
+   * area, a side of `narrowest` metres and `leastArea` square metres; failing that the row moves `step` metres
+   * on and leaves yard.
+   */
+  rows: z.strictObject({
+    simplify: z.number().nonnegative(),
+    edgeLeast: metres,
+    endLeast: z.number().nonnegative(),
+    stopShort: z.number().nonnegative(),
+    width: z.strictObject({ median: metres, spread: z.number().nonnegative(), min: metres, max: metres }),
+    depth: z.strictObject({ min: metres, max: metres, vary: span }),
+    court: z.strictObject({ least: metres, share: probability }),
+    wing: z.strictObject({ chance: probability, bodyLeast: metres, width: span, depth: span }),
+    passage: z.strictObject({ chance: probability, width: metres, after: probability, edgeLeast: metres, depth: share }),
+    inset: z.number().nonnegative(),
+    gap: z.number().nonnegative(),
+    setBack: z.number().nonnegative(),
+    keep: probability,
+    narrowest: metres,
+    leastArea: z.number().nonnegative(),
+    step: metres,
+  }),
+  /**
    * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
    * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,
    * `piers.length` long and `piers.width` wide, the outermost `piers.first` of the quay's length from its ends;
