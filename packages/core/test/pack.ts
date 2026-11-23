@@ -149,11 +149,21 @@ export function rawMedievalPackBefore6C(): any {
  * is the one generator version 5 made, and its layout is the grid's. Safe to call twice.
  */
 export function stripPhase6D(raw: any): void {
+  stripPhase6E(raw);
   delete raw.layout.generator;
   delete raw.layout.grown;
   for (const landmark of raw.landmarks) delete landmark.perExit;
   const vagrants = raw.travellers?.vagrants;
   if (vagrants) vagrants.sleepsAt = vagrants.sleepsAt.filter((place: string) => place !== 'gate');
+}
+
+/**
+ * Takes out of a raw pack what phase 6E added: the `staged` generator's block of the layout file, which names
+ * building types as landmarks and so cannot stand in a pack from before those types existed. Nothing else reads
+ * it, so cities, grid layouts and plans are unchanged. Safe to call twice.
+ */
+export function stripPhase6E(raw: any): void {
+  delete raw.layout.staged;
 }
 
 let before6D: SettingPack | undefined;

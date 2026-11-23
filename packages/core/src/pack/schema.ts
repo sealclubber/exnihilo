@@ -594,6 +594,51 @@ const StagedSettingsSchema = z.strictObject({
     step: metres,
   }),
   /**
+   * Landmarks: building types that claim their ground before ordinary houses are laid. `types` names each one's
+   * reservation: a `ward` (the castle or the plaza, named by `ward`), a `block`, a `slot` in a row or a courtyard,
+   * or a `gate`. A block landmark's footprint is a `template`, and `place` says which block it prefers: the one
+   * nearest the `plaza`, a highway or main street (`road`) or the `harbour`. `templates` are footprints made of
+   * rectangles, each written [x0, y0, x1, y1] in a frame that runs from -0.5 to 0.5 along the footprint's length
+   * and across its width; a footprint is at most `length` by `width` metres and at most `lengthShare` and
+   * `widthShare` of its block's long and narrow sides. `block` says which blocks can be reserved: of an area in
+   * `area`, at least `long` by `short` metres, in a ward whose growth rank is within the inner `inner` of the
+   * town's, and `apart` metres from any other reserved block; `jitter` metres of chance are added to the
+   * distance that ranks them. A footprint is tried at each of `scales` in turn until it fits whole, `margin`
+   * metres inside its block, and is not built under `leastArea` square metres.
+   */
+  landmarks: z.strictObject({
+    types: z.record(
+      id,
+      z.strictObject({
+        reservation: z.enum(['ward', 'block', 'slot', 'gate']),
+        ward: z.enum(['castle', 'plaza']).optional(),
+        template: id.optional(),
+        place: z.enum(['plaza', 'road', 'harbour']).optional(),
+      }),
+    ),
+    templates: z.record(
+      id,
+      z.strictObject({
+        length: metres,
+        width: metres,
+        lengthShare: probability,
+        widthShare: probability,
+        parts: z.array(z.tuple([z.number().min(-0.5).max(0.5), z.number().min(-0.5).max(0.5), z.number().min(-0.5).max(0.5), z.number().min(-0.5).max(0.5)])).min(1),
+      }),
+    ),
+    block: z.strictObject({
+      area: span,
+      long: metres,
+      short: metres,
+      inner: probability,
+      apart: z.number().nonnegative(),
+      jitter: z.number().nonnegative(),
+      scales: z.array(z.number().positive().max(1)).min(1),
+      margin: z.number().nonnegative(),
+      leastArea: z.number().nonnegative(),
+    }),
+  }),
+  /**
    * The harbour of a port: a quay `length` metres long and `width` wide, `inset` metres inland of the water's
    * edge, and no longer than `lengthShare` times the town's radius. On a coast it has `piers.count` piers,
    * `piers.length` long and `piers.width` wide, the outermost `piers.first` of the quay's length from its ends;
@@ -1056,6 +1101,21 @@ function crossCheck(pack: SettingPack): string[] {
   const needKind = (kind: string, where: string) => {
     if (!kinds.has(kind)) problems.push(`${where} names the district kind "${kind}", which districts does not list`);
   };
+
+  if (pack.layout.staged) {
+    const marks = pack.layout.staged.landmarks;
+    const types = new Set([...pack.workplaces.map((type) => type.id), ...pack.dwellings.map((type) => type.id), ...pack.landmarks.map((type) => type.id)]);
+    for (const [type, mark] of Object.entries(marks.types)) {
+      const where = `layout.staged.landmarks.types: "${type}"`;
+      if (!types.has(type)) problems.push(`${where} is not a building type of the pack`);
+      if (mark.template !== undefined && !(mark.template in marks.templates)) problems.push(`${where} names the template "${mark.template}", which layout.staged.landmarks.templates does not list`);
+      if (mark.reservation === 'ward' && mark.ward === undefined) problems.push(`${where} reserves a ward, so it must say which: castle or plaza`);
+      if (mark.reservation === 'block' && mark.template === undefined) problems.push(`${where} reserves a block, so it needs a template for its footprint`);
+    }
+    for (const [name, template] of Object.entries(marks.templates)) {
+      for (const [x0, y0, x1, y1] of template.parts) if (!(x0 < x1 && y0 < y1)) problems.push(`layout.staged.landmarks.templates: "${name}" has a part whose corners are not written lowest first`);
+    }
+  }
 
   for (const repeated of duplicates(pack.pack.statusTiers.map((tier) => tier.id))) {
     problems.push(`pack: the status tier "${repeated}" is listed more than once`);

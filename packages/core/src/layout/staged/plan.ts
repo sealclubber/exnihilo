@@ -16,6 +16,7 @@ import { type RoadPlan, planRoads } from './highways.ts';
 import { type Mesh, makeMesh } from './mesh.ts';
 import { type MainStreet, layMainStreets } from './streets.ts';
 import { type Ward, cutWards } from './wards.ts';
+import { type LandmarkBuilding, type PlacedLandmark, reserve } from './landmarks.ts';
 import { type House, type Passage, layRows } from './rows.ts';
 import { type SpecialWard, planSpecialWards, plazaRadius } from './special.ts';
 import { type Wall, planWall } from './wall.ts';
@@ -51,6 +52,9 @@ export interface TownPlan extends WardPlan {
   blocks: Block[];
   /** The lanes that part a ward's blocks, each the centre line of a cut. */
   lanes: Lane[];
+  /** The landmarks given a ward or a block, and those for which none was found. */
+  landmarks: PlacedLandmark[];
+  unplaced: LandmarkBuilding[];
   /** Every house made: more than the town has. */
   houses: House[];
   passages: Passage[];
@@ -107,11 +111,21 @@ export function planWards(site: SitePlan, pack: SettingPack): WardPlan {
   return { ...site, ground, mesh, streets, wards: cut.wards, notes: [...site.notes, ...(cut.holes > 0 ? [`${cut.holes} ward${cut.holes === 1 ? ' has' : 's have'} a hole`] : [])] };
 }
 
-/** Every stage built so far, for a town of so many buildings. */
-export function planTown(brief: SettlementBrief, buildings: number, pack: SettingPack, seed: number = brief.seed): TownPlan {
+/** The buildings of a city that the pack marks as landmarks, in the city's order. */
+export function landmarksOf(buildings: ReadonlyArray<{ id: string; type: string }>, pack: SettingPack): LandmarkBuilding[] {
+  const { types } = stagedSettings(pack).landmarks;
+  return buildings.filter((building) => building.type in types).map(({ id, type }) => ({ id, type }));
+}
+
+/** Every stage built so far, for a town of so many buildings, of which some are landmarks. */
+export function planTown(brief: SettlementBrief, buildings: number, pack: SettingPack, seed: number = brief.seed, landmarks: readonly LandmarkBuilding[] = []): TownPlan {
   const settings = stagedSettings(pack);
   const wards = planWards(planSite(brief, buildings, pack, seed), pack);
   const { blocks, lanes } = cutBlocks(wards.wards, settings, seed);
-  const { houses, passages } = layRows(blocks, wards.wards, settings, seed);
-  return { ...wards, blocks, lanes, houses, passages };
+  // Reservations first: ordinary houses fill only the blocks that are left.
+  const roads = [...wards.highways.map((highway) => highway.points), ...wards.streets.map((street) => street.points)];
+  const { placed, unplaced } = reserve({ settings, rng: stepRng(seed, 'staged-landmarks'), landmarks, wards: wards.wards, blocks, roads, ...(wards.harbour && { quay: wards.harbour.quay }) });
+  const reserved = new Set(placed.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
+  const { houses, passages } = layRows(blocks, wards.wards, settings, seed, reserved);
+  return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages };
 }

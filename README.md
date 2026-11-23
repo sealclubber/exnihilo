@@ -532,7 +532,18 @@ and each stage draws on streams named `staged-…`. So far:
    across its long axis near the middle by a lane, turned slightly, and
    again until its pieces are small enough. The line of each cut is kept
    as the lane's centre line.
-10. **Rows of houses** (`staged/rows.ts`). In every block houses are laid
+10. **Reservations** (`staged/landmarks.ts`). Anything special claims its
+    ground before houses are laid. The pack's `landmarks.types` names the
+    building types that do and what each reserves: a ward (the citadel in
+    the castle, with a keep; the market square, which is the plaza), a
+    block, a slot or a gate. A block landmark takes a whole block, the one
+    nearest the plaza, a highway or main street, or the harbour, at least
+    90 m from any other; its footprint is a template from the pack (a
+    cross, a hall round a yard, an L, a plain range) scaled down until it
+    fits whole inside. It is never clipped. One that finds no block is
+    reported and will be an ordinary house. Slots and gates are not
+    reserved yet.
+    **Rows of houses** (`staged/rows.ts`). In every block houses are laid
     along each edge, longest edge first: rectangles facing the street, some
     with a rear wing that makes an L, a gap apart, with the courtyard
     behind. A block too shallow for a courtyard has one row right through,
@@ -541,11 +552,12 @@ and each stage draws on streams named `staged-…`. So far:
     passage; one that does not fit is made a little narrower or shallower,
     and failing that is not built and the ground is left as yard. About two
     and a half times as many houses are made as the town has buildings.
-    Choosing among them, landmarks, districts and the walking network are
-    not built yet.
+    Choosing among them, districts and the walking network are not built
+    yet.
 
-A ward's blocks and rows draw on streams of the ward's own, named by its
-seed point, so that a change to one ward changes no other. Whether a house
+A ward's blocks draw on a stream of the ward's own, named by its seed
+point, and each block's rows on a stream of the block's own, so that a
+change to one ward, or reserving one block, changes no other. Whether a house
 fits is tested directly on rectangles (`staged/rects.ts`), not through the
 polygon library.
 
@@ -558,8 +570,7 @@ The mesh is `d3-delaunay`'s Voronoi diagram.
 `node scripts/render-stages.ts <out folder> <suffix> [--as flag,flag] <settlement name>...`
 draws the plan as far as the stages go; `--as walls,plaza,citadel` draws a
 town as if its brief had those flags too. `docs/renders/*-6e-step1.svg`,
-`*-6e-step2.svg`, `*-6e-step3.svg` and `*-6e-step4.svg` are seven towns
-after each step, and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
+`*-6e-step2.svg` to `*-6e-step5.svg` are seven towns after each step, and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
 the prototype.
 
 `ringShare` is in every layout's summary so that a town falling back into
@@ -578,7 +589,7 @@ npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <fi
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1` to `-6e-step4`).
+and the staged generator's plans step by step (`-6e-step1` to `-6e-step5`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

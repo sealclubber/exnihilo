@@ -55,15 +55,27 @@ const HAIR = 0.01;
 /** The shapes tried for a house that does not fit as drawn: shares of its width and of its depth. */
 const SHAPES: ReadonlyArray<readonly [number, number]> = [[1, 1], [1, 0.85], [0.85, 1], [0.85, 0.85], [1, 0.7], [0.7, 1], [1, 0.6], [0.6, 1]];
 
-export function layRows(blocks: readonly Block[], wards: readonly Ward[], settings: StagedSettings, seed: number, characterOf: (ward: Ward, index: number) => RowCharacter = () => ({ wing: settings.rows.wing.chance, passage: settings.rows.passage.chance })): { houses: House[]; passages: Passage[] } {
+export function layRows(
+  blocks: readonly Block[],
+  wards: readonly Ward[],
+  settings: StagedSettings,
+  seed: number,
+  /** The blocks given to landmarks: no row is laid in them. */
+  reserved: ReadonlySet<number> = new Set(),
+  characterOf: (ward: Ward, index: number) => RowCharacter = () => ({ wing: settings.rows.wing.chance, passage: settings.rows.passage.chance }),
+): { houses: House[]; passages: Passage[] } {
   const rules = settings.rows;
   const houses: House[] = [];
   const passages: Passage[] = [];
-  const streams = new Map<number, ReturnType<typeof wardRng>>();
+  /** How many blocks of each ward have been seen: a block's rows draw on a stream named by its ward and its place in it. */
+  const seen = new Map<number, number>();
   blocks.forEach((block, index) => {
     const ward = wards[block.ward] as Ward;
-    let rng = streams.get(block.ward);
-    if (!rng) streams.set(block.ward, (rng = wardRng(seed, ward, 'rows')));
+    const place = seen.get(block.ward) ?? 0;
+    seen.set(block.ward, place + 1);
+    // No row is laid in a reserved block. Each block has a stream of its own, so that changes no other block.
+    if (reserved.has(index)) return;
+    const rng = wardRng(seed, ward, `rows-${place}`);
     const character = characterOf(ward, block.ward);
     const outline = outlineOf(block.polygon);
     const shell = simplifyRing(block.polygon, rules.simplify);

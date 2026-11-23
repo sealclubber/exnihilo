@@ -16,6 +16,7 @@ const INK = '#3f322c';
 const CASTLE = '#9a9486';
 const WARD = '#a9a79b';
 const HOUSE = '#6f6485';
+const LANDMARK = '#3d3d3d';
 const GATE = '#d9a441';
 
 const round = (value: number) => String(Math.round(value * 10) / 10);
@@ -55,10 +56,12 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     road(plan.harbour.quay, plan.harbour.width);
   }
   for (const bridge of plan.bridges) road([bridge.a, bridge.b], highwayWidth + 1);
+  for (const landmark of plan.landmarks) if (landmark.outline.length > 0 && landmark.reservation === 'block') lines.push(`<path d="${path(landmark.outline, true)}" fill="${LANDMARK}" stroke="#1f1b18" stroke-width="0.6"/>`);
   const tower = (point: Point, half: number) => lines.push(`<rect x="${round(point[0] - half)}" y="${round(point[1] - half)}" width="${round(2 * half)}" height="${round(2 * half)}" fill="${INK}"/>`);
   if (plan.castle) {
-    lines.push(`<path d="${path(plan.castle.polygon, true)}" fill="${CASTLE}" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>`);
+    lines.push(`<path d="${path(plan.castle.polygon, true)}" fill="${plan.houses.length > 0 ? ROAD : CASTLE}" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>`);
     for (const corner of plan.castle.polygon) tower(corner, 4.5);
+    for (const landmark of plan.landmarks) if (landmark.outline.length > 0 && landmark.reservation === 'ward') lines.push(`<path d="${path(landmark.outline, true)}" fill="${LANDMARK}" stroke="#1f1b18" stroke-width="0.6"/>`);
   }
   if (plan.wall) {
     for (const part of plan.wall.parts) lines.push(`<path d="${path(part.points, part.closed)}" fill="none" stroke="${INK}" stroke-width="5" stroke-linejoin="round"/>`);
@@ -82,7 +85,7 @@ export function drawPlanSvg(plan: TownPlan, brief: SettlementBrief, highwayWidth
     ...(plan.river ? [`river ${Math.round(plan.river.width)} m wide, set ${Math.round(plan.river.distance)} m from the centre`] : []),
     ...(plan.astride !== undefined ? [plan.astride ? 'astride the river' : 'beside the river'] : []),
     `${plan.wards.filter((ward) => ward.kind === 'ordinary').length} wards`,
-    ...(plan.houses.length > 0 ? [`${plan.blocks.length.toLocaleString('en-US')} blocks`, `${plan.houses.length.toLocaleString('en-US')} houses made`] : []),
+    ...(plan.houses.length > 0 ? [`${plan.blocks.length.toLocaleString('en-US')} blocks`, `${plan.houses.length.toLocaleString('en-US')} houses made`, `${plan.landmarks.length} landmarks placed${plan.unplaced.length > 0 ? `, ${plan.unplaced.length} without a place` : ''}`] : []),
     `${plan.streets.length} main street${plan.streets.length === 1 ? '' : 's'}`,
     ...(plan.river && !plan.farBank ? ['no ground across the river'] : []),
     ...(plan.harbour ? [`${plan.harbour.kind} on the ${plan.harbour.on}`] : []),
