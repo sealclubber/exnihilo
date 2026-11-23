@@ -2,15 +2,13 @@
 # All lengths are in metres. Every value is a placeholder to be tuned by eye:
 # edit, then run the layout again or restart the server.
 #
-# Two generators read this file. The `grid` is deliberately regular: a street
-# grid trimmed to a compact outline, with lots along the streets. The `grown`
-# one lays roads first, cuts the ground between them into wards and the wards
-# into buildings; water, walls and the plaza are its alone.
+# The `grid` generator lays every town out today. It is deliberately regular:
+# a street grid trimmed to a compact outline, with lots along the streets.
+# The `staged` generator of phase 6E, whose numbers are in the `staged` block
+# at the end of this file, is being built and will take over when complete.
 
-# Which generator lays towns out: `grid`, or `grown`, whose own numbers are
-# in the `grown` block at the end of this file. The numbers before that block
-# are read by both. Left out, the grid.
-generator: grown
+# Which generator lays towns out. Left out, the grid.
+generator: grid
 
 # The full width of the roadway, per kind of street segment. Arterials are the
 # streets that carry the brief's routes from the centre to the town's exits;
@@ -151,141 +149,6 @@ watersideReach: 40
 # Town walls have no geometry yet; gatehouses are ordinary lots.
 atExits: [gatehouse]
 
-# --- The grown generator (phase 6D.3) -------------------------------------
-# Roads, then wards, then buildings. The brief's routes are laid as highways
-# before anything else and arterials branch off them; the town takes the
-# ground nearest its roads first, as much as its buildings need; the roads cut
-# that ground into wards; and each ward is cut in two again and again until
-# the pieces are its buildings. EVERY NUMBER IS A PLACEHOLDER, to be tuned by
-# eye against the renders in docs/renders. The starting values are the
-# prototype's, docs/prototypes/proto_combined.py.
-grown:
-  # Roadway widths. A highway carries a route; an arterial branches off one,
-  # as does the road to a bridge; a street runs along a river bank or splits a
-  # ward; an alley is the gap a cut leaves between buildings, with a lane
-  # down it.
-  widths: {highway: 10, arterial: 7, street: 4.5, alley: 2.4, bridge: 10}
-  # How far a highway strays from a straight line, and no more than
-  # `wanderShare` of the town's radius; exits within `through`
-  # degrees of opposite make one road through the centre; how far a highway
-  # runs on past the town before its exit; how far either side of a river it
-  # leaves its line to meet a bridge square to the bank.
-  highways: {wander: 55, wanderShare: 0.15, through: 50, beyond: 200, approach: 85}
-  # Arterials branch off each highway, alternating sides, `spacing` metres
-  # apart, along a stretch `span` times the town's radius either side of the
-  # centre. One is `reach` times the radius long, less `fall` for each metre
-  # along the highway from the centre, times a share drawn from `spread`. It
-  # leaves square, leaning along the highway by about `lean`, and strays by
-  # `wander` metres; it stops `bank` metres from water. Once the ground is
-  # known it is cut back to `trim` metres past it, and dropped if shorter than
-  # `shortest`. In a settlement of fewer than `streetBelow` residents they
-  # are as wide as streets.
-  arterials:
-    streetBelow: 1000
-    spacing: {min: 130, max: 220}
-    span: 1.25
-    reach: 1.5
-    fall: 0.7
-    spread: {min: 0.75, max: 1.1}
-    lean: 0.3
-    wander: 35
-    bank: 11
-    trim: 5
-    shortest: 25
-  # Bridges stand square to the bank, ending `landing` metres beyond the
-  # water. A town of more than `secondAbove` residents has a second bridge
-  # `apart` metres along the river from the first, with an arterial of its
-  # own that strays `wander` metres and runs `beyond` times the town's radius
-  # past the far end.
-  bridges: {landing: 7, secondAbove: 5000, apart: 260, wander: 20, beyond: 0.75}
-  # A street follows each bank of a river, this far out from the water.
-  quays: {offset: 8}
-  # The ground the town needs is its buildings' lot area over `fill`, times
-  # `margin`. It is taken cheapest first on a grid of `cell` metres. Cost is
-  # the distance from the nearest highway, plus `along` per metre along it
-  # from the centre, plus `arterial` per metre from the nearest arterial (up
-  # to `arterialCap`), plus smooth noise; ground across the water from its
-  # highway costs `water` more, and none within `wet` metres of the water is
-  # taken. The outline closes gaps of `close` metres and opens necks of
-  # `open`; nothing is built within `waterClear` metres of the water.
-  ground:
-    fill: 0.8
-    margin: 1.12
-    cell: 12
-    along: 0.45
-    arterial: 0.8
-    arterialCap: 200
-    noise: {depth: 70, length: 72}
-    water: 400
-    wet: 4
-    close: 28
-    open: 10
-    waterClear: 6
-  # A ward larger than a limit drawn from `limit` square metres is split by a
-  # street across its long axis, `at` of the way along, turned by about
-  # `turn` degrees and bent aside by `bend` of its width, at most `rounds`
-  # times over. A piece under `least` square metres is no ward.
-  wards: {limit: {min: 6500, max: 15000}, at: {min: 0.36, max: 0.64}, turn: 11.5, bend: 0.07, rounds: 8, least: 250}
-  # Buildings. Each ward is cut in two again and again across its long axis.
-  # A cut leaves an alley while the piece is over its building size times
-  # `alleyAbove` divided by a small draw; cuts are square once a piece is
-  # under `squareBelow` building sizes; finished pieces come out at about
-  # `pieceShare` of the building size. Each kind of district has a character:
-  # how far cuts wander from square and the middle (`gridChaos`, drawn per
-  # ward), how much sizes vary (`sizeChaos`), and the chance a piece is left
-  # open. Building size varies from ward to ward by `vary`. Buildings over
-  # `big` times the building size are cut for first, a half within `bigMatch`
-  # of one's size going to it. The last `loose.share` of wards by growth are
-  # loose: more pieces left open toward the edge, and buildings drawn in from
-  # their lots by `loose.pull` metres. A ward with little road along it is
-  # given no more buildings than `frontDepth` metres of ground behind that
-  # road would hold. No cut leaves a lot narrower than `leastWidth` metres
-  # (but for a building whose own lot is narrower, such as a market stall),
-  # nor more than `longest` times as long as it is wide.
-  buildings:
-    frontDepth: 60
-    leastWidth: 5
-    longest: 3.5
-    alleyAbove: 1
-    squareBelow: 4
-    pieceShare: 0.7
-    character:
-      default: {gridChaos: {min: 0.5, max: 0.8}, sizeChaos: 0.7, open: 0.02}
-      centre: {gridChaos: {min: 0.6, max: 0.9}, sizeChaos: 0.6, open: 0.02}
-      upper: {gridChaos: {min: 0.3, max: 0.5}, sizeChaos: 0.7, open: 0.06}
-      outskirts: {gridChaos: {min: 0.5, max: 0.8}, sizeChaos: 0.7, open: 0.05}
-      shanty: {gridChaos: {min: 0.7, max: 1}, sizeChaos: 0.8, open: 0.01}
-    vary: {min: 0.75, max: 1.3}
-    big: 3
-    bigMatch: 0.3
-    loose: {share: 0.2, open: {min: 0.22, max: 0.47}, pull: {min: 0.6, max: 2.2}}
-  # A ward joins the district whose seed ward is nearest, crossing a highway,
-  # an arterial or the water counting as so many metres more; over `rounds`
-  # rounds each district's reach is set so its ground matches its buildings.
-  districts:
-    penalty: {highway: 150, arterial: 110, water: 400}
-    rounds: 12
-  # The plaza of a town flagged for one: square metres for each resident,
-  # between a least and a most, and the building whose lot it is.
-  plaza: {perResident: 0.09, min: 1200, max: 4500, building: market-square}
-  # The wall of a town flagged for one: its width, the share of the town's
-  # ground it encloses (the oldest), the number of residents below which it
-  # encloses everything, how many metres its line is smoothed over, and the
-  # building at each gate.
-  wall: {width: 3, share: 0.75, enclosesAllBelow: 1000, smoothing: 60, gatehouse: gatehouse}
-  # A river: meanders eleven widths long, swinging aside by a share of that;
-  # width varying by a share along its length; the length of the pieces its
-  # line is cut into; how far from the centre it passes at the least, beyond
-  # the plaza. A coast stands as far beyond the town's oldest ground.
-  river: {meanderLength: 11, meanderSwing: 0.14, widthVariation: 0.25, pieceLength: 2.5, beside: 60}
-  # The coast: broad bays and headlands, a smaller wobble on top, and the bay
-  # a port's harbour stands in. Lengths are along the shore, depths across it.
-  coast:
-    bays: {length: 700, depth: 60}
-    wobble: {length: 110, depth: 9}
-    harbour: {length: 320, depth: 70}
-    pieceLength: 8
-
 # The `staged` generator of phase 6E, which is being built stage by stage and
 # will replace `grown`: water, then highways and bridges, the wall, special
 # wards, a mesh of wards, blocks, rows of houses, and last the selection of
@@ -315,8 +178,6 @@ staged:
   river:
     width: 30
     portWidth: 1.5
-    # The centre is never nearer the bank than this, however small the town.
-    least: 35
     distance: {min: 0.25, max: 0.85}
     portDistance: {min: 0.15, max: 0.4}
     bend: {min: 0.07, max: 0.13}
@@ -344,60 +205,80 @@ staged:
   # Two exits more than `through` degrees apart are one road through the
   # centre. A highway strays aside by `wander` times the reach and is evened
   # in steps of `step` metres. Beside a river it keeps `waterClear` metres
-  # from the bank; an exit that would fall in the river is turned by up to
-  # `exitShift` degrees toward the town's own bank.
-  highways: {through: 150, wander: 0.04, step: 45, waterClear: 12, exitShift: 15}
+  # from the bank, and where it came nearer it is moved `waterPush` times that
+  # far out; an exit that would fall in the water is turned by up to
+  # `exitShift` degrees away from it.
+  highways: {through: 150, wander: 0.04, step: 45, waterClear: 12, waterPush: 1.25, exitShift: 15}
 
-  # Bridges are placed before the roads that use them. `counts`: how many, by
-  # the town's buildings. The main crossing is the point of the river, within
-  # `search` radii of the centre, where the river runs most nearly square to
-  # the way the road is going (`square`), less `near` for each metre from the
-  # centre. A town whose centre is within `astrideWithin` metres of it stands
-  # astride its river; one further off stands beside it.
-  #   Beside: the highway splits before the river, each branch crosses on a
-  #   bridge of its own `apart` metres along the bank from the next, and the
-  #   branches rejoin beyond.
-  #   Astride: side bridges stand `astrideApart` along the river, and each
-  #   one's road runs on `run` metres from both ends and then curves into the
-  #   nearest highway on that bank.
-  # `lead` is how far the road runs straight either side of the main bridge.
-  # Where no route crosses the river, the main bridge carries a road of its
-  # own from the centre that ends `beyond` radii into the far bank.
+  # Bridges stand only where a route crosses the river or the town is astride
+  # it, and are placed before the roads that use them. A town is astride its
+  # river where the river passes within `astrideWithin` radii of the centre,
+  # and beside it otherwise; a town beside a river no route crosses has no
+  # bridge and takes no ground on the far bank.
+  # `counts`: how many, by the town's buildings. The main crossing is the
+  # point of the river, within `search` radii of the centre, where the river
+  # runs most nearly square to the way the road is going (`square`), less
+  # `near` for each metre from the centre. Further bridges stand a share of
+  # the radius drawn from `apart` along the bank, and at least `apartLeast`
+  # metres.
+  #   Beside: the highway splits `splitBefore` metres short of the end of its
+  #   straight lead, each branch crosses on a bridge of its own, straight for
+  #   `approach` metres either side, and the branches rejoin beyond.
+  #   Astride: each side bridge's road runs on `run` metres from both ends
+  #   and then curves into the nearest road on that bank within `joinWithin`
+  #   radii, a metre along the bank counting `veer` more than one ahead.
+  #   Astride with no route across: the main bridge carries a road of its own
+  #   from the centre, and bridge roads run on into the far bank as main
+  #   streets, the main one for `beyond` radii.
+  # `lead` is how far the road runs straight either side of the main bridge:
+  # `single` where it is the only bridge, otherwise `share` of the distance
+  # from the centre, between `min` and `max`. With the centre less than
+  # `leadSlack` metres beyond that, the road runs straight to the bridge.
+  # `straight` is how far from a bridge's end the road is dead straight.
   bridges:
     counts:
       - {below: 1500, bridges: 1}
       - {below: 4000, bridges: 2}
       - {bridges: 3}
+    astrideWithin: 0.5
     landing: 8
     step: 20
     search: 1.5
     square: 300
     near: 0.6
-    astrideWithin: 230
     lead: {single: 110, share: 0.72, min: 90, max: 210}
-    apart: {min: 150, max: 200}
+    leadSlack: 20
+    straight: {main: 12, side: 8}
+    apart: {min: 0.3, max: 0.45}
+    apartLeast: 120
+    splitBefore: 15
     approach: 55
-    astrideApart: {share: 0.55, min: 150, max: 270, vary: {min: 0.9, max: 1.1}}
     run: 70
     joinWithin: 1.3
     veer: 0.6
     beyond: 0.5
 
-  # The wall of a town flagged for one: a rounded ring enclosing ground for
-  # `share` of its buildings at `perBuilding` square metres each, `through`
-  # times as long as wide along a single through road, `several` otherwise.
-  wall: {share: 0.5, perBuilding: 330, ratio: {through: 1.4, several: 1.12}}
+  # The plaza of a town flagged for one: so many square metres for each
+  # building, between a least and a most. A river never passes nearer the
+  # centre than the plaza reaches, with a highway's width to spare.
+  plaza: {perBuilding: 1.3, min: 1200, max: 6500}
 
-  # The harbour of a port. A sea route is a highway from the centre that ends
-  # at the quay; ships leave by water, so it has no exit at the town's edge.
-  # On a coast the quay is a strip along the shore with piers square to it.
-  # In a river port with no coast it is a wharf along the bank nearest the
-  # centre, with jetties no longer than `jettyShare` of the river's width, so
-  # that the channel stays open, and at least `clearOfBridge` metres from any
-  # bridge. The quay is no longer than `lengthShare` times the town's radius.
+  # The harbour. A sea route is a highway from the centre that ends at the
+  # quay, and its exit is at the end of the quay: ships leave by water.
+  # On a coast the quay is a strip along the shore with piers square to it,
+  # the outermost `first` of the quay's length from its ends. In a river port
+  # with no coast it is a wharf along the bank nearest the centre, with
+  # jetties no longer than `jettyShare` of the river's width, so that the
+  # channel stays open, and at least `clearOfBridge` metres from any bridge.
+  # The quay is no longer than `lengthShare` times the town's radius. The road
+  # to it strays `wander` metres, and no more than `wanderShare` of its
+  # length. A settlement with a sea route but no port flag has a landing of
+  # `jetty.landing` metres with a single jetty.
   harbour:
     quay: {length: 220, lengthShare: 0.6, width: 14, inset: 9}
-    piers: {count: 3, length: 62, width: 9}
+    piers: {count: 3, length: 62, width: 9, first: 0.2}
+    jetty: {landing: 24, length: 30}
     jettyShare: 0.25
     wander: 25
+    wanderShare: 0.1
     clearOfBridge: 60

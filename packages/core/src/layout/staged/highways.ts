@@ -13,8 +13,8 @@
 import type { Rng } from '../../city/random.ts';
 import type { StagedSettings } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
-import { bearingDifference, bearingVector, distance, pointAlongPolyline, polylineLength, projectOnPolyline, slicePolyline } from '../geometry.ts';
-import { chaikin, normal } from '../lines.ts';
+import { bearingDifference, bearingVector, distance, exactBearing, pointAlongPolyline, polylineLength, projectOnPolyline, slicePolyline } from '../geometry.ts';
+import { chaikin, firstCrossing, normal } from '../lines.ts';
 import { add, between, dot, drawFrom, left, resmooth, size, stray, tangentAt, tidy, unit } from './lines.ts';
 import type { Coast, River } from './water.ts';
 
@@ -43,13 +43,17 @@ export interface Bridge {
 export interface PlanExit {
   /** The route's place in the brief. */
   route: number;
-  /** The bearing the exit lies on, which is the brief's unless a river stood in the way. */
+  /** The bearing the exit lies on from the centre: the brief's unless water stood in the way, or the quay's for a sea route. */
   bearing: number;
   point: Point;
+  /** A sea route's exit is at the end of the quay: ships leave by water. */
+  atQuay: boolean;
 }
 
 export interface Harbour {
   on: 'coast' | 'river';
+  /** A port has a quay with piers; a settlement with a sea route but no port has a landing with a single jetty. */
+  kind: 'quay' | 'jetty';
   /** The quay's centre line and width. */
   quay: Point[];
   width: number;
@@ -62,9 +66,13 @@ export interface RoadPlan {
   highways: Highway[];
   bridges: Bridge[];
   exits: PlanExit[];
+  /** The roads that run on from a bridge into the far bank of a town astride a river no route crosses. */
+  mainStreets: Point[][];
   harbour?: Harbour;
-  /** Whether the town stands astride its river: only known where a highway crosses it. */
+  /** Whether the town stands astride its river, which passes near its centre, or beside it. */
   astride?: boolean;
+  /** Whether the town takes ground across its river: only where it has a bridge. */
+  farBank: boolean;
   /** What could not be done as the brief asked, for the report. */
   notes: string[];
 }
@@ -82,11 +90,18 @@ export interface RoadInput {
 }
 
 const CENTRE: Point = [0, 0];
+/** How finely a road is walked when the nearest point of it is looked for, in metres. */
+const JOIN_STEP = 15;
+/** How finely a ray or a bank is walked when a place on the shore is looked for, in metres. */
+const SHORE_STEP = 5;
+/** How many pieces a quay's line is drawn in. */
+const QUAY_PIECES = 12;
 
 export function planRoads(input: RoadInput): RoadPlan {
   const { brief, settings, buildings, radius, reach, river, coast } = input;
   const { highways: rules, bridges: spans } = settings;
   const highways: Highway[] = [];
+  const mainStreets: Point[][] = [];
   const bridges: Bridge[] = [];
   const exits: PlanExit[] = [];
   const notes: string[] = [];
@@ -112,8 +127,8 @@ export function planRoads(input: RoadInput): RoadPlan {
       if (!wrong && found.distance - river.width / 2 >= clear) return point;
       moved = true;
       // A little further than it need be, since rounding the line afterwards draws it back in.
-      if (atEnd) return add(found.point, unit(found.point, point), river.width / 2 + 1.25 * clear);
-      return add(found.point, left(river.at(found.along).direction), -side * (river.width / 2 + 1.25 * clear));
+      if (atEnd) return add(found.point, unit(found.point, point), river.width / 2 + rules.waterPush * clear);
+      return add(found.point, left(river.at(found.along).direction), -side * (river.width / 2 + rules.waterPush * clear));
     });
     return moved ? chaikin(out, 2) : points;
   };
@@ -145,7 +160,10 @@ export function planRoads(input: RoadInput): RoadPlan {
 
   // The main crossing, once made, is used by every highway that crosses.
   let main: { bridge: number; across: Point; lead: number; fork: Point } | undefined;
-  let astride: boolean | undefined;
+  // A town is astride its river where the river passes near its centre, and beside it otherwise.
+  const astride = river ? river.nearest(CENTRE).distance <= spans.astrideWithin * radius : undefined;
+  /** Whether a route crosses the river. Where none does, an astride town's bridge roads end at their bridges and run on as main streets. */
+  let routeCrosses = false;
   const sideBridges: Array<{ bridge: number; across: Point }> = [];
   const branches: Highway[] = [];
 
@@ -173,17 +191,13 @@ export function planRoads(input: RoadInput): RoadPlan {
     const { a, b } = bridges[index] as Bridge;
     const gap = size(a);
     const lead = bridgeCount === 1 ? spans.lead.single : Math.min(Math.max(spans.lead.share * gap, spans.lead.min), spans.lead.max);
-    astride = gap <= spans.astrideWithin;
     main = { bridge: index, across, lead, fork: add(b, across, lead) };
     // Further bridges: beside the river the highway splits to them and rejoins; astride it they are side bridges.
-    const split = astride ? CENTRE : add(a, across, -(lead - 15));
-    const rejoin = add(b, across, lead - 15);
-    const wallRadius = Math.sqrt((settings.wall.share * buildings * settings.wall.perBuilding * settings.wall.ratio.several) / Math.PI);
+    const split = astride ? CENTRE : add(a, across, -(lead - spans.splitBefore));
+    const rejoin = add(b, across, lead - spans.splitBefore);
     for (let extra = 0; extra < bridgeCount - 1; extra++) {
       const sign = extra % 2 === 0 ? 1 : -1;
-      const apart = astride
-        ? Math.min(Math.max(spans.astrideApart.share * wallRadius, spans.astrideApart.min), spans.astrideApart.max) * drawFrom(rng, spans.astrideApart.vary)
-        : drawFrom(rng, spans.apart);
+      const apart = Math.max(drawFrom(rng, spans.apart) * radius, spans.apartLeast);
       const along = site.along + sign * (Math.floor(extra / 2) + 1) * apart;
       if (along <= 0 || along >= river.length || !coastClear(river.at(along).point)) {
         notes.push(`bridge ${extra + 2} of ${bridgeCount} would stand beyond the river's end or in the sea, and was left out`);
@@ -202,14 +216,20 @@ export function planRoads(input: RoadInput): RoadPlan {
       const beyond = add(ends.b, over, spans.approach);
       branches.push({
         kind: 'branch',
-        points: tidy([...chaikin([split, between(split, near), near, add(ends.a, over, -8)], 4), ends.a, ends.b, ...chaikin([add(ends.b, over, 8), beyond, between(beyond, rejoin), rejoin], 4)]),
+        points: tidy([...chaikin([split, between(split, near), near, add(ends.a, over, -spans.straight.side)], 4), ends.a, ends.b, ...chaikin([add(ends.b, over, spans.straight.side), beyond, between(beyond, rejoin), rejoin], 4)]),
         routes: [],
         bridges: [side],
       });
     }
-    const before = gap > lead + 20 ? [...first, CENTRE, between(CENTRE, add(a, across, -lead)), add(a, across, -lead), add(a, across, -12)] : [...first, CENTRE, add(a, across, -12)];
+    const before = gap > lead + spans.leadSlack ? [...first, CENTRE, between(CENTRE, add(a, across, -lead)), add(a, across, -lead), add(a, across, -spans.straight.main)] : [...first, CENTRE, add(a, across, -spans.straight.main)];
     const pre = keptClear(resmooth(before, rules.step), home);
-    const post = keptClear(resmooth([add(b, across, 12), add(b, across, lead), between(add(b, across, lead), to), to], rules.step), -home as 1 | -1);
+    const post = keptClear(resmooth([add(b, across, spans.straight.main), add(b, across, lead), between(add(b, across, lead), to), to], rules.step), -home as 1 | -1);
+    if (kind === 'bridge-road') {
+      // No route crosses: the road ends at the bridge, and runs on into the far bank as a main street.
+      highways.push({ kind, points: tidy([...pre, a, b]), routes, bridges: [index] });
+      mainStreets.push(tidy([b, ...post]));
+      return;
+    }
     highways.push({ kind, points: tidy([...pre, a, b, ...post]), routes, bridges: [index] });
     // A further highway over the river leaves this one where its straight lead ends, on the road as laid.
     main.fork = projectOnPolyline(post, main.fork).point;
@@ -239,7 +259,7 @@ export function planRoads(input: RoadInput): RoadPlan {
       if (!found) notes.push(`route ${index} leaves at ${route.bearing}°, into the water, and no bearing within ${rules.exitShift}° is clear of it`);
     }
     exitOf.set(index, point);
-    exits.push({ route: index, bearing, point });
+    exits.push({ route: index, bearing, point, atQuay: false });
   }
 
   // ---- Highways ------------------------------------------------------------------------------------------------
@@ -277,9 +297,10 @@ export function planRoads(input: RoadInput): RoadPlan {
     highways.push({ kind: 'local', points: tidy(resmooth([...stray(rng, add(CENTRE, bearingVector(bearing), 2 * radius), CENTRE, amplitude / 2).slice(0, -1), ...stray(rng, CENTRE, add(CENTRE, bearingVector(bearing + 180), 2 * radius), amplitude / 2)], rules.step)), routes: [], bridges: [] });
   }
 
-  // A town on a river has its bridges whether or not a route crosses: the main bridge then carries a road of its
-  // own from the centre, which runs on a way into the far bank and ends there.
-  if (river && !main) {
+  routeCrosses = main !== undefined;
+  // Bridges stand only where a route crosses the river or the town is astride it. Astride with no route across,
+  // the main bridge carries a road of its own from the centre.
+  if (river && !main && astride) {
     const nearest = river.nearest(CENTRE);
     const over = nearest.distance > 1 ? unit(CENTRE, nearest.point) : left(river.at(nearest.along).direction);
     const end = add(nearest.point, over, river.width / 2 + spans.landing + spans.beyond * radius);
@@ -289,17 +310,22 @@ export function planRoads(input: RoadInput): RoadPlan {
     else notes.push('the far bank of the river is in the sea, so the town has no bridge');
   }
 
-  // A side bridge's road runs on from each end until it joins the nearest highway on that bank.
+  // A side bridge's road runs on from each end until it joins the nearest road on that bank: a highway, or on a far
+  // bank no route reaches, a main street.
   for (const { bridge, across } of sideBridges) {
     const { a, b } = bridges[bridge] as Bridge;
     const legs = ([[a, -1], [b, 1]] as Array<[Point, number]>).map(([end, sign]) => {
       const out = add(end, across, sign * spans.run);
+      const roads = [...highways.map((highway) => highway.points), ...mainStreets];
+      // Where a road already passes in front of the bridge, the bridge's road runs straight to it and stops.
+      const meets = Math.min(...roads.map((road) => firstCrossing([end, out], road) ?? Infinity));
+      if (meets < Infinity) return [end, add(end, across, sign * meets)];
       let best: Point | undefined;
       let least = Infinity;
-      for (const highway of highways) {
-        const length = polylineLength(highway.points);
-        for (let along = 0; along < length; along += 15) {
-          const point = pointAlongPolyline(highway.points, along);
+      for (const road of roads) {
+        const length = polylineLength(road);
+        for (let along = 0; along < length; along += JOIN_STEP) {
+          const point = pointAlongPolyline(road, along);
           if (size(point) > spans.joinWithin * radius || (river as River).crossed(out, point)) continue;
           // Going on ahead is preferred to veering along the bank.
           const away = distance(out, point) + spans.veer * Math.abs(dot([point[0] - out[0], point[1] - out[1]], left(across)));
@@ -309,26 +335,34 @@ export function planRoads(input: RoadInput): RoadPlan {
           }
         }
       }
-      const start = add(end, across, sign * 8);
+      const start = add(end, across, sign * spans.straight.side);
       if (!best) return [start, out];
-      return keptClear(chaikin([start, out, add(between(out, best), [normal(rng), normal(rng)], 8), best], 4), (sign < 0 ? home : -home) as 1 | -1);
+      return keptClear(chaikin([start, out, add(between(out, best), [normal(rng), normal(rng)], spans.straight.side), best], 4), (sign < 0 ? home : -home) as 1 | -1);
     });
-    branches.push({ kind: 'bridge-road', points: tidy([...(legs[0] as Point[]).reverse(), a, b, ...(legs[1] as Point[])]), routes: [], bridges: [bridge] });
+    if (routeCrosses) branches.push({ kind: 'bridge-road', points: tidy([...(legs[0] as Point[]).reverse(), a, b, ...(legs[1] as Point[])]), routes: [], bridges: [bridge] });
+    else {
+      branches.push({ kind: 'bridge-road', points: tidy([...(legs[0] as Point[]).reverse(), a, b]), routes: [], bridges: [bridge] });
+      mainStreets.push(tidy([b, ...(legs[1] as Point[])]));
+    }
   }
   highways.push(...branches);
 
   // ---- Harbour ---------------------------------------------------------------------------------------------------
+  // A port has a quay with piers. A settlement with a sea route but no port flag has a landing with one jetty.
   const harbourRng = input.rng('staged-harbour');
   let harbour: Harbour | undefined;
-  const { quay, piers } = settings.harbour;
-  const quayLength = Math.min(quay.length, quay.lengthShare * radius);
-  const scale = quayLength / quay.length;
-  if (brief.flags.port && coast) {
+  const { quay, piers, jetty } = settings.harbour;
+  const kind: Harbour['kind'] | undefined = brief.flags.port ? 'quay' : seaRoutes.length > 0 ? 'jetty' : undefined;
+  const quayLength = kind === 'jetty' ? jetty.landing : Math.min(quay.length, quay.lengthShare * radius);
+  const pierCount = kind === 'jetty' ? 1 : piers.count;
+  const pierLength = kind === 'jetty' ? jetty.length : (piers.length * quayLength) / quay.length;
+  const pierAt = (at: number) => (pierCount === 1 ? 0.5 : piers.first + ((1 - 2 * piers.first) * at) / (pierCount - 1));
+  if (kind && coast) {
     // Where the first sea route, or failing one the way to open water, meets the shore.
     const bearing = seaRoutes[0]?.route.bearing ?? (brief.coast.waterBearing as number);
     const way = bearingVector(bearing);
     let hit: Point | undefined;
-    for (let out = 0; out < reach && !hit; out += 5) if (coast.gap(add(CENTRE, way, out)) <= 0) hit = add(CENTRE, way, out);
+    for (let out = 0; out < reach && !hit; out += SHORE_STEP) if (coast.gap(add(CENTRE, way, out)) <= 0) hit = add(CENTRE, way, out);
     const start = projectOnPolyline(coast.shore, hit ?? CENTRE).along;
     // The quay stands on the town's own side of a river, clear of its mouth.
     const fits = (along: number) => {
@@ -336,7 +370,7 @@ export function planRoads(input: RoadInput): RoadPlan {
       return !river || (!river.crossed(CENTRE, middle) && river.gap(middle) > quayLength / 2 + clear);
     };
     let along = start;
-    for (let step = 0; step * 20 < reach && !fits(along); step++) along = start + (step % 2 === 0 ? 1 : -1) * (Math.floor(step / 2) + 1) * 20;
+    for (let step = 0; step * spans.step < reach && !fits(along); step++) along = start + (step % 2 === 0 ? 1 : -1) * (Math.floor(step / 2) + 1) * spans.step;
     if (!fits(along)) notes.push('the quay could not be kept clear of the river mouth');
     const strip = slicePolyline(coast.shore, along - quayLength / 2, along + quayLength / 2);
     const total = polylineLength(strip);
@@ -345,18 +379,18 @@ export function planRoads(input: RoadInput): RoadPlan {
       return dot(across, coast.seaward) > 0 ? across : [-across[0], -across[1]];
     };
     const line: Point[] = [];
-    for (let step = 0; step <= 12; step++) line.push(add(pointAlongPolyline(strip, (total * step) / 12), seawardAt((total * step) / 12), -quay.inset));
-    const out = Array.from({ length: piers.count }, (_, at): [Point, Point] => {
-      const from = total * (piers.count === 1 ? 0.5 : 0.2 + (0.6 * at) / (piers.count - 1));
+    for (let step = 0; step <= QUAY_PIECES; step++) line.push(add(pointAlongPolyline(strip, (total * step) / QUAY_PIECES), seawardAt((total * step) / QUAY_PIECES), -quay.inset));
+    const out = Array.from({ length: pierCount }, (_, at): [Point, Point] => {
+      const from = total * pierAt(at);
       const foot = add(pointAlongPolyline(strip, from), seawardAt(from), -quay.inset);
-      return [foot, add(foot, seawardAt(from), piers.length * scale)];
+      return [foot, add(foot, seawardAt(from), quay.inset + pierLength)];
     });
-    harbour = { on: 'coast', quay: line, width: quay.width, piers: out, pierWidth: piers.width };
-  } else if (brief.flags.port && river) {
+    harbour = { on: 'coast', kind, quay: line, width: quay.width, piers: out, pierWidth: piers.width };
+  } else if (kind && river) {
     // A wharf along the bank nearest the centre, clear of the bridges.
     let best: number | undefined;
     let least = Infinity;
-    for (let along = quayLength / 2; along < river.length - quayLength / 2; along += 10) {
+    for (let along = quayLength / 2; along < river.length - quayLength / 2; along += SHORE_STEP) {
       if (bridges.some((bridge) => Math.abs(bridge.along - along) < quayLength / 2 + settings.harbour.clearOfBridge)) continue;
       const away = size(river.at(along).point);
       if (away < least) {
@@ -372,19 +406,29 @@ export function planRoads(input: RoadInput): RoadPlan {
       };
       const edge = river.width / 2;
       const line: Point[] = [];
-      for (let step = 0; step <= 12; step++) line.push(offset(best - quayLength / 2 + (quayLength * step) / 12, edge + quay.inset));
-      const reachOut = Math.min(piers.length * scale, settings.harbour.jettyShare * river.width);
-      const out = Array.from({ length: piers.count }, (_, at): [Point, Point] => {
-        const from = (best as number) - quayLength / 2 + quayLength * (piers.count === 1 ? 0.5 : 0.2 + (0.6 * at) / (piers.count - 1));
+      for (let step = 0; step <= QUAY_PIECES; step++) line.push(offset(best - quayLength / 2 + (quayLength * step) / QUAY_PIECES, edge + quay.inset));
+      // Jetties are short, so that the channel stays open.
+      const reachOut = Math.min(pierLength, settings.harbour.jettyShare * river.width);
+      const out = Array.from({ length: pierCount }, (_, at): [Point, Point] => {
+        const from = (best as number) - quayLength / 2 + quayLength * pierAt(at);
         return [offset(from, edge + quay.inset), offset(from, edge - reachOut)];
       });
-      harbour = { on: 'river', quay: line, width: quay.width, piers: out, pierWidth: piers.width };
+      harbour = { on: 'river', kind, quay: line, width: quay.width, piers: out, pierWidth: piers.width };
     }
-  } else if (brief.flags.port) notes.push('the settlement is flagged a port but has neither coast nor river, so it has no harbour');
+  } else if (kind === 'quay') notes.push('the settlement is flagged a port but has neither coast nor river, so it has no harbour');
+  else if (kind === 'jetty') notes.push(`${seaRoutes.length} sea route${seaRoutes.length === 1 ? '' : 's'}, but neither coast nor river to land at`);
   if (harbour) {
     const middle = harbour.quay[Math.floor(harbour.quay.length / 2)] as Point;
-    highways.push({ kind: 'quay-road', points: tidy(keptClear(stray(harbourRng, CENTRE, middle, Math.min(settings.harbour.wander, 0.1 * size(middle))), home)), routes: seaRoutes.map(({ index }) => index), bridges: [] });
-  } else if (seaRoutes.length > 0) notes.push(`${seaRoutes.length} sea route${seaRoutes.length === 1 ? '' : 's'} with no harbour to end at: the settlement ${brief.flags.port ? 'has no water' : 'is not flagged a port'}`);
+    highways.push({ kind: 'quay-road', points: tidy(keptClear(stray(harbourRng, CENTRE, middle, Math.min(settings.harbour.wander, settings.harbour.wanderShare * size(middle))), home)), routes: seaRoutes.map(({ index }) => index), bridges: [] });
+    // A sea route has its exit at the end of the quay that lies more its way: ships leave by water.
+    const ends = [harbour.quay[0] as Point, harbour.quay[harbour.quay.length - 1] as Point];
+    for (const { route, index } of seaRoutes) {
+      const way = bearingVector(route.bearing);
+      const point = dot([ends[0]![0] - middle[0], ends[0]![1] - middle[1]], way) >= dot([ends[1]![0] - middle[0], ends[1]![1] - middle[1]], way) ? (ends[0] as Point) : (ends[1] as Point);
+      exits.push({ route: index, bearing: exactBearing(CENTRE, point), point, atQuay: true });
+    }
+    exits.sort((x, y) => x.route - y.route);
+  }
 
-  return { highways, bridges, exits, ...(harbour && { harbour }), ...(astride !== undefined && { astride }), notes };
+  return { highways, bridges, exits, mainStreets, ...(harbour && { harbour }), ...(astride !== undefined && { astride }), farBank: bridges.length > 0, notes };
 }

@@ -91,7 +91,7 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET .../city/households/<id>` | One household with its members and its home |
 | `GET .../city/buildings/<id>` | One building with the people who work and live there |
 | `GET .../city/building-types` | The type of every building, by ID, for naming lots on the map |
-| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas, walls, places and a summary. `?generator=grid` or `?generator=grown` gives that generator's layout of the same town, made for the request and kept nowhere |
+| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas, walls, places and a summary. `?generator=grid` gives the named generator's layout of the same town, made for the request and kept nowhere; the grid is the only generator today |
 | `GET .../layout/path?from=<lot>&to=<lot>` | The shortest walking path between two lots: the segments in order, the length in metres, and the line walked |
 
 **The clock and daily life**
@@ -441,99 +441,61 @@ except at a gate, every gate has a gatehouse within 30 m, and the city
 generator makes at least one gatehouse for each of the brief's route exits.
 A plaza is the open lot of its building, with a street all the way round.
 
-**Two generators** make layouts in this format, and a layout's summary names
-the one that made it. The pack's `layout.yaml` chooses with `generator`; a
-pack that says nothing gets the grid. `generateLayout(city, brief, pack,
-{ generator })` asks for either.
+**One generator** makes layouts in this format today, and a layout's summary
+names the one that made it. The pack's `layout.yaml` chooses with
+`generator`; a pack that says nothing gets the grid.
 
 - **`grid`** (`layout/grid.ts`) is deliberately regular: a street grid around
   the centre, a river bending beside it, districts grown block by block from
   the centre outward, an arterial from the centre to each exit, and bridges
   where streets meet the river. It has no walls and no plaza, and its water
   has straight edges.
-- **`grown`** (`layout/town.ts`, `layout/allot.ts` and `layout/grown.ts`),
-  the medieval pack's choice, lays out roads, then wards, then buildings
-  (phase 6D.3). Its reference is the prototype in
-  `docs/prototypes/proto_combined.py` and its pictures `proto_combined.png`
-  and `proto_combined_b.png`. The cutting of wards into buildings is the
-  method of Watabou's Medieval Fantasy City Generator, written afresh here;
-  no code of it is copied.
 
-**How a town is grown.** Each step draws on a random stream of its own, and
-every number is in the `grown` block of `layout.yaml`.
+The `grown` generator of phase 6D has been removed. Its renders are kept in
+`docs/renders/` as `-grown-6d3` and `-grown-6d4`, for comparison.
 
-1. **Water** (`layout/water.ts`), before anything else: a meandering river of
-   varying width, a coast of bays and headlands, a port in a bay of its own.
-2. **Highways** (`layout/roads.ts`). Every route of the brief is a highway,
-   a gently wandering line. Two exits nearly opposite each other make one road
-   through the centre; the others run in to the centre. Where a highway
-   crosses a river it bends to meet a bridge set square to the bank. A port's
-   quay along the shore is a highway of its own; a town with no routes has a
-   local road through its centre; a single highway runs on past the centre
-   as a street.
-3. **Arterials** branch off each highway on alternating sides, every 130 to
-   220 m, at about a right angle, longest near the centre, and stop at the
-   water. A town whose highway does not cross its river carries the arterial
-   nearest the centre over on a bridge; one of more than 5,000 residents has
-   a second bridge a few hundred metres along the river, with an arterial of
-   its own. A street follows each bank.
-4. **Ground** (`layout/ground.ts`): as much as the buildings' lot area over
-   0.8, taken cheapest first, where ground costs its distance from the
-   nearest highway, plus a share of its distance along it from the centre,
-   plus a share of its distance from an arterial, plus smooth noise. The
-   outline is closed over gaps and opened at necks; every piece a road
-   reaches is kept, so a town may stand on both banks. The cost is the order
-   the town grew in, and every ward records its `growthRank`.
-5. **Arterials are cut back** to the town's edge; only highways run on, 200 m
-   past the town, to their exits.
-6. **The plaza and the wall.** A plaza stands where the highways meet, with a
-   street all round it, or beside the road where one road runs through the
-   centre. A wall follows a contour of the oldest ground, blurred over 60 m,
-   never along the water nor a quay: where it comes within a quay's reach of a
-   bank it runs straight to the bank and the water closes the gap;
-   in a town under 1,000 residents it goes round all of it. A street runs
-   along the outside of the wall.
-7. **Wards** (`layout/wards.ts`). The ground is split along the centre line
-   of every road, the river and the wall into faces, and each road's strip is
-   taken out at its own width; what is left of a face is a ward. A ward
-   larger than a limit drawn between 0.65 and 1.5 ha is split by a street
-   across its long axis, turned and bent a little, until none is.
-8. **Districts on wards** (`layout/allot.ts`). Each district starts from a
-   seed ward by the pack's placement of its kind; a ward joins the district
-   whose seed is nearest going ward to ward, crossing a highway, an arterial
-   or the river counting for more, and the districts' reach is adjusted until
-   each one's ground matches its buildings.
-9. **Buildings** (`layout/buildings.ts`). Each ward is cut in two again and
-   again across its long axis near the middle until the pieces are building
-   sized, leaving an alley with a lane down it on the early cuts. Each kind of
-   district sets how far the cuts wander and how much sizes vary. The last
-   fifth of wards by growth are loose: more pieces left open, and buildings
-   drawn in from their lots. The count is made exact: a piece with no way
-   along it joins a neighbour, too few pieces and the largest are cut again,
-   too many and some are left open and the smallest joined to a neighbour.
-   Buildings and pieces are paired by size, and buildings of a trade then
-   change places to stand together. No cut leaves a lot narrower than the
-   pack's `leastWidth` (5 m), but for a building whose own pack lot is
-   narrower, nor more than `longest` (3.5) times as long as it is wide; a cut
-   that would leave a piece with no way along it leaves an alley instead, and
-   a piece still without one has an alley run out from it to the nearest way.
-   Each ward is first cut once to count the lots it can make that keep every
-   rule, and a district's buildings are shared among its wards in proportion
-   to those counts; a district short of lots is cut again with a building size
-   a tenth smaller, up to five times, and then laid out on more ground.
-10. **Streets, lanes and gates** (`layout/network.ts`). Every road, street
-    and lane is cut at its junctions into segments. Gates stand where the
-    highways cross the wall, then arterials and streets, as many as there are
-    gatehouses; each gatehouse takes the piece nearest its gate, and anything
-    else that meets the wall stops short of it.
+**The staged generator (phase 6E, being built).** `layout/staged/` holds the
+generator that will replace it, built stage by stage after the approved
+prototype in `docs/prototypes/proto_wards9.py` (pictures `w9_*.png`); the
+gameplan is `sim-6e.md`. The town is made in a fixed order on one shared
+mesh, and a later stage never moves what an earlier one placed. Until it is
+complete the grid lays every town out, and the staged generator produces a
+plan, not a layout. Its numbers are in the `staged` block of `layout.yaml`,
+and each stage draws on streams named `staged-…`. So far:
 
-The grown generator checks every invariant on what it made. A layout that
-breaks one is laid out again with its streams drawn afresh, a town that does
-not fit on more ground, and the fault of the last attempt is reported if none
-passes. Phase 6D.3's measures are in `packages/core/test/shape.ts`, printed
-by `node scripts/measure-wards.ts`; `node scripts/preview-town.ts <name>
-<out.svg> [--buildings | --districts]` draws a town's ground plan step by
-step.
+1. **Water** (`staged/water.ts`). A river enters and leaves on the brief's
+   bearings with two broad bends and a constant width. The brief gives no
+   distance, so how far it passes from the centre is one seeded draw, as a
+   share of the town's radius: 0.25 to 0.85, or 0.15 to 0.4 for a river port
+   with no coast, whose river is also half as wide again. It never passes
+   nearer than leaves room for the plaza and a quay road. A coast is a line
+   of broad bays and headlands; where a land route leaves within 90° of the
+   water's bearing, the shore on that side runs out to sea beside it, so that
+   no land exit is in the water.
+2. **Highways and bridges** (`staged/highways.ts`). Every land route is a
+   highway; two exits more than 150° apart are one road through the centre.
+   A town is astride its river where the river passes within half its radius
+   of the centre, and beside it otherwise. Bridges stand only where a route
+   crosses the river or the town is astride it: one under 1,500 buildings,
+   two under 4,000, three above, a share of the radius apart (0.3 to 0.45,
+   at least 120 m). The main bridge is chosen first, where the river runs
+   most nearly square to the way, and the road is laid onto its axis. Beside
+   the river the highway splits to the further bridges and rejoins; astride
+   it each side bridge's road curves into the nearest road on each bank.
+   Astride a river no route crosses, the main bridge carries a road of its
+   own from the centre and the bridge roads run on into the far bank as main
+   streets. A town beside a river no route crosses has no bridge and takes
+   no ground across it.
+3. **Harbour.** A port has a quay: on its coast a strip along the shore with
+   piers, or with no coast a wharf along the river bank nearest the centre
+   with short jetties, clear of the bridges. A settlement with a sea route
+   but no port flag has a landing with a single jetty. The sea routes are
+   one highway from the centre to the quay, and each has its exit at an end
+   of the quay.
+
+`node scripts/render-stages.ts <out folder> <suffix> <settlement name>...`
+draws the plan as far as the stages go; `docs/renders/*-6e-step1.svg` are
+seven towns at this stage.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
@@ -546,13 +508,12 @@ district, the wall and its gates, the plaza, and exits labelled with where
 they lead. `npm run render` wraps it:
 
 ```sh
-npm run render -- settlement-641 [--generator grid|grown] [--seed <number>] [--out <file.svg>]
+npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <file.svg>]
 ```
 
-`docs/renders/` holds each of the five towns above as `-grown` and `-grid`,
-the grown layouts as they were at phase 6D.3 as `-grown-6d3`, for comparison,
-and Badanos at each of the first three steps of phase 6D.3
-(`badanos-step1-wards.svg`, `-step2-buildings`, `-step3-districts`).
+`docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
+removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
+and the staged generator's plans step by step (`-6e-step1`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line
@@ -1035,12 +996,6 @@ npm test            # every test in every package
 npm run typecheck   # strict TypeScript across packages and tests
 npm run check       # both
 npm run test:viewer # the viewer in a headless browser
-```
-
-```sh
-node scripts/measure-layout.ts --all       # the shape of the five towns, and of all Lomia
-node scripts/measure-road-first.ts --all   # the road-first measures of phase 6D.2
-node scripts/measure-life-on-layouts.ts    # a day in Badanos on each layout generator
 ```
 
 `npm run test:viewer` starts a server and the viewer on ports of their own,

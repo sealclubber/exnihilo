@@ -21,6 +21,6 @@ for (const name of names) {
   const started = performance.now();
   const plan = planTown(brief, city.buildings.length, pack);
   const took = performance.now() - started;
-  writeFileSync(join(out, `${name.toLowerCase()}-${suffix}.svg`), drawPlanSvg(plan, brief, stagedSettings(pack).widths.highway));
+  writeFileSync(join(out, `${name.toLowerCase()}-${suffix}.svg`), drawPlanSvg(plan, brief, stagedSettings(pack).widths.highway, stagedSettings(pack).widths.mainStreet));
   console.log(`${name}: ${plan.highways.length} highways, ${plan.bridges.length} bridges, ${Math.round(took)} ms${plan.notes.length ? ` · ${plan.notes.join('; ')}` : ''}`);
 }

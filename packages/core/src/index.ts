@@ -27,7 +27,6 @@ export { ringShare, riverOutline, riverWidthAt } from './layout/measure.ts';
 export { generateGridLayout, LayoutGenerationError, GRID_GENERATOR, type LayoutOptions } from './layout/grid.ts';
 export { generateLayout } from './layout/generate.ts';
 export { renderLayoutSvg, type RenderOptions } from './layout/render.ts';
-export { generateGrownLayout, GROWN_GENERATOR } from './layout/grown.ts';
 export { createPathFinder, shortestPath, LayoutPathError, type PathFinder } from './layout/path.ts';
 export * from './life/records.ts';
 export * from './life/calendar.ts';

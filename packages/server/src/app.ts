@@ -11,7 +11,6 @@ import {
   type AvatarState,
   AvatarError,
   GRID_GENERATOR,
-  GROWN_GENERATOR,
   generateLayout,
   leaveBuilding,
   perceive,
@@ -88,7 +87,7 @@ export interface AppOptions {
 }
 
 /** The layout generators a request may name. */
-const LAYOUT_GENERATORS = [GRID_GENERATOR, GROWN_GENERATOR] as const;
+const LAYOUT_GENERATORS = [GRID_GENERATOR] as const;
 
 /** The longest window of game time one request for trips may cover. */
 export const MAX_TRIP_WINDOW = 2 * 86_400;

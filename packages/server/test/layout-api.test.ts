@@ -31,12 +31,12 @@ describe('GET /api/settlements/:id/layout', () => {
     expect(status).toBe(200);
     expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(expected)));
     expect(body.lots).toHaveLength(1825);
-    expect(body.summary.generator).toBe('grown');
+    expect(body.summary.generator).toBe('grid');
   });
 
   it('serves the layout a named generator makes of the same town', async () => {
     const city = generateCity(brief, medievalPack());
-    for (const generator of ['grid', 'grown'] as const) {
+    for (const generator of ['grid'] as const) {
       const { status, body } = await get<Layout>(`${LAYOUT}?generator=${generator}`);
       expect(status, generator).toBe(200);
       expect(body.summary.generator).toBe(generator);
@@ -49,10 +49,10 @@ describe('GET /api/settlements/:id/layout', () => {
   });
 
   it('answers 400 for a generator it does not have, naming the parameter and the ones it has', async () => {
-    for (const query of ['?generator=rings', '?generator=', '?generator=grid&generator=grown']) {
+    for (const query of ['?generator=rings', '?generator=', '?generator=grid&generator=rings', '?generator=grown']) {
       const { status, body } = await get<{ error: string }>(`${LAYOUT}${query}`);
       expect(status, query).toBe(400);
-      expect(body.error).toMatch(/^generator must be one of grid, grown/);
+      expect(body.error).toMatch(/^generator must be one of grid;/);
     }
     expect((await get<{ error: string }>('/api/settlements/settlement-9999/layout?generator=grid')).status).toBe(404);
   });

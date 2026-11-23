@@ -29,12 +29,20 @@ export function stagedSettings(pack: SettingPack): StagedSettings {
   return settings;
 }
 
+/** How far a plaza reaches from the centre: half the diagonal of a square of its area. */
+export function plazaRadius(buildings: number, settings: StagedSettings): number {
+  const { plaza } = settings;
+  return Math.sqrt(Math.min(Math.max(buildings * plaza.perBuilding, plaza.min), plaza.max) / 2);
+}
+
 /** Stages 1 to 3 for a town of so many buildings. */
 export function planTown(brief: SettlementBrief, buildings: number, pack: SettingPack, seed: number = brief.seed): TownPlan {
   const settings = stagedSettings(pack);
   const radius = Math.sqrt((buildings * settings.extent.perBuilding) / Math.PI);
   const reach = Math.max(radius * settings.extent.reach, settings.extent.least);
-  const water = { brief, settings, seed, radius, reach };
+  // Between the centre and a river's bank there is room for the plaza and a quay road.
+  const least = plazaRadius(buildings, settings) + settings.widths.highway;
+  const water = { brief, settings, seed, radius, reach, least };
   const river = makeRiver(water);
   const coast = makeCoast(water);
   const roads = planRoads({ brief, settings, rng: (step) => stepRng(seed, step), buildings, radius, reach, ...(river && { river }), ...(coast && { coast }) });

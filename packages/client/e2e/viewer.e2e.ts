@@ -819,27 +819,26 @@ describe('the town as laid out', () => {
     await settled(on);
   }
 
-  it('names the generator in the town pane, and draws a grown town with a river', async () => {
+  it('names the generator in the town pane, and draws a town with a river', async () => {
     await setTime(main, at(1, 12, 30));
     await open(main, BADANOS);
     const layout = await layoutOf(BADANOS);
-    expect(layout.summary.generator).toBe('grown');
+    expect(layout.summary.generator).toBe('grid');
     const rivers = layout.waters.filter((water) => water.kind === 'river');
     expect(rivers.length).toBeGreaterThan(0);
-    // Its width varies along its length, which is what the outline is drawn from.
-    expect(rivers.some((river) => river.kind === 'river' && new Set(river.widths ?? []).size > 1)).toBe(true);
-    expect(await fact('generator').innerText()).toBe('grown');
+    expect(await fact('generator').innerText()).toBe('grid');
     expect(await pane('summary').locator('.layout-note').count()).toBe(0);
     // Badanos has no wall, so nothing is said of gates.
     expect(layout.walls).toHaveLength(0);
     expect(await fact('gates').count()).toBe(0);
     const state = await drawn();
-    expect(state.town).toEqual({ generator: 'grown', rivers: rivers.length, walls: 0, gates: 0, places: layout.places.length, living: true });
+    expect(state.town).toEqual({ generator: 'grid', rivers: rivers.length, walls: 0, gates: 0, places: layout.places.length, living: true });
     expect(state.people.length).toBeGreaterThan(900);
     expect(errors).toEqual([]);
   });
 
-  it('says how many gates a walled town has and how large its plaza is, and draws them', async () => {
+  // The grid has no walls or plazas. These two wait for the staged generator of phase 6E to be finished.
+  it.skip('says how many gates a walled town has and how large its plaza is, and draws them', async () => {
     for (const settlementId of [POMBAL, CEVILEFON, VERECELDO]) {
       await open(main, settlementId);
       const layout = await layoutOf(settlementId);
@@ -889,7 +888,10 @@ describe('the town as laid out', () => {
     expect(await page.locator('#inspector .street-count').innerText()).toBe('');
     // Nothing was asked of the server about anyone's movements, and the tools that act through the streets are put away.
     expect(asked.some((url) => url.includes('generator=grid'))).toBe(true);
-    expect(asked.filter((url) => /\/life\/trips|\/avatar\/perception/.test(url))).toEqual([]);
+    // (The page it was opened from may still have had a question in flight, so only what was asked after the
+    // layout by name is looked at.)
+    const since = asked.slice(asked.findIndex((url) => url.includes('generator=grid')));
+    expect(since.filter((url) => /\/life\/trips|\/avatar\/perception/.test(url))).toEqual([]);
     expect(await page.locator('#inspector .map-tools button:visible').allInnerTexts()).toEqual(['⌂']);
     // A lot can still be looked at: hovering names it and clicking shows its building, and no menu offers to walk there.
     const layout = await layoutOf(POMBAL, '?generator=grid');
@@ -909,11 +911,11 @@ describe('the town as laid out', () => {
     expect(JSON.stringify(await main.get<AvatarReport>('/api/avatar'))).toBe(avatarBefore);
     page.off('request', listen);
     // The layout served without the query is the pack's, as before.
-    expect((await layoutOf(POMBAL)).summary.generator).toBe('grown');
+    expect((await layoutOf(POMBAL)).summary.generator).toBe('grid');
     expect(errors).toEqual([]);
   });
 
-  it('shows the grown layout when asked for by name, with the plaza a lot like any other under the cursor', async () => {
+  it.skip('shows the grown layout when asked for by name, with the plaza a lot like any other under the cursor', async () => {
     await openAs(POMBAL, 'grown');
     expect(await fact('generator').innerText()).toBe('grown');
     expect(await pane('summary').locator('.layout-note').innerText()).toMatch(/grown generator.*People are not shown/s);
@@ -941,7 +943,7 @@ describe('the town as laid out', () => {
     // On a page of its own: the server's refusal is logged by the browser as a failed request.
     const other = await browser.newPage({ viewport: { width: 1400, height: 800 } });
     await other.goto(`${viewer}/?api=${encodeURIComponent(main.url)}&generator=rings#${BADANOS}/city`);
-    await other.waitForFunction(() => /generator must be one of grid, grown/.test(document.querySelector('#inspector .map-note')?.textContent ?? ''), null, { timeout: 90_000 });
+    await other.waitForFunction(() => /generator must be one of grid;/.test(document.querySelector('#inspector .map-note')?.textContent ?? ''), null, { timeout: 90_000 });
     expect(await fact('generator', other).count()).toBe(0);
     await other.close();
   });

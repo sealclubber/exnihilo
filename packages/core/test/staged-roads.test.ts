@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateCity } from '../src/index.ts';
 import { bearingDifference, bearingVector, distance, exactBearing, pointAlongPolyline, polylineLength } from '../src/layout/geometry.ts';
-import { type TownPlan, planTown, stagedSettings } from '../src/layout/staged/plan.ts';
+import { type TownPlan, planTown, plazaRadius, stagedSettings } from '../src/layout/staged/plan.ts';
 import type { Point, SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack, rawMedievalPack, settlement } from './pack.ts';
 import { parsePack } from '../src/index.ts';
@@ -47,11 +47,14 @@ describe('water', () => {
       const riverPort = brief.flags.port && !brief.coast.isCoastal;
       const range = riverPort ? settings.river.portDistance : settings.river.distance;
       expect(plan.river.distance / plan.radius, brief.name).toBeGreaterThanOrEqual(range.min);
-      expect(plan.river.distance / plan.radius, brief.name).toBeLessThanOrEqual(range.max);
-      expect(plan.river.gap([0, 0]), brief.name).toBeGreaterThanOrEqual(settings.river.least - 1e-6);
+      // In a small town the room the plaza and a quay road need may be more than the range allows.
+      const room = plan.river.width / 2 + plazaRadius(plan.buildings, settings) + settings.widths.highway;
+      expect(plan.river.distance, brief.name).toBeLessThanOrEqual(Math.max(range.max * plan.radius, room) + 1e-6);
+      expect(plan.river.nearest([0, 0]).distance, brief.name).toBeCloseTo(plan.river.distance, 6);
+      // Between the centre and the bank there is room for the plaza and a quay road.
+      expect(plan.river.gap([0, 0]), brief.name).toBeGreaterThanOrEqual(plazaRadius(plan.buildings, settings) + settings.widths.highway - 1e-6);
+      expect(plan.astride, brief.name).toBe(plan.river.nearest([0, 0]).distance <= settings.bridges.astrideWithin * plan.radius);
       expect(plan.river.width, brief.name).toBe(settings.river.width * (riverPort ? settings.river.portWidth : 1));
-      // The centre is on dry land.
-      expect(plan.river.gap([0, 0]), brief.name).toBeGreaterThan(0);
     }
   });
 
@@ -71,8 +74,8 @@ describe('highways', () => {
   it('every land route has an exit on dry land near its bearing, and a highway that ends there', () => {
     for (const { brief, plan } of everyPlan()) {
       const land = brief.routes.map((route, index) => ({ route, index })).filter(({ route }) => route.kind !== 'sea-route');
-      expect(plan.exits.map((exit) => exit.route), brief.name).toEqual(land.map(({ index }) => index));
-      for (const exit of plan.exits) {
+      expect(plan.exits.filter((exit) => !exit.atQuay).map((exit) => exit.route), brief.name).toEqual(land.map(({ index }) => index));
+      for (const exit of plan.exits.filter((entry) => !entry.atQuay)) {
         const route = brief.routes[exit.route] as SettlementBrief['routes'][number];
         expect(bearingDifference(exit.bearing, route.bearing), `${brief.name} route ${exit.route}`).toBeLessThanOrEqual(settings.highways.exitShift);
         if (plan.river) expect(plan.river.gap(exit.point), brief.name).toBeGreaterThan(0);
@@ -91,6 +94,12 @@ describe('highways', () => {
         for (const point of samples(highway.points)) {
           if (plan.river && plan.river.gap(point) < 0) expect(plan.bridges.some((bridge) => distance(point, bridge.centre) < distance(bridge.a, bridge.b) / 2 + 1), `${brief.name}: a ${highway.kind} highway in the river`).toBe(true);
           if (plan.coast && highway.kind !== 'quay-road') expect(plan.coast.gap(point), `${brief.name}: a ${highway.kind} highway in the sea`).toBeGreaterThanOrEqual(0);
+        }
+      }
+      for (const street of plan.mainStreets) {
+        for (const point of samples(street)) {
+          if (plan.river) expect(plan.river.gap(point), `${brief.name}: a main street in the river`).toBeGreaterThan(0);
+          if (plan.coast) expect(plan.coast.gap(point), `${brief.name}: a main street in the sea`).toBeGreaterThanOrEqual(0);
         }
       }
     }
@@ -126,11 +135,22 @@ describe('bridges', () => {
     }
   });
 
-  it('are as many as the size rule says, unless a note says why not', () => {
+  it('stand only where a route crosses the river or the town is astride it, as many as the size rule says', () => {
     let short = 0;
+    let none = 0;
     for (const { brief, plan } of everyPlan()) {
       if (!plan.river) {
         expect(plan.bridges.length, brief.name).toBe(0);
+        expect(plan.farBank, brief.name).toBe(false);
+        continue;
+      }
+      const crossed = plan.exits.some((exit) => !exit.atQuay && (plan.river as NonNullable<TownPlan['river']>).crossed([0, 0], exit.point));
+      expect(plan.farBank, brief.name).toBe(plan.bridges.length > 0);
+      if (!crossed && !plan.astride) {
+        // Beside a river no route crosses: no bridge, and no ground across the river.
+        none++;
+        expect(plan.bridges.length, brief.name).toBe(0);
+        expect(plan.mainStreets.length, brief.name).toBe(0);
         continue;
       }
       const wanted = sizeRule(plan.buildings);
@@ -146,35 +166,41 @@ describe('bridges', () => {
         if (bridge.main) expect(carried, brief.name).toBeGreaterThanOrEqual(1);
         else expect(carried, brief.name).toBe(1);
       });
+      // Astride with no route across, each bridge's road runs on into the far bank as a main street from its far end.
+      if (!crossed) {
+        expect(plan.mainStreets.length, brief.name).toBe(plan.bridges.length);
+        for (const street of plan.mainStreets) expect(Math.min(...plan.bridges.map((bridge) => distance(bridge.b, street[0] as Point))), brief.name).toBeLessThan(1e-6);
+      } else expect(plan.mainStreets.length, brief.name).toBe(0);
     }
-    // Six towns of Lomia's 210 on a river: the far bank is in the sea, or the river only rises at the town's edge.
-    expect(short).toBeLessThanOrEqual(6);
+    console.log(`${none} river towns stand beside a river no route crosses and have no bridge; ${short} have fewer bridges than the size rule`);
+    expect(short).toBeLessThanOrEqual(3);
   });
 
-  it('further bridges of a town beside its river stand apart along the bank as the pack says', () => {
+  it('further bridges stand a share of the radius apart along the bank, and no less than the pack\'s floor', () => {
     for (const { brief, plan } of everyPlan()) {
-      if (plan.astride !== false || !plan.river) continue;
-      const main = plan.bridges.find((bridge) => bridge.main) as TownPlan['bridges'][number];
       const alongs = plan.bridges.map((bridge) => bridge.along).sort((a, b) => a - b);
+      const { apart, apartLeast } = settings.bridges;
       for (let at = 1; at < alongs.length; at++) {
-        const apart = (alongs[at] as number) - (alongs[at - 1] as number);
-        expect(apart, brief.name).toBeGreaterThanOrEqual(settings.bridges.apart.min - 1e-6);
-        expect(apart, brief.name).toBeLessThanOrEqual(2 * settings.bridges.apart.max + 1e-6);
+        const gap = (alongs[at] as number) - (alongs[at - 1] as number);
+        expect(gap, brief.name).toBeGreaterThanOrEqual(Math.max(apart.min * plan.radius, apartLeast) - 1e-6);
+        expect(gap, brief.name).toBeLessThanOrEqual(2 * Math.max(apart.max * plan.radius, apartLeast) + 1e-6);
       }
-      expect(Math.hypot(...main.a), brief.name).toBeGreaterThan(settings.bridges.astrideWithin);
     }
   });
 });
 
 describe('harbour', () => {
-  it('every port has a quay: on the coast if it has one, otherwise on its river', () => {
+  it('every port has a quay, and a settlement with a sea route but no port flag a single jetty: on the coast if it has one, otherwise on its river', () => {
     for (const { brief, plan } of everyPlan()) {
-      if (!brief.flags.port) {
+      const seaRoutes = brief.routes.flatMap((route, index) => (route.kind === 'sea-route' ? [index] : []));
+      if (!brief.flags.port && seaRoutes.length === 0) {
         expect(plan.harbour, brief.name).toBeUndefined();
         continue;
       }
       expect(plan.harbour?.on, brief.name).toBe(brief.coast.isCoastal ? 'coast' : 'river');
       const harbour = plan.harbour as NonNullable<TownPlan['harbour']>;
+      expect(harbour.kind, brief.name).toBe(brief.flags.port ? 'quay' : 'jetty');
+      expect(harbour.piers.length, brief.name).toBe(brief.flags.port ? settings.harbour.piers.count : 1);
       const gap = (point: Point) => (harbour.on === 'coast' ? (plan.coast as NonNullable<TownPlan['coast']>).gap(point) : (plan.river as NonNullable<TownPlan['river']>).gap(point));
       // The quay is on land at the water's edge, and each pier runs from it out over the water.
       for (const point of harbour.quay) {
@@ -186,13 +212,18 @@ describe('harbour', () => {
         expect(gap(head), brief.name).toBeLessThan(0);
         if (harbour.on === 'river') expect(-gap(head), brief.name).toBeLessThanOrEqual(settings.harbour.jettyShare * (plan.river as NonNullable<TownPlan['river']>).width * 1.01);
       }
-      // The sea routes end at the quay, and have no exit at the town's edge.
+      // The sea routes end at the quay, each with its exit at one end of it.
       const road = plan.highways.filter((highway) => highway.kind === 'quay-road');
       expect(road.length, brief.name).toBe(1);
       const points = (road[0] as TownPlan['highways'][number]).points;
       expect(Math.hypot(...(points[0] as Point)), brief.name).toBeLessThan(1);
       expect(Math.min(...harbour.quay.map((point) => distance(point, points[points.length - 1] as Point))), brief.name).toBeLessThan(1);
-      expect((road[0] as TownPlan['highways'][number]).routes, brief.name).toEqual(brief.routes.flatMap((route, index) => (route.kind === 'sea-route' ? [index] : [])));
+      expect((road[0] as TownPlan['highways'][number]).routes, brief.name).toEqual(seaRoutes);
+      expect(plan.exits.filter((exit) => exit.atQuay).map((exit) => exit.route), brief.name).toEqual(seaRoutes);
+      const ends = [harbour.quay[0] as Point, harbour.quay[harbour.quay.length - 1] as Point];
+      for (const exit of plan.exits.filter((entry) => entry.atQuay)) expect(Math.min(...ends.map((end) => distance(end, exit.point))), brief.name).toBeLessThan(1e-6);
+      // One exit for every route of the brief, in the brief's order.
+      expect(plan.exits.map((exit) => exit.route), brief.name).toEqual(brief.routes.map((_, index) => index));
     }
   });
 
@@ -205,29 +236,38 @@ describe('harbour', () => {
 });
 
 describe('named settlements', () => {
-  it('Badanos stands beside its river with two bridges and no harbour', () => {
+  it('Badanos stands astride its river, which no route crosses: two bridges, each with a main street beyond', () => {
     const { plan } = planOf('settlement-641');
     expect(plan.buildings).toBe(1825);
+    expect(plan.astride).toBe(true);
     expect(plan.bridges.length).toBe(2);
-    expect(plan.exits.map((exit) => Math.round(exit.bearing))).toEqual([61, 227]);
+    expect(plan.mainStreets.length).toBe(2);
+    expect(plan.exits.map((exit) => exit.route)).toEqual([0, 1]);
     expect(plan.harbour).toBeUndefined();
     // The one through road carries both ends of the trail.
     expect(plan.highways.filter((highway) => highway.kind === 'route').map((highway) => highway.routes.length)).toEqual([2]);
   });
 
-  it('Pombal is a river port: a wider river, three bridges and a wharf on the bank', () => {
+  it('Pombal is a river port: a wider river, three bridges, and a wharf where both its sea routes end', () => {
     const { plan } = planOf('settlement-5');
     expect(plan.river?.width).toBe(settings.river.width * settings.river.portWidth);
     expect(plan.bridges.length).toBe(3);
-    expect(plan.harbour?.on).toBe('river');
-    expect(plan.exits.length).toBe(2);
+    expect(plan.harbour).toMatchObject({ on: 'river', kind: 'quay' });
+    expect(plan.exits.map((exit) => exit.atQuay)).toEqual([true, true, false, false]);
   });
 
   it('Cevilefon is a sea port with a quay on the coast and no bridge', () => {
     const { plan } = planOf('settlement-3');
-    expect(plan.harbour?.on).toBe('coast');
+    expect(plan.harbour).toMatchObject({ on: 'coast', kind: 'quay' });
     expect(plan.harbour?.piers.length).toBe(settings.harbour.piers.count);
     expect(plan.bridges.length).toBe(0);
+  });
+
+  it('Karlen has sea routes but is no port: a single jetty on its river', () => {
+    const { plan } = planOf('settlement-8');
+    expect(plan.harbour).toMatchObject({ on: 'river', kind: 'jetty' });
+    expect(plan.harbour?.piers.length).toBe(1);
+    expect(plan.exits.filter((exit) => exit.atQuay).length).toBe(2);
   });
 });
 

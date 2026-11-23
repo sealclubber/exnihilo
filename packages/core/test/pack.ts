@@ -144,7 +144,7 @@ export function rawMedievalPackBefore6C(): any {
 }
 
 /**
- * Takes out of a raw pack what phase 6D added: the choice of layout generator and the grown generator's numbers, a
+ * Takes out of a raw pack what phase 6D added: the choice of layout generator (and the numbers of its `grown` generator, since removed), a
  * gatehouse for every route exit, and the gate as a place where a vagrant may sleep. A city made from the result
  * is the one generator version 5 made, and its layout is the grid's. Safe to call twice.
  */

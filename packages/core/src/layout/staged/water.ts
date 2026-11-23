@@ -18,7 +18,7 @@ export interface River {
   line: Point[];
   width: number;
   length: number;
-  /** How far from the centre the river was set to pass, in metres, before its bends were rounded. */
+  /** How far from the centre the river's centre line passes, in metres: the distance drawn, or the least there is room for. */
   distance: number;
   /** The nearest point of the centre line, how far along the line it is, and how far away. */
   nearest(point: Point): { point: Point; along: number; distance: number };
@@ -52,10 +52,12 @@ export interface WaterInput {
   /** The town's radius, and how far out roads and water are drawn. */
   radius: number;
   reach: number;
+  /** The least distance from the centre to a river's bank. */
+  least: number;
 }
 
 /** The river of a brief, or nothing if it has none. */
-export function makeRiver({ brief, settings, seed, radius, reach }: WaterInput): River | undefined {
+export function makeRiver({ brief, settings, seed, radius, reach, least }: WaterInput): River | undefined {
   if (!brief.river) return undefined;
   const { river } = settings;
   const arrives = brief.river.arrivesFrom?.bearing;
@@ -81,14 +83,13 @@ export function makeRiver({ brief, settings, seed, radius, reach }: WaterInput):
   const pushed = (a: Point, b: Point, by: number) => add(between(a, b), left(unit(a, b)), sign * by * size([b[0] - a[0], b[1] - a[1]]));
   let line = chaikin([from, pushed(from, middle, bends[0] as number), middle, pushed(middle, to, bends[1] as number), to], 5);
   const width = river.width * (riverPort ? river.portWidth : 1);
-  // Rounding its bends may have drawn it in toward the centre, and a small town's share of its radius may be less
-  // than the river is wide: it is moved bodily away until the centre is at least `least` metres from the bank.
-  const short = width / 2 + river.least - projectOnPolyline(line, [0, 0]).distance;
-  if (short > 0) {
-    const found = projectOnPolyline(line, [0, 0]).point;
-    const away = size(found) > 1e-6 ? unit([0, 0], found) : unit([0, 0], toward);
-    line = line.map((point) => add(point, away, short));
-  }
+  // Rounding its bends moves it in or out, and a small town's share of its radius may be less than the river is
+  // wide. It is moved bodily until it passes the centre at the distance drawn, or as near as leaves room between
+  // the centre and the bank for the plaza and a quay road.
+  const passes = Math.max(off, width / 2 + least);
+  const found = projectOnPolyline(line, [0, 0]);
+  const away = found.distance > 1e-6 ? unit([0, 0], found.point) : unit([0, 0], toward);
+  line = line.map((point) => add(point, away, passes - found.distance));
   if (arrives === undefined) {
     // Cut at the last point upstream of the centre that is as far out as the source.
     const nearest = projectOnPolyline(line, [0, 0]).along;
@@ -105,7 +106,7 @@ export function makeRiver({ brief, settings, seed, radius, reach }: WaterInput):
     line,
     width,
     length,
-    distance: off,
+    distance: passes,
     nearest,
     at,
     gap: (point) => nearest(point).distance - width / 2,

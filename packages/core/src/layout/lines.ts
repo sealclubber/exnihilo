@@ -1,9 +1,8 @@
 /**
  * Lines that wander, are smoothed, and are asked how far away they are.
  *
- * The grown generator lays its roads as lines before it lays any block, and
- * then asks of thousands of points which road is nearest and how far along it
- * they are. These are the tools for both. Pure: randomness comes from the
+ * A generator that lays its roads as lines before it lays any block asks of
+ * thousands of points which road is nearest and how far along it they are. These are the tools for both. Pure: randomness comes from the
  * stream passed in.
  */
 import type { Rng } from '../city/random.ts';

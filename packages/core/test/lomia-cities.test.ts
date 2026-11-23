@@ -3,7 +3,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  type Layout,
   WORKFORCE_SHARE_LIMITS,
   checkCity,
   checkLayout,
@@ -15,11 +14,9 @@ import {
   generateCity,
   generateLayout,
   geometry,
-  lotSizeOf,
   placeFlagsOf,
 } from '../src/index.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
-import { wallStretches, width } from './shape.ts';
 
 describe('every settlement of Lomia', () => {
   it('generates with every invariant holding, 2,935,089 people in all, and no runesmith', { timeout: 120_000 }, () => {
@@ -75,22 +72,6 @@ describe('every settlement of Lomia', () => {
         if (seconds > slowest.seconds) slowest = { seconds, id: brief.id };
         lots += layout.lots.length;
         if (layout.lots.length !== city.buildings.length) failures.push(`${brief.id}: ${layout.lots.length} lots for ${city.buildings.length} buildings`);
-        // Phase 6D.4: no lot narrower than the pack's least width but a building whose own lot is narrower; at most one
-        // wall, never along the water or on a road; a village's ways no wider than a street but its highways.
-        const leastWidth = pack.layout.grown?.buildings.leastWidth ?? 0;
-        const typeOf = new Map(city.buildings.map((building) => [building.id, building.type]));
-        for (const lot of layout.lots) {
-          const allowed = Math.min(leastWidth, lotSizeOf(typeOf.get(lot.buildingId) as string, pack).frontage);
-          if (width(lot.polygon) < allowed - 1e-6) failures.push(`${brief.id}: ${lot.id} is ${width(lot.polygon).toFixed(2)} m wide, under ${allowed} m`);
-        }
-        if (layout.walls.length > (brief.flags.walls ? 1 : 0)) failures.push(`${brief.id}: ${layout.walls.length} wall records`);
-        const stretches = wallStretches(layout);
-        if (stretches.alongWater > 10) failures.push(`${brief.id}: ${stretches.alongWater.toFixed(0)} m of wall runs along the water`);
-        if (stretches.onRoad > 10) failures.push(`${brief.id}: ${stretches.onRoad.toFixed(0)} m of wall runs on a road`);
-        if (brief.population < (pack.layout.grown?.arterials.streetBelow ?? 0)) {
-          const street = pack.layout.grown?.widths.street ?? Infinity;
-          for (const segment of layout.segments) if (segment.routeId === undefined && segment.kind !== 'bridge' && segment.width > street + 1e-9 && !isHighwayWide(layout, segment)) failures.push(`${brief.id}: ${segment.id} is ${segment.width} m wide in a village`);
-        }
         // The generator checks itself; the rules are run again here so the test does not rely on that.
         failures.push(...checkLayout(layout, city, brief, pack).map((problem) => `${brief.id}: ${problem}`));
         // Footprints lie inside their lots without overlapping (checked above, with the rest), and an open-air building has open ground.
@@ -143,9 +124,3 @@ describe('every settlement of Lomia', () => {
     expect(openAirLots).toBeGreaterThan(10_000);
   });
 });
-
-/** A segment as wide as the town's highways: a port's quay or a local road, which stand in for one. */
-function isHighwayWide(layout: Layout, segment: Layout['segments'][number]): boolean {
-  const widest = Math.max(0, ...layout.segments.filter((other) => other.routeId !== undefined).map((other) => other.width));
-  return segment.width >= widest;
-}

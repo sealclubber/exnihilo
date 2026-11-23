@@ -3,8 +3,8 @@
  * one layout, and means nothing in another.
  */
 import { describe, expect, it } from 'vitest';
-import { type AvatarState, LAYOUT_VERSION, parsePack } from '@worldsim/core';
-import { medievalPack, rawMedievalPack } from '../../core/test/pack.ts';
+import { type AvatarState, LAYOUT_VERSION } from '@worldsim/core';
+import { medievalPack } from '../../core/test/pack.ts';
 import { AvatarKeeper, fromStore, toStore } from '../src/avatar.ts';
 
 const pack = medievalPack();
@@ -26,8 +26,8 @@ describe('the stored avatar', () => {
   });
 
   it('is not restored under another generator, whose segments are other segments', () => {
-    const raw = rawMedievalPack();
-    raw.layout.generator = (pack.layout.generator ?? 'grid') === 'grid' ? 'grown' : 'grid';
-    expect(fromStore(toStore(standing, pack), parsePack(raw))).toBeUndefined();
+    // The grid is the only generator today, so the other is one that is no more.
+    expect(fromStore({ ...toStore(standing, pack), generator: 'grown' }, pack)).toBeUndefined();
+    expect(fromStore(toStore(standing, pack), pack)).toBeDefined();
   });
 });

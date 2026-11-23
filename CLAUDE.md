@@ -21,26 +21,18 @@ current phase before starting, and the README for how things run today.
 | Start the viewer | `npm run client` |
 | Generate one city | `npm run generate -- <settlement id>` |
 | Print a settlement's day | `npm run day -- <settlement id> --day <number>` |
-| Draw a town's layout to SVG | `npm run render -- <settlement id> [--generator grid\|grown]` |
-| Measure the shape of laid-out towns | `node scripts/measure-layout.ts --all` |
+| Draw a town's layout to SVG | `npm run render -- <settlement id>` |
+| Draw the staged generator's plan of a town | `node scripts/render-stages.ts <out folder> <suffix> <name>...` |
 
-**How long things take** (measured 2026-11-23 on the development machine, phase
-6D.4). Plan around these; run a single test file with `npx vitest run <file>`
-while working, and the full check once at the end.
+**How long things take** (measured 2026-11-23 on the development machine,
+with the grid laying every town out). Run a single test file with
+`npx vitest run <file>` while working, and the full check once at the end.
 
 | Task | Time |
 | --- | --- |
-| `npm run check` (type-check and every test) | about 8 to 10 minutes |
-| `packages/core/test/lomia-cities.test.ts` (lays out all 682 settlements) | about 7 to 8 minutes |
-| `packages/core/test/visitors.test.ts` (lays out all 682 under an edited pack) | about 4 to 8 minutes |
-| `packages/core/test/outsiders.test.ts`, `districts.test.ts` | about 2 to 3 minutes each |
-| `packages/core/test/grown.test.ts` (the five test towns) | about 1 minute |
-| `npm run test:viewer` | about 1.5 minutes |
-| Grown layout of one town | Badanos 1 s, Cevilefon 2 s, Pombal 5 s, the slowest of Lomia (Tames, five attempts) about 16 s |
-| All of Lomia laid out once, one core | about 7 minutes |
-
-The two whole-Lomia tests carry a 900-second limit of their own. Commands
-that run longer than two minutes are best run in the background.
+| `npm run check` (type-check and every test) | about 2 minutes |
+| `npm run test:viewer` | about 1 minute |
+| `packages/core/test/staged-roads.test.ts` (stages 1 to 3 for all 682 settlements) | about 10 seconds |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -88,15 +80,16 @@ enforce them. Do not weaken that test to make a change pass.
 11. **Layout is a separate module that reads a finished city.**
     `packages/core/src/layout` takes a city, its brief, the pack and a seed,
     and never reaches back to change the city. Its random streams are named
-    apart from the city generator's (`layout-…` for the grid, `grown-…` for
-    the grown generator).
+    apart from the city generator's (`layout-…` for the grid, `staged-…` for
+    the staged generator).
 12. **Consumers read the layout format, never the generator.** The viewer,
     the API, the path function and anything built later may use only what
     `layout/records.ts` guarantees. A segment is a polyline and a lot is a
     polygon: nothing that reads a layout may assume straight streets, right
-    angles, rectangles or a grid. Two generators make it: `layout/grid.ts`,
-    deliberately regular, and `layout/grown.ts`, the pack's choice. Either may
-    be replaced; the format will not.
+    angles, rectangles or a grid. `layout/grid.ts`, deliberately regular,
+    makes it today; `layout/staged/` is the generator of phase 6E, being
+    built stage by stage (`sim-6e.md`). A generator may be replaced; the
+    format will not.
 
 13. **Nothing is stepped.** A resident's whereabouts are a pure function of
     game time: a day plan is derived from the person, the day number, the
@@ -206,14 +199,22 @@ centre, x east and y south; bearings are degrees clockwise from north.
   around or toward the centre. An undirected town scores 44%; a town of rings
   and spokes nearly 100%.
 - Every length, width and density limit comes from `packs/medieval/layout.yaml`;
-  the grown generator's numbers are in its `grown` block.
-- **Roads, wards, buildings.** The grown generator lays the brief's routes as
-  highways first and branches arterials off them; the roads cut the town's
-  ground into wards, and each ward is cut in two again and again until the
-  pieces are buildings. A lot is its piece. Do not derive a street's
-  direction from the centre: that is what made rings.
-- **Blocks are wards.** A grown layout lists its wards as blocks, each with a
-  district and a `growthRank` from 0 (first built on) to 1 (last).
+  the staged generator's numbers are in its `staged` block.
+
+## The staged generator (phase 6E, in progress)
+
+- **Stages, each final.** Water, then highways and bridges, the harbour, the
+  wall, special wards, the mesh, and so on. A later stage never moves what an
+  earlier one placed, and nothing is repaired afterwards. Each stage is a
+  pure function of the stages before it.
+- **No loops.** The only loop allowed anywhere is "take more ground", at most
+  three times.
+- **It is not a layout yet.** Until its last stage is built it makes a plan
+  (`staged/plan.ts`), drawn by `scripts/render-stages.ts`; the grid lays
+  every town out.
+- **The prototype is a sketch to port, not code to keep.** Where
+  `docs/prototypes/proto_wards9.py` and `sim-6e.md` disagree, the document
+  wins; where the brief's facts and either disagree, report it.
 
 ## Conventions
 
