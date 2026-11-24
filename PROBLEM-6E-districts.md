@@ -1,238 +1,209 @@
 # Open problem: district ground in the staged town generator (Phase 6E)
 
-Written 2026-11-24, at commit `0592d8e`. This is a self-contained brief for
-someone picking the problem up cold. Read `CLAUDE.md` first for the project's
-standing rules; `sim-6e.md` is the gameplan this work belongs to.
+Written 2026-11-24. **Status: stopped, to be looked at again.** This brief
+assumes no context. Read `CLAUDE.md` for the project's standing rules and
+`sim-6e.md` for the gameplan.
 
-## The one-paragraph version
+- `main` (this file) is the last state where `npm run check` passes:
+  643 of 682 settlements pass every layout invariant.
+- Branch `6e-district-rules` holds the user's approved rule changes and the
+  fixes made after them: 657 of 682 pass. The full check has **not** been
+  run on that branch.
 
-The staged town generator (`packages/core/src/layout/staged/`) lays out all
-682 settlements of the Lomia test world. 643 of them keep every layout
-invariant. The other 39 fail only the rules about **district ground**: some
-buildings end up standing in ground that is not their own district's. Until
-all 682 pass, the pack keeps naming the old grid generator as the default.
-The goal is to get the 39 to pass without breaking the user's rules below,
-or to show which rule has to give and put that to the user.
+## The problem in one paragraph
 
-## Background you need
+The staged generator (`packages/core/src/layout/staged/`) lays out all 682
+settlements of the Lomia test world. Everything about streets, walls,
+gates, water, lots and houses passes everywhere. What fails, in 25 to 40
+settlements depending on the rules, is **district ground**: the polygons
+that say which district a piece of town belongs to. Some buildings stand
+in ground that is not their own district's, or not next to it. The pack
+keeps naming the old grid generator until this passes in all 682.
 
-A city (people, households, buildings, districts) is generated first and is
-fixed: the layout may not add, remove or change a building, or move one to
-another district. Each building belongs to exactly one district, and each
-district has an exact building count.
+## Why it keeps coming back
 
-The staged generator then builds the town in stages, each final:
+Over nine rounds the pass count went 397, 582, 589, 637, 643, 650, 655, 657.
+Each round found a real fault, fixed it, and uncovered the next. The faults
+differ; the shape does not. The question for the next attempt is whether
+the design should change, not which patch comes next.
 
-1. Water, highways, bridges, wall, plaza and castle.
-2. A Voronoi mesh of **wards**; main streets along mesh edges.
-3. Districts are grown over wards (`districts.ts`, `growDistricts`): each
-   district starts at a seed ward and claims neighbours until its wards have
-   room for its buildings.
-4. Each ward is cut into **blocks**; rows of rectangular houses are laid in
-   every block. About 2.5 to 3 times more houses are made than the town
-   has buildings.
-5. **Selection** (`selection.ts`, `chooseHouses`): the town keeps exactly as
-   many houses as it has buildings, chosen town-wide by growth rank (centre
-   first, inside the wall first, thinning at the edge). This decides which
-   houses exist. Nothing later may drop or add a house.
-6. Selection then makes each district's count exact by moving **blocks**,
-   then **single houses**, between districts. This is where the problem
-   lives.
-7. Fitting gives each building a kept house in its district (`fitting.ts`).
-8. The layout is written (`layout.ts`): walking network, lots, gates, and
-   each district's **ground**, drawn from a tile per block (`tiles.ts`).
+The current design has **three separate answers to "which district is
+this?"**, made at different stages from different information, and
+reconciled afterwards:
 
-## The invariant (set by the user; `layout/invariants.ts`)
+1. **Wards** get a district when districts are grown over the mesh
+   (`districts.ts`). This uses ward area and adjacency, before any house
+   exists.
+2. **Houses** get a district in selection (`selection.ts`). The town keeps
+   houses by rank, town-wide. Each district's count must then be made
+   exact. That is done by moving blocks across borders, chains of block
+   moves, single houses at borders, then a counted fallback that ignores
+   borders.
+3. **Ground** gets a district when the layout is written (`layout.ts`,
+   `districtGround`). Each block's tile goes to the district most of its
+   lots belong to. Pieces are then re-owned until each district is one
+   piece, first on the tile graph and again on the drawn polygons.
 
-- Each district's ground is one connected piece, and grounds do not overlap.
-- At least 97% of a district's lots lie inside its own ground.
-- A lot outside its own ground lies inside a district whose ground touches
-  its own (within 0.5 m).
+Every failure is a disagreement between two of these answers:
+
+- Districts are grown on ground whose houses selection then does not keep,
+  so a district is short. It borrows across a border, or through the
+  fallback from anywhere.
+- A borrowed house's lot stands in the lender's ground. If the lender is
+  not beside the borrower, the lot fails.
+- Re-owning a tile to keep one district in one piece moves its lots out of
+  their own district's ground, which pushes another district over the 3%
+  limit.
+- Landmarks (plaza, castle, a temple's block) belong to a district by the
+  city's say-so but stand where the layout put them. A strip of ground
+  joining one to its district can cut a third district in two.
+
+Each fix so far made two of the answers agree in one more case. None
+removed the need to reconcile.
+
+## Rules in force
+
+From the user, on `main`:
+
+- A district's ground is one connected piece; grounds do not overlap.
+- At least 97% of a district's lots lie in its own ground.
+- A lot outside its own ground lies in a district whose ground touches its
+  own.
 - A waterside district's ground comes within 40 m of the water.
+- Blocks, then single houses, change district only across a touching
+  border. Chains are allowed. No house is dropped or added. A short
+  district with no touching neighbour takes from the nearest district,
+  and that fallback is counted.
 
-A lot whose wall lies exactly on the ground's edge counts as inside (it is
-tested drawn in by 2 cm). That tolerance was added during this work because
-two terraced houses of different districts share a wall.
+Approved later; on the branch only:
 
-## The user's rules for step 6 (do not change these without asking)
+1. One connected piece **per bank**. Pieces on different banks must be
+   joined by a bridge link. No ground is drawn across water, and the
+   strips that crossed bridges are removed.
+2. A lot outside its own ground may also lie in a district joined to its
+   own by a bridge link. Single houses may cross a bridge link.
+3. The limit is 97%, or all but 2 lots, whichever allows more.
+4. A bridge link reaches past a landmark's block to the next block along
+   the road.
+5. The district that owns the market square is seeded beside the plaza.
+6. No new passes.
 
-- A block changes district only where its ground touches the taker's.
-- Chains are allowed: surplus flows through intermediate districts across
-  shared borders.
-- After block moves, each district's count is made exact by moving single
-  houses between districts, only at a shared border.
-- Never drop or add a house; the town-wide selection decides which exist.
-- If a short district has no touching neighbour with spare houses, take
-  from the nearest district and **count the case** (`selection.fallback`).
-- Houses are never clipped; landmarks' blocks never change district.
+## Where the branch stands
 
-Decisions the implementation added on top, which the user has been told
-about but which are not the user's own rules:
-
-- A block is never taken if its loss would split the district that gives it
-  (`whole`).
-- The two blocks at the ends of a bridge count as touching for whole-block
-  moves. Single houses never cross a bridge.
-- A district grows only from its **body**, the largest connected piece of
-  its blocks; a stray block (other than a landmark's) is first handed to the
-  district whose body it touches.
-- A short district first absorbs unbuilt blocks between it and the nearest
-  houses (`reachHouses`).
-- A thin district that can give nothing is passed through and thickened
-  first; a stopped chain is retried (up to `THICKENINGS` = 8).
-- Single houses move in two passes: first only from a block that could
-  change district itself; then, for a district still short, from any border
-  block that keeps most of its own houses.
-- A block whose houses belong to two districts has its tile divided between
-  them in the drawn ground, unless dividing would part its own district.
-
-## Where things stand
-
-Measured over all 682 settlements. A settlement can appear in several rows.
+Over all 682 settlements, 657 pass every invariant and 25 fail:
 
 | Fails | Settlements |
 | --- | --- |
-| A lot lies in a district whose ground does not touch its own | 35 |
-| More than 3% of a district's lots lie outside its ground | 25 |
-| A lot lies outside every district's ground | 8 |
-| Any of the above | 39 |
+| A lot lies in ground that neither touches its own nor is bridge-linked to it | 21 |
+| More than 3% (and more than 2) of a district's lots lie outside its ground | 20 |
 
-- The non-touching fallback is used in 31 settlements, for 2,631 houses.
-- All 18 settlements under 500 people pass. Badanos, Pombal and Boytayay
-  pass; Cevilefon, Karlen and Tames do not.
-- The walking network, wall, gates and water invariants pass everywhere.
-- No settlement needs the "take more ground" loop.
+- The non-touching fallback is used in 17 settlements, for 1,372 houses.
+- Every failing settlement has a river, so towns astride water are the
+  hard case.
+- All settlements under 500 people pass, and so do Badanos and Boytayay.
+  Pombal fails on one temple and 19 lots.
 
-History of the pass count, for scale: 397, then 582 (touching-only moves),
-589, 637 (districts kept whole, hairs of ground removed, tiles divided),
-643 (thin districts passed through).
+### The failing settlements and their causes
 
-## What is known about the remaining 39
+Taken from a classifier run on the branch, which was stopped partway, so
+the list is incomplete. It sees at most the first 20 problems of each town.
 
-Only a handful of the failing towns were examined one by one, so the split
-between these causes across the 39 is **not measured**.
+Tags used in the table:
 
-1. **Towns astride a river where one bank is starved.** Selection keeps
-   houses by rank, town-wide. District growth hands out wards by adjacency
-   and room. On the far bank the two disagree: districts are given ground
-   whose houses the town mostly does not keep.
-   - *Inillanue* (settlement-109): four far-bank districts want 1,384
-     houses; the town keeps 661 there. Fallback 423 houses.
-   - The only way to supply them is across the bridges.
-2. **A landmark's block at the bridgehead.** The bridge link joins the two
-   tiles nearest the bridge's ends. If one of them is a landmark's block,
-   which never changes district, nothing can cross.
-   - *Montica* (three districts, one bridge): 101 spare houses on one bank
-     cannot reach the other.
-3. **Single houses cannot cross a bridge.** After block chains finish,
-   leftovers of about 20 houses per district remain on each bank.
-   - *Ruha*: far-bank districts each hold about 20 spare; near-bank ones are
-     each about 20 short. Fallback 176.
-4. **A plaza or castle that belongs to a district it does not stand in.**
-   The city generator says which district owns the market square; the
-   layout puts the plaza at the centre regardless.
-   - *Klauka*: the market square is district 2's but stands amid district 1,
-     and the two grounds do not touch.
-5. **Small districts just over 3%.** A visitors' quarter of 39 buildings is
-   allowed one lot outside. *Klauka*: 3 of 39.
-6. **Drawn ground apart although the tiles are neighbours.** A divided
-   tile's part can take the edge its parent shared with a neighbour. Seen in
-   Klauka (district 5); not run down.
+- **fallback**: a lot in a house given by the non-touching fallback.
+- **drawn elsewhere**: a lot in its own district's block, but the block's
+  tile was re-owned to keep some district in one piece.
+- **over limit (n/m)**: n of a district's m lots lie outside its ground.
+- **gatehouse**: a gatehouse with no gate of its own, standing at another
+  district's gate.
+- **landmark**: a landmark standing apart from its own district.
 
-The last change (thin districts, second house pass) lowered the "does not
-touch" row by 5 but raised the other two rows by 5 each. Which of the two
-changes did that was not determined.
+| Settlement | Fallback houses | Causes |
+| --- | --- | --- |
+| Klauka | 0 | over limit (14/303) |
+| Sunde | 0 | gatehouse |
+| Pombal | 0 | drawn elsewhere ×19; landmark (temple's block) |
+| Karlen | 268 | drawn elsewhere ×17; over limit; landmark (market square, town hall) |
+| Karpeysk | 8 | fallback ×8; drawn elsewhere ×4; over limit (5/41) |
+| Vasetbo | 0 | gatehouse |
+| Ruha | 96 | fallback ×18; landmark (citadel); over limit |
+| Joen | 0 | landmark (citadel); over limit ×2 |
+| Courceauligy | 57 | fallback ×19; over limit |
+| Tames | 0 | gatehouse; over limit (5/157) |
+| Tiorpanki | 46 | fallback ×17; over limit ×3 |
+| Borfino | 14 | fallback ×14; over limit ×3 |
+| Nuvusvaa | 66 | over limit (79/264) and one more; fallback ×2 |
+| Batimanchy | 0 | over limit (8/239) |
+| Ririm | 150 | fallback ×19; gatehouse |
+| Horncesham | 184 | drawn elsewhere ×13; fallback ×4; over limit ×3 |
+| Mevezomaz | 0 | over limit ×2 |
+| Chawbume | 56 | fallback ×12; over limit ×2 |
+| Haurinen | 3 | fallback ×3 |
 
-## Things tried that did not work
+The classifier was stopped before it reached the rest. A run on slightly
+earlier branch code also failed Ertin, Bemegoro, Feins, Lilov, Gasilnik
+and Tuvaaki: fallback houses, lots over the limit, and blocks moved across
+a border the ground then lost.
 
-- **Letting any border block give houses while it keeps a majority, with no
-  wholeness check, as the only house rule.** Cut the fallback but put more
-  lots off their ground. It is now the second pass only.
-- **Restricting district growth to the "town proper" wards** (those ranked
-  inside 1.3 times the building count) while districts take what they need.
-  Made Inillanue worse (fallback 645 to 704). Reverted.
-- **Using block-only bridge links for the drawn ground as well as for
-  selection.** The strip of ground across the bridge then crossed foreign
-  blocks and whole banks were re-owned. Reverted; both now use the tiles
-  nearest the bridge ends.
-- **A separate "block adjustment" pass after selection** (branch
-  `6e-step8-wip`, deleted). It thrashed: districts became ribbons.
+### Cause 6, run down
 
-## Options not yet tried
+Cause 6 was "drawn ground apart although the tiles are neighbours".
 
-- **Let a bridge link reach past a landmark's block** to the next block
-  along the road, and let single houses use bridge links. The ground would
-  need a strip along the road rather than only across the water. Smallest
-  change; addresses causes 2 and 3.
-- **Seed and grow districts per bank**, so no bank is asked for more houses
-  than selection will keep there. Addresses cause 1 at the root, but changes
-  how districts are placed, which is a user-facing design change.
-- **Make district growth aware of selection** more directly: estimate, per
-  ward, how many houses will be kept (rank against the keep threshold)
-  instead of using area. Today `roomIn` is area over `perHouse`.
-- **For cause 4**, either make the plaza's district the one grown at the
-  heart of the town, or exempt special wards from the "touches" rule. The
-  second is a rule change and is the user's call.
+- **Strips across other districts.** A castle or other landmark standing
+  amid another district was joined to its own by a 2 m strip drawn
+  straight across. The strip cut the other district in two. Strips now
+  never cross water or another district's ground. Mevezomaz went from
+  about 125 lots off their ground to 1.
+- **Hairs on divided tiles.** Dividing a tile left hair-thin slivers that
+  made two tiles neighbours on the tile graph but not when drawn. Hairs
+  are now removed when a tile is divided. Horncesham went from 64 lots
+  to 10.
 
-## Constraints that bite
+What remains of cause 6 is landmark ground whose strip is now refused, so
+the landmark stands apart. That is the **landmark** cause above.
 
-- `core` is pure and deterministic: no clock, no unseeded randomness; same
-  inputs give byte-identical output.
-- No loops except "take more ground", at most three times. Bounded passes
-  and bounded retries with a fixed count have been accepted so far.
-- No hard-coded numbers that are setting data: those live in
-  `packs/medieval/layout.yaml` under `staged`. Geometric tolerances
-  (`HAIR`, `TOUCH`, `ON_THE_EDGE`) are constants in code today.
-- Polygon arithmetic only through `staged/shapes.ts` (wraps `clipper2-ts`).
-- Stay inside the gameplan's scope; if a rule has to change, stop and ask
-  the user with evidence.
-- Do not weaken `packages/core/test/boundaries.test.ts`.
+## Directions worth weighing before more patches
+
+These change the design, so they are the user's call.
+
+- **One answer instead of three.** Choose the kept houses first. Then grow
+  districts over *kept houses or blocks*, not wards, to the exact count,
+  as connected regions. Ground then follows the blocks with no vote and
+  no re-owning. Exact counts and connected ground come from one process,
+  not three reconciled ones. The cost: district character (house size,
+  lane density) is set per ward before houses exist, so it would need to
+  be set some other way, or the houses re-laid after districts are known.
+- **Make the ground follow the lots, not the blocks.** Draw each
+  district's ground as the union of its own lots plus the open ground
+  nearest them, for example a Voronoi of lots clipped to the town. Every
+  lot is then inside its own ground by construction. The remaining
+  question is only whether that ground is one piece per bank. Borrowed
+  houses would make ragged borders.
+- **Grow districts per bank.** No bank is asked for more houses than
+  selection keeps there, so the fallback across water mostly disappears.
+  This keeps the current design and addresses the largest single cause.
+- **Seed every landmark's district beside the landmark**, as the plaza's
+  now is: the castle, and block landmarks such as a temple or town hall.
+  This removes the landmark cause.
+- **Exempt gatehouses**, wherever they stand, from the "touches" rule. A
+  gatehouse standing at another district's gate is a fact of the wall,
+  not a fault of the districts.
 
 ## How to measure
 
-Node 24 or newer runs the TypeScript directly.
-
 ```sh
-# The table above: all 682 settlements, about 6 minutes.
-node scripts/staged-census.ts
-
-# The sample of 57 used while working (every 12th), about 30 seconds,
-# with each failing town's first problem.
-node scripts/staged-census.ts 12 --towns
-
-# Draw towns as the staged generator lays them out, with what each breaks.
-node scripts/render-staged-layout.ts docs/renders 6e-step10 Inillanue Montica Ruha Klauka
-
-# Tests for this area (about 3 minutes and 1 minute).
-npx vitest run packages/core/test/staged-town.test.ts
-npx vitest run packages/core/test/staged-layout.test.ts
-
-# Before calling anything done (about 5 minutes). Capture the exit status;
-# do not pipe it through tail before committing.
-npm run check > check.log 2>&1; echo "exit $?"
+node scripts/staged-census.ts            # all 682, about 6 minutes
+node scripts/staged-census.ts 12 --towns # the sample of 57, about 30 s
+node scripts/render-staged-layout.ts docs/renders try Pombal Ruha Karlen
+npm run check > check.log 2>&1; echo "exit $?"   # about 5 minutes
 ```
-
-The viewer shows a staged layout beside the grid's with
-`?generator=staged` before the `#`.
 
 ## Where the code is
 
-| File | What to read |
+| File | What it does |
 | --- | --- |
-| `staged/selection.ts` | `chooseHouses`: town-wide choice, then `embody`, the rounds, `reachHouses`, the chains, the two single-house passes, the fallback |
-| `staged/districts.ts` | `growDistricts`: seeds, ranking, claims; `wardsBeside`: what counts as adjacent and what crossing costs |
-| `staged/tiles.ts` | `tileBlocks`: a tile per block, hair removal, adjacency; `bridgeLinks` |
-| `staged/layout.ts` | `districtGround`: votes, dividing tiles, one-piece passes on the tile graph and then on the drawn polygons, bridge strips |
-| `staged/plan.ts` | `planTown`: how the stages are wired, and what selection is given (`beside`, `touching`, `fixed`) |
-| `layout/invariants.ts` | The district-ground checks and their messages |
-| `packs/medieval/layout.yaml` | The `staged` block: `districts`, `selection` |
-
-## What a good answer looks like
-
-- The census table with the pass count and the fallback count, before and
-  after, over all 682.
-- No regression in the rows that are already zero, and `npm run check`
-  green.
-- Any rule that was bent named plainly, with the settlements that needed it.
-- If the answer is "a rule must change", the smallest change, the evidence,
-  and the settlements it would fix, put as a question to the user.
+| `staged/districts.ts` | `growDistricts`: seeds, ranking, claims over wards |
+| `staged/selection.ts` | `chooseHouses`: the town-wide choice, block moves, chains, single houses, fallback |
+| `staged/tiles.ts` | `tileBlocks`: a tile per block, adjacency, hairs; `bridgeLinks` |
+| `staged/layout.ts` | `districtGround`: votes, divided tiles, re-owning, strips, the drawn polygons |
+| `layout/invariants.ts` | The district-ground rules |
