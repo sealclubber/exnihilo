@@ -7,7 +7,7 @@ import type { City } from '../../city/records.ts';
 import type { SettingPack } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { interiorPoint } from '../cutting.ts';
-import { boxOf, distance, distancePolygonToPolyline, pointInPolygon, polygonsOverlap, sharedBoundaryLength, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
+import { boxOf, distance, distancePolygonToPolyline, pointInPolygon, polylineLength, slicePolyline, polygonsOverlap, sharedBoundaryLength, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
 import { checkLayout } from '../invariants.ts';
 import { ringShare } from '../measure.ts';
 import { type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
@@ -15,7 +15,7 @@ import { type NetEdge, type NetNode, buildNetwork } from './network.ts';
 import { StagedLayoutError, type TownPlan, planTown, stagedSettings, townInput } from './plan.ts';
 import { cornersOf } from './rects.ts';
 import { grown, widened, without } from './shapes.ts';
-import { plainly } from './tiles.ts';
+import { bridgeLinks, plainly } from './tiles.ts';
 
 export const STAGED_GENERATOR = 'staged';
 
@@ -42,7 +42,11 @@ const WALL_WIDTH = 3;
 const GATEHOUSE = 3.5;
 /** A pocket of at least this many junctions is joined to the town, by a lane no longer than this many metres. */
 const POCKET = 2;
-const JOIN_WITHIN = 120;
+const JOIN_WITHIN = 400;
+/** How near a bridge's head no joining lane begins or ends, in metres. */
+const HEAD_CLEAR = 3;
+/** A house's way is looked for at its front; if none lies within this many metres, at its other sides. */
+const FRONT_WITHIN = 11;
 
 export function generateStagedLayout(city: City, brief: SettlementBrief, pack: SettingPack, options: StagedOptions = {}): Layout {
   const settings = stagedSettings(pack);
@@ -77,7 +81,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     solid.add(boxOf(polygon, 3), polygon);
   }
   const ringLines = plan.wall ? plan.wall.parts.map((part) => (part.closed ? [...part.points, part.points[0] as Point] : part.points)) : [];
-  const laneWidth = settings.widths.lane - 0.2;
+  const laneWidth = settings.widths.lane - 0.4;
   const pieces = (): { of: Int32Array; sizes: number[] } => {
     const of = new Int32Array(net.nodes.length).fill(-1);
     const sizes: number[] = [];
@@ -101,18 +105,47 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
   };
   let found = pieces();
   let largest = found.sizes.indexOf(Math.max(...found.sizes));
-  const pockets = found.sizes.map((size, at) => ({ size, at })).filter(({ size, at }) => at !== largest && size >= POCKET).sort((a, b) => b.size - a.size || a.at - b.at);
+  // Each pocket is known by one of its junctions: the pieces are counted again after every join.
+  const pockets = found.sizes.map((size, at) => ({ size, at, node: found.of.indexOf(at) })).filter(({ size, at }) => at !== largest && size >= POCKET).sort((a, b) => b.size - a.size || a.at - b.at);
   for (const pocket of pockets) {
-    const own = net.nodes.map((_, at) => at).filter((at) => found.of[at] === pocket.at);
-    const main = net.nodes.map((_, at) => at).filter((at) => found.of[at] === largest);
+    // Never at a bridge's head, where a gate may stand across the road.
+    const atHead = (at: number) => [...net.bridgeHeads.values()].some((head) => distance(head, (net.nodes[at] as NetNode).point) < HEAD_CLEAR) || plan.bridges.some((bridge) => distance(bridge.a, (net.nodes[at] as NetNode).point) < HEAD_CLEAR || distance(bridge.b, (net.nodes[at] as NetNode).point) < HEAD_CLEAR);
+    const piece = found.of[pocket.node] as number;
+    if (piece === largest) continue;
+    const own = net.nodes.map((_, at) => at).filter((at) => found.of[at] === piece && !atHead(at));
+    const main = net.nodes.map((_, at) => at).filter((at) => found.of[at] === largest && !atHead(at));
+    // To the nearest place on any way of the town, not only its junctions: the way is parted there.
+    const inMain = new Set(main);
     const pairs = own.flatMap((u) => {
-      let best = -1;
-      for (const v of main) if (best < 0 || distance((net.nodes[u] as NetNode).point, (net.nodes[v] as NetNode).point) < distance((net.nodes[u] as NetNode).point, (net.nodes[best] as NetNode).point)) best = v;
-      return best < 0 ? [] : [{ u, v: best, away: distance((net.nodes[u] as NetNode).point, (net.nodes[best] as NetNode).point) }];
+      const from = (net.nodes[u] as NetNode).point;
+      let best: { edge: number; along: number; point: Point; away: number } | undefined;
+      net.edges.forEach((edge, at) => {
+        if (edge.kind === 'bridge' || found.of[edge.from] !== largest) return;
+        const hit = projectOnPolyline(edge.points, from);
+        if (!best || hit.distance < best.away) best = { edge: at, along: hit.along, point: hit.point, away: hit.distance };
+      });
+      return best ? [{ u, ...(best as { edge: number; along: number; point: Point; away: number }) }] : [];
     }).sort((a, b) => a.away - b.away || a.u - b.u);
-    for (const { u, v, away } of pairs.slice(0, 40)) {
+    void inMain;
+    const nodeAt = (edge: number, along: number, point: Point): number => {
+      const way = net.edges[edge] as NetEdge;
+      const length = polylineLength(way.points);
+      if (along < 0.3) return way.from;
+      if (along > length - 0.3) return way.to;
+      const node = net.nodes.length;
+      net.nodes.push({ point, kind: 'crossing' });
+      beside.push([edge, net.edges.length]);
+      const far = way.to;
+      net.edges.push({ ...way, from: node, to: far, points: [point, ...slicePolyline(way.points, along, length).slice(1)] });
+      (beside[far] as number[]).splice((beside[far] as number[]).indexOf(edge), 1, net.edges.length - 1);
+      way.to = node;
+      way.points = [...slicePolyline(way.points, 0, along).slice(0, -1), point];
+      return node;
+    };
+    for (const { u, edge, along, point, away } of pairs.slice(0, 40)) {
       if (away > JOIN_WITHIN) break;
-      const [from, to] = [(net.nodes[u] as NetNode).point, (net.nodes[v] as NetNode).point];
+      if ([...net.bridgeHeads.values()].some((head) => distance(head, point) < HEAD_CLEAR)) continue;
+      const [from, to] = [(net.nodes[u] as NetNode).point, point];
       let clear = true;
       for (let step = 0; step <= Math.ceil(away / 2) && clear; step++) {
         const point: Point = [from[0] + ((to[0] - from[0]) * step) / Math.ceil(away / 2), from[1] + ((to[1] - from[1]) * step) / Math.ceil(away / 2)];
@@ -120,6 +153,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
       }
       for (const outline of solid.near(boxOf([from, to], laneWidth))) if (distancePolygonToPolyline(outline, [from, to]) < laneWidth / 2 + 0.05) clear = false;
       if (!clear) continue;
+      const v = -1;
       const hits = ringLines.flatMap((line) => line.flatMap((point, at) => (at > 0 ? [meetOf(from, to, line[at - 1] as Point, point)] : [])).filter((hit): hit is Point => hit !== undefined));
       if (hits.length > 1) continue;
       const add = (a: number, b: number, points: Point[]) => {
@@ -127,13 +161,15 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
         (beside[b] as number[]).push(net.edges.length);
         net.edges.push({ from: a, to: b, points, kind: 'lane', width: laneWidth });
       };
+      void v;
+      const target = nodeAt(edge, along, point);
       if (hits.length === 1) {
         const gate = net.nodes.length;
         net.nodes.push({ point: hits[0] as Point, kind: 'gate', arterial: false });
         beside.push([]);
         add(u, gate, [from, hits[0] as Point]);
-        add(gate, v, [hits[0] as Point, to]);
-      } else add(u, v, [from, to]);
+        add(gate, target, [hits[0] as Point, to]);
+      } else add(u, target, [from, to]);
       break;
     }
     found = pieces();
@@ -185,7 +221,14 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
       const side = Math.min(open, body.width, body.depth);
       footprints = [cornersOf({ corner: [body.corner[0] + (body.along[0] * (body.width - side)) / 2 + body.inward[0] * 0.5, body.corner[1] + (body.along[1] * (body.width - side)) / 2 + body.inward[1] * 0.5], along: body.along, inward: body.inward, width: side, depth: Math.min(side, body.depth - 0.5) })];
     }
-    drafts.set(held, { building: held, polygon: house.outline, footprints, front: house.front, entrance: entranceFor(house.outline, middle) });
+    // By its front; but a house whose front faces open ground with no way across it opens onto the way nearest
+    // any of its sides.
+    let entrance = entranceFor(house.outline, middle);
+    if (distance(entrance.point, middle) > FRONT_WITHIN) {
+      const other = entranceFor(house.outline);
+      if (distancePolygonToPolyline(house.outline, [other.point, other.point]) < distancePolygonToPolyline(house.outline, [entrance.point, entrance.point])) entrance = other;
+    }
+    drafts.set(held, { building: held, polygon: house.outline, footprints, front: house.front, entrance });
   });
   for (const landmark of plan.landmarks) {
     const polygon = landmark.block !== undefined ? (plan.blocks[landmark.block] as TownPlan['blocks'][number]).polygon : (plan.wards[landmark.ward] as TownPlan['wards'][number]).polygon;
@@ -232,7 +275,8 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
         const along: Point = [-inward[1], inward[0]];
         (net.nodes[at] as NetNode).kind = 'gate';
         const here = (net.nodes[at] as NetNode).point;
-        const half = settings.widths.highway / 2 + 1;
+        // No longer than the gate itself: other ways meet the road close by the bridge's head.
+        const half = 0.3;
         wallLines.push([[here[0] - along[0] * half, here[1] - along[1] * half], here, [here[0] + along[0] * half, here[1] + along[1] * half]]);
         gates.push({ node: at, arterial: true, along, inward, clear: settings.widths.highway / 2, rank: 1, bank: true });
       }
@@ -451,24 +495,10 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
   });
   // Tiles beside each other: those that touch, and the two at the ends of each bridge.
   const beside = plan.tilesBeside.map((list) => [...list]);
-  const nearestTile = (point: Point): { tile: number; point: Point } | undefined => {
-    let best: { tile: number; point: Point; away: number } | undefined;
-    plan.tiles.forEach((rings, tile) => {
-      for (const ring of rings) {
-        const found = projectOnPolyline([...ring, ring[0] as Point], point);
-        const away = pointInPolygon(point, ring) ? 0 : found.distance;
-        if (!best || away < best.away) best = { tile, point: found.point, away };
-      }
-    });
-    return best;
-  };
-  const links: Array<{ a: number; b: number; line: Point[] }> = [];
-  for (const bridge of plan.bridges) {
-    const [one, other] = [nearestTile(bridge.a), nearestTile(bridge.b)];
-    if (!one || !other || one.tile === other.tile) continue;
-    (beside[one.tile] as number[]).push(other.tile);
-    (beside[other.tile] as number[]).push(one.tile);
-    links.push({ a: one.tile, b: other.tile, line: [one.point, bridge.a, bridge.b, other.point] });
+  const links = bridgeLinks(plan.tiles, plan.bridges);
+  for (const link of links) {
+    (beside[link.a] as number[]).push(link.b);
+    (beside[link.b] as number[]).push(link.a);
   }
   // One piece each: of a district in several pieces, the piece with most of its lots is its ground, and the tiles
   // of the others, like tiles that are nobody's, become the ground of whichever district is beside them.

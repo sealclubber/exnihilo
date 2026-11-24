@@ -15,7 +15,7 @@ import { offsetLine } from '../cutting.ts';
 import { SpatialIndex, bearingDifference, boxOf, distance, distancePolygonToPolyline, distanceToPolygonEdge, distanceToPolyline, exactBearing, pointAlongPolyline, pointInPolygon, polylineLength, projectOnPolyline, slicePolyline } from '../geometry.ts';
 import { cellPolygon } from './mesh.ts';
 import type { TownPlan } from './plan.ts';
-import { grown } from './shapes.ts';
+import { grown, widened } from './shapes.ts';
 
 export type WayKind = 'arterial' | 'street' | 'lane' | 'bridge';
 
@@ -74,7 +74,9 @@ const LEAST = 3;
 const REACH = 13;
 /** Points nearer than this are one junction, in metres. */
 const SNAP = 0.05;
-const HAIR = 0.2;
+const HAIR = 0.4;
+/** An end this near another way, in metres, is set on it. */
+const NEAR_MISS = 0.8;
 /** How far a bridge's way runs on past each end of the bridge, in metres. */
 const APPROACH = 3;
 /** How near a block a lane along the wall or the water must pass to be laid, in metres. */
@@ -298,10 +300,20 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
     }
     return false;
   };
-  const fronted = (line: readonly Point[], within: number) => [0, 0.25, 0.5, 0.75, 1].some((share) => besideHouses(pointAlongPolyline(line, share * polylineLength(line)), within));
+  const fronted = (line: readonly Point[], within: number) => {
+    const length = polylineLength(line);
+    for (let along = 0; along <= length; along += 2 * STEP) if (besideHouses(pointAlongPolyline(line, along), within)) return true;
+    return besideHouses(line[line.length - 1] as Point, within);
+  };
   const gated = new Set(plan.gateLanes.map(([a, b]) => `${a}:${b}`));
   for (const edge of plan.mesh.edges) {
-    if (plan.mesh.onEdge[edge.a] || plan.mesh.onEdge[edge.b] || onStreet.has(`${edge.a}:${edge.b}`)) continue;
+    if (onStreet.has(`${edge.a}:${edge.b}`)) continue;
+    if (plan.mesh.onEdge[edge.a] || plan.mesh.onEdge[edge.b]) {
+      // A border that runs out to the edge of the mesh, at the town's fringe: only the length of it that passes a
+      // house's door.
+      if (edge.cells.some((cell) => builtCells.has(cell))) for (const piece of stretches([plan.mesh.corners[edge.a] as Point, plan.mesh.corners[edge.b] as Point], (point) => besideHouses(point, settings.widths.wardBorder / 2 + 1))) ways.push({ points: piece, kind: 'lane', width: widths.lane, through: false });
+      continue;
+    }
     const gate = gated.has(`${edge.a}:${edge.b}`);
     // A border of the plaza's or the castle's cell is laid too: where the cell is larger than the ward in it,
     // the border is a way between houses, and where it is the ward's own edge it is trimmed away below.
@@ -321,7 +333,8 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
     else for (const by of [back, -back]) along.push(offsetLine(part.points, by));
   }
   const shoreBack = settings.wards.fromWater;
-  if (plan.river) for (const by of [plan.river.width / 2 + shoreBack, -(plan.river.width / 2 + shoreBack)]) along.push(offsetLine(plan.river.line, by));
+  // Round the river's whole outline, its source included where it rises here.
+  if (plan.river) for (const ring of widened([plan.river.line], plan.river.width + 2 * shoreBack)) along.push([...ring, ring[0] as Point]);
   if (plan.coast) for (const by of [shoreBack, -shoreBack]) along.push(offsetLine(plan.coast.shore, by));
   // Not at a bridge's head, where a gatehouse may stand.
   const offBridges = (point: Point) => plan.bridges.every((bridge) => distance(point, bridge.a) > BRIDGEHEAD && distance(point, bridge.b) > BRIDGEHEAD);
@@ -357,14 +370,18 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
     }
     const narrowNear = half > ringOffset - 0.1 && plan.plaza ? plan.plaza.polygon : undefined;
     const clear = (point: Point) => dry(point, Math.min(half, widths.lane) + 0.3) && (way.through || offWall(point, wallWidth / 2 + half + 0.5)) && offSpecials(point, way.kind === 'lane' && rings.some((ring) => way.points[0] === ring[0]) ? 0 : ringOffset - 0.01);
-    for (const piece of stretches(way.points, clear)) {
-      if (!narrowNear) {
-        trimmed.push({ ...way, points: piece });
+    for (const whole of stretches(way.points, clear)) {
+      // Where a highway runs nearer the water than half its ground is wide, it is only a street's width there.
+      const lengths = way.kind === 'arterial' ? parted(whole, (point) => dry(point, half + 0.5)).map((part) => ({ points: part.points, width: part.pass ? way.width : Math.min(way.width, settings.widths.mainStreet) })) : [{ points: whole, width: way.width }];
+      for (const { points: piece, width } of lengths) {
+      if (!narrowNear || width < way.width) {
+        trimmed.push({ ...way, points: piece, width });
         continue;
       }
       // Beside the plaza a highway is only as wide as the ground between the plaza and the houses.
       const near = (point: Point) => distanceToPolygonEdge(point, narrowNear) < half + 0.5;
       for (const part of parted(piece, near)) trimmed.push(part.pass ? { ...way, points: part.points, width: 2 * ringOffset - 0.2 } : { ...way, points: part.points });
+      }
     }
   }
 
@@ -394,6 +411,8 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
       }
       if (least === undefined || least < SNAP) continue;
       const reached: Point = [tip[0] + toward[0] * least, tip[1] + toward[1] * least];
+      // Never nearer the water than the way is wide.
+      if (!dry(reached, way.width / 2 + 0.3)) continue;
       if (end === 0) way.points = [reached, ...way.points];
       else way.points = [...way.points, reached];
     }
@@ -439,6 +458,26 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
     }
   }
 
+  // An end that stops a step short of another way, as a lane along the bank does beside the quay, is set on it.
+  const tipsAt = new Map<string, number>();
+  for (const { way } of known) for (const tip of [way.points[0] as Point, way.points[way.points.length - 1] as Point]) tipsAt.set(key(tip), (tipsAt.get(key(tip)) ?? 0) + 1);
+  for (const a of known) {
+    if (a.way.kind === 'bridge') continue;
+    for (const end of [0, a.way.points.length - 1]) {
+      const tip = a.way.points[end] as Point;
+      // Not where a route leaves the town: an exit stays where it was put. Nor an end that already meets another
+      // way's end, as a road's does a bridge's.
+      if (exits.some((exit) => distance(exit.point, tip) < SNAP) || (tipsAt.get(key(tip)) ?? 0) > 1) continue;
+      let best: { point: Point; away: number } | undefined;
+      for (const b of known) {
+        if (b === a || b.way.kind === 'bridge' || tip[0] < b.minX - NEAR_MISS || tip[0] > b.maxX + NEAR_MISS || tip[1] < b.minY - NEAR_MISS || tip[1] > b.maxY + NEAR_MISS) continue;
+        const found = projectOnPolyline(b.way.points, tip);
+        if (found.distance <= NEAR_MISS && (!best || found.distance < best.away)) best = { point: found.point, away: found.distance };
+      }
+      if (best && best.away > 1e-9) a.way.points[end] = best.point;
+    }
+  }
+
   // ---- Joined: every way cut where it meets another, at the wall, and at an exit ------------------------------------
   const cuts: number[][] = trimmed.map(() => []);
   const alongOf = (way: Way, piece: number, share: number) => {
@@ -468,8 +507,9 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
       }
     }
   }
-  const gateAt = new Map<string, boolean>();
-  const gatePoints = new Map<string, Point>();
+  /** For each way, where it passes the wall. A gate is found again by how far along it is, to within a hair: another cut may fall on the same spot. */
+  const gatesOn = new Map<number, Array<{ along: number; point: Point; arterial: boolean }>>();
+  const gateNear = (index: number, along: number) => (gatesOn.get(index) ?? []).find((gate) => Math.abs(gate.along - along) <= 2 * SNAP);
   trimmed.forEach((way, index) => {
     if (!way.through) return;
     for (const line of walls) {
@@ -483,8 +523,7 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
           const a = line[q - 1] as Point;
           const b = line[q] as Point;
           const point: Point = [a[0] + (b[0] - a[0]) * hit[1], a[1] + (b[1] - a[1]) * hit[1]];
-          gateAt.set(`${index}:${along.toFixed(3)}`, way.kind === 'arterial');
-          gatePoints.set(`${index}:${along.toFixed(3)}`, point);
+          gatesOn.set(index, [...(gatesOn.get(index) ?? []), { along, point, arterial: way.kind === 'arterial' }]);
         }
       }
     }
@@ -499,14 +538,29 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
   const nodes: NetNode[] = [];
   const nodeOf = new Map<string, number>();
   const node = (point: Point): number => {
-    const name = key(point);
-    let index = nodeOf.get(name);
-    if (index === undefined) {
-      index = nodes.length;
-      nodes.push({ point: [point[0], point[1]], kind: 'crossing' });
-      nodeOf.set(name, index);
+    // Two ends a hair apart are one junction, whichever side of a line they fall.
+    const [cx, cy] = [Math.round(point[0] / SNAP), Math.round(point[1] / SNAP)];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const found = nodeOf.get(`${cx + dx}:${cy + dy}`);
+        if (found !== undefined && distance((nodes[found] as NetNode).point, point) <= SNAP) return found;
+      }
     }
+    const index = nodes.length;
+    nodes.push({ point: [point[0], point[1]], kind: 'crossing' });
+    nodeOf.set(`${cx}:${cy}`, index);
     return index;
+  };
+  /** The junction at a point, if there is one. */
+  const nodeAt = (point: Point): number | undefined => {
+    const [cx, cy] = [Math.round(point[0] / SNAP), Math.round(point[1] / SNAP)];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const found = nodeOf.get(`${cx + dx}:${cy + dy}`);
+        if (found !== undefined && distance((nodes[found] as NetNode).point, point) <= SNAP) return found;
+      }
+    }
+    return undefined;
   };
   const edges: NetEdge[] = [];
   trimmed.forEach((way, index) => {
@@ -518,8 +572,8 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
       const points = slicePolyline(way.points, low, high);
       // Ends at a gate stand exactly on the wall.
       for (const [along, end] of [[low, 0], [high, points.length - 1]] as const) {
-        const gate = gatePoints.get(`${index}:${along.toFixed(3)}`);
-        if (gate) points[end] = gate;
+        const gate = gateNear(index, along);
+        if (gate) points[end] = gate.point;
       }
       const from = node(points[0] as Point);
       const to = node(points[points.length - 1] as Point);
@@ -527,21 +581,21 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
       points[0] = (nodes[from] as NetNode).point;
       points[points.length - 1] = (nodes[to] as NetNode).point;
       for (const [along, end] of [[low, from], [high, to]] as const) {
-        const gate = gateAt.get(`${index}:${along.toFixed(3)}`);
+        const gate = gateNear(index, along);
         if (gate === undefined) continue;
         const at = nodes[end] as NetNode;
         at.kind = 'gate';
-        at.arterial = (at.arterial ?? false) || gate;
+        at.arterial = (at.arterial ?? false) || gate.arterial;
       }
       edges.push({ from, to, points, kind: way.kind, width: way.width, ...(way.route !== undefined && { route: way.route }) });
     }
   });
   for (const end of bridgeEnds) {
-    const index = nodeOf.get(key(end));
+    const index = nodeAt(end);
     if (index !== undefined && (nodes[index] as NetNode).kind === 'crossing') (nodes[index] as NetNode).kind = 'bridge-end';
   }
   for (const exit of exits) {
-    const index = nodeOf.get(key(exit.point));
+    const index = nodeAt(exit.point);
     if (index === undefined) {
       notes.push(`the exit for route ${exit.route} is on no way`);
       continue;

@@ -231,11 +231,11 @@ centre, x east and y south; bearings are degrees clockwise from north.
   types are landmarks, what each reserves and its footprint template are
   pack data (`layout.staged.landmarks`): code must not name a temple.
 - **Make too many, keep the best.** More houses are made than the town has;
-  the town keeps exactly its number, chosen as one town, and each
-  district's count is then made exact at its borders. Counts are never met by
-  cutting, moving or remaking houses. A district is a group of wards; its
-  border may shift by whole blocks, and a house may be borrowed, but
-  nothing is generated again.
+  the town keeps exactly its number, chosen as one town. That choice decides
+  which houses exist: making each district's count exact never drops, adds,
+  cuts or remakes one. A district is a group of wards; blocks, then single
+  houses, change district only across a border where the two grounds
+  touch, and the non-touching fallback is counted.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
 - **It makes layouts, and the grid is still the default.** `staged/layout.ts`

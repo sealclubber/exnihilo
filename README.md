@@ -570,9 +570,16 @@ and each stage draws on streams named `staged-…`. So far:
     that luck inflates with distance, so the centre is solid and the town
     thins toward its edge. A kept house belongs to the district of its
     block. Wards are coarse, so each district's count is then made exact at
-    its borders: over a few rounds a district takes the nearest whole
-    blocks of a neighbour that has more to spare than it has, and what
-    remains is settled house by house (under 1% of houses). If the whole
+    its borders, and no house is dropped or added in doing so. A block
+    changes district only where its ground touches the taker's (or stands
+    across a bridge from it), and never where its loss would part the
+    district that gives it; a district that is short is supplied from the
+    nearest one with houses to spare through the districts between, a block
+    changing hands across each shared border on the way. What blocks cannot
+    settle is settled the same way by single houses in blocks at a shared
+    border. Where a short district has no neighbour across a border with
+    houses to spare it takes the nearest kept houses of any district that
+    has: the last resort, counted in the selection's `fallback`. If the whole
     town has too few houses, ground is taken again half as large again, at
     most three times: the generator's only loop, which no settlement of
     Lomia needs.

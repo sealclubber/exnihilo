@@ -9,7 +9,7 @@
  * not to a third block further off.
  */
 import type { Point } from '../../schema.ts';
-import { SpatialIndex, boxOf, crossingsOfPolyline, distance, pointInPolygon, polygonArea } from '../geometry.ts';
+import { SpatialIndex, boxOf, crossingsOfPolyline, distance, pointInPolygon, polygonArea, projectOnPolyline } from '../geometry.ts';
 import { grown, without } from './shapes.ts';
 
 export interface Tiles {
@@ -92,3 +92,25 @@ export function tileBlocks(polygons: ReadonlyArray<readonly Point[]>, steps: rea
 
 /** How long a common edge two tiles must have to be neighbours, in metres. */
 const TOUCH = 0.5;
+
+/** The two tiles at the ends of each bridge, with the line that joins them: from the first tile's edge over the bridge to the second's. */
+export function bridgeLinks(rings: ReadonlyArray<ReadonlyArray<readonly Point[]>>, bridges: ReadonlyArray<{ a: Point; b: Point }>): Array<{ a: number; b: number; line: Point[] }> {
+  const nearest = (point: Point): { tile: number; point: Point } | undefined => {
+    let best: { tile: number; point: Point; away: number } | undefined;
+    rings.forEach((pieces, tile) => {
+      for (const ring of pieces) {
+        const found = projectOnPolyline([...ring, ring[0] as Point], point);
+        const away = pointInPolygon(point, ring as Point[]) ? 0 : found.distance;
+        if (!best || away < best.away) best = { tile, point: found.point, away };
+      }
+    });
+    return best;
+  };
+  const links: Array<{ a: number; b: number; line: Point[] }> = [];
+  for (const bridge of bridges) {
+    const [one, other] = [nearest(bridge.a), nearest(bridge.b)];
+    if (!one || !other || one.tile === other.tile) continue;
+    links.push({ a: one.tile, b: other.tile, line: [one.point, bridge.a, bridge.b, other.point] });
+  }
+  return links;
+}

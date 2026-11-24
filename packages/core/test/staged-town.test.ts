@@ -341,6 +341,18 @@ describe('exact counts', () => {
     expect(more).toBe(0);
   });
 
+  it('falls back on a district that does not touch only in a few settlements, and counts the houses', () => {
+    let settlements = 0;
+    let houses = 0;
+    for (const { plan } of everyPlan()) {
+      expect(plan.selection.fallback).toBeLessThanOrEqual(plan.selection.borrowed.reduce((sum, count) => sum + count, 0));
+      if (plan.selection.fallback > 0) settlements++;
+      houses += plan.selection.fallback;
+    }
+    console.log(`The non-touching fallback: ${settlements} settlements, ${houses} houses`);
+    expect(settlements).toBeLessThan(60);
+  });
+
   it('a house is kept by the district of its block, but for the few borrowed from a neighbour', () => {
     let kept = 0;
     let borrowed = 0;
@@ -360,8 +372,9 @@ describe('exact counts', () => {
       blocks += plan.blocks.length;
       expect(plan.blocks.filter((block, index) => plan.selection.blockDistrict[index] !== plan.districtPlan.of[block.ward]).length, brief.name).toBe(plan.selection.moved);
     }
-    // Measured: under 1% of houses borrowed. Borders shift by many whole blocks, since wards are coarse.
-    expect(borrowed / kept).toBeLessThan(0.02);
+    // Measured: about 2.4% of houses stand in a neighbour's block at a shared border. Borders shift by many whole
+    // blocks, since wards are coarse.
+    expect(borrowed / kept).toBeLessThan(0.04);
     expect(moved / blocks).toBeLessThan(0.35);
   });
 });

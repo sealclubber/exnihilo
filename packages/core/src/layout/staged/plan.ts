@@ -24,7 +24,7 @@ import { type LandmarkBuilding, type PlacedLandmark, reserve } from './landmarks
 import { type House, type Passage, layRows } from './rows.ts';
 import { type Selection, chooseHouses } from './selection.ts';
 import { gateLanes } from './network.ts';
-import { tileBlocks } from './tiles.ts';
+import { bridgeLinks, tileBlocks } from './tiles.ts';
 import { type SpecialWard, planSpecialWards, plazaRadius } from './special.ts';
 import { type Wall, planWall } from './wall.ts';
 import { type Coast, type River, makeCoast, makeRiver } from './water.ts';
@@ -219,7 +219,17 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     const corridor = settings.widths.highway + 2 * settings.wards.highwayVerge + settings.widths.wardBorder;
     const specials = wards.wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind !== 'ordinary');
     const tiles = tileBlocks([...blocks.map((block) => block.polygon), ...specials.map(({ ward }) => ward.polygon)], [settings.widths.lane / 2 + 0.2, settings.widths.wardBorder / 2 + 0.25, settings.widths.mainStreet / 2 + 1, corridor / 2 + 0.6]);
-    const selection = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: districtPlan, wanted, ground: wards.ground, ...(site.wall && { wall: site.wall }) });
+    // Blocks whose ground touches are beside each other. For whole blocks the two at the ends of a bridge are too:
+    // a district whose block stands at each end has its ground joined across the bridge.
+    const touching = blocks.map((_, index) => (tiles.beside[index] as number[]).filter((other) => other < blocks.length));
+    const beside = touching.map((list) => [...list]);
+    for (const link of bridgeLinks(tiles.rings.slice(0, blocks.length), site.bridges)) {
+      (beside[link.a] as number[]).push(link.b);
+      (beside[link.b] as number[]).push(link.a);
+    }
+    const fixed = new Map<number, number>();
+    for (const landmark of placed) if (landmark.block !== undefined && landmark.district !== undefined) fixed.set(landmark.block, landmark.district);
+    const selection = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: districtPlan, wanted, ground: wards.ground, beside, touching, fixed, ...(site.wall && { wall: site.wall }) });
     if (selection.short > 0 && attempt < settings.selection.tries) {
       more *= settings.selection.moreGround;
       continue;
