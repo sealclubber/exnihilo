@@ -3,7 +3,7 @@
  * format, with its walking network, entrances, gates and district ground.
  */
 import { describe, expect, it } from 'vitest';
-import { type City, type Layout, checkLayout, createLife, createPlanChecker, generateCity, generateLayout } from '../src/index.ts';
+import { type City, type Layout, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, measureDistrictGround } from '../src/index.ts';
 import { STAGED_GENERATOR, generateStagedLayout } from '../src/layout/staged/layout.ts';
 import type { SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
@@ -21,8 +21,6 @@ function staged(name: string) {
   }
   return entry;
 }
-/** The rules about lots and district ground, which the town's choice of houses does not yet always keep. */
-const ofGround = (problem: string) => /which does not touch its own|lie outside its ground|lies outside the ground/.test(problem);
 const SAMPLE = lomiaWorld().settlements.filter((_, at) => at % 12 === 0).map((settlement) => settlement.name);
 
 describe('the staged generator as a layout', () => {
@@ -39,18 +37,19 @@ describe('the staged generator as a layout', () => {
     expect(generateLayout(city, brief, pack).summary.generator).toBe('grid');
   });
 
-  it('breaks nothing but the rules about lots and district ground, across a sample of Lomia', () => {
-    let whole = 0;
-    const others: string[] = [];
+  it('keeps every invariant across a sample of Lomia, and measures how district ground falls', () => {
+    const lots = { all: 0, outside: 0 };
     for (const name of SAMPLE) {
-      const { problems } = staged(name);
-      if (problems.length === 0) whole++;
-      for (const problem of problems) if (!ofGround(problem)) others.push(`${name}: ${problem}`);
+      const { layout, problems } = staged(name);
+      expect(problems, name).toEqual([]);
+      const measured = measureDistrictGround(layout);
+      lots.all += measured.lots;
+      lots.outside += measured.lotsOutside;
     }
-    console.log(`Staged layouts, ${SAMPLE.length} settlements: ${whole} pass every invariant; the rest break only the district-ground rules`);
-    // Measured: 55 of the 57. Nothing else is broken anywhere in the sample.
-    expect(others).toEqual([]);
-    expect(whole / SAMPLE.length).toBeGreaterThan(0.9);
+    // District ground is each block's tile given to the district holding most of its lots: a lot in a block a
+    // neighbour holds most of stands in the neighbour's ground. Measured: 268 of 52,381 in the sample.
+    console.log(`Lots outside their own district's ground, ${SAMPLE.length} settlements: ${lots.outside} of ${lots.all}`);
+    expect(lots.outside / lots.all).toBeLessThan(0.02);
   });
 
   it('gives every building one lot, a house its front, and each lot an entrance on a way of the one network', () => {

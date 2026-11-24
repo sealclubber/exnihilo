@@ -46,10 +46,8 @@ export interface SelectionInput {
   wanted: readonly number[];
   ground: Ground;
   wall?: Wall;
-  /** For each block, the blocks whose ground touches its own, and those across a bridge from it. */
+  /** For each block, the blocks whose ground touches its own, and those a bridge link joins it to: blocks and single houses change district across either. */
   beside: ReadonlyArray<readonly number[]>;
-  /** The same without the bridges: a single house changes district only where the two grounds truly touch. */
-  touching: ReadonlyArray<readonly number[]>;
   /** Blocks that hold a landmark, and so stay in its district. */
   fixed: ReadonlyMap<number, number>;
 }
@@ -60,7 +58,7 @@ const SETTLED = 3;
 /** How many times a chain that stopped at a thin district is tried again, the district being thicker each time. */
 const THICKENINGS = 8;
 
-export function chooseHouses({ settings, seed, houses, blocks, wards, plan, wanted, ground, wall, beside, touching, fixed }: SelectionInput): Selection {
+export function chooseHouses({ settings, seed, houses, blocks, wards, plan, wanted, ground, wall, beside, fixed }: SelectionInput): Selection {
   const rules = settings.selection;
   const base = houses.map((house) => ground.rank(house.centre) * (wall?.inside(house.centre) ? rules.insideWall : 1));
   const walled = houses.map((house) => wall?.inside(house.centre) ?? false);
@@ -349,12 +347,12 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
   const inBlock: number[][] = blocks.map(() => []);
   for (const index of chosen) (inBlock[(houses[index] as House).block] as number[]).push(index);
   const borrowed = wanted.map(() => 0);
-  // The blocks of each district that touch each other district's body, once, each with the block it touches there:
-  // block moves are done.
+  // The blocks of each district that touch each other district's body, or stand across a bridge from it, once,
+  // each with the block it meets there: block moves are done.
   const borderBlocks = new Map<string, Array<{ index: number; next: number }>>();
   blockDistrict.forEach((from, index) => {
     if (from === undefined || (keptIn[index] as number) === 0) return;
-    for (const next of touching[index] ?? []) {
+    for (const next of beside[index] ?? []) {
       const to = blockDistrict[next];
       if (to === undefined || to === from || !inBody[next]) continue;
       const key = `${from}>${to}`;

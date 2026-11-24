@@ -99,14 +99,26 @@ export function tileBlocks(polygons: ReadonlyArray<readonly Point[]>, steps: rea
   return { rings, beside };
 }
 
+/** How far beyond a bridge's end the next tile along the road is looked for, and in what steps, in metres. */
+const PAST_WITHIN = 300;
+const PAST_STEP = 2;
+
 /** Ground narrower than this, in metres, is a hair. */
 export const HAIR = 0.12;
 
 /** How long a common edge two tiles must have to be neighbours, in metres. */
 const TOUCH = 0.5;
 
-/** The two tiles at the ends of each bridge, with the line that joins them: from the first tile's edge over the bridge to the second's. */
-export function bridgeLinks(rings: ReadonlyArray<ReadonlyArray<readonly Point[]>>, bridges: ReadonlyArray<{ a: Point; b: Point }>): Array<{ a: number; b: number; line: Point[] }> {
+/**
+ * The two tiles at the ends of each bridge, with the line that joins them: from the first tile's edge over the
+ * bridge to the second's. A tile that is `past`, as a landmark's block is that never changes district, is passed
+ * for the next tile along the road.
+ */
+export function bridgeLinks(
+  rings: ReadonlyArray<ReadonlyArray<readonly Point[]>>,
+  bridges: ReadonlyArray<{ a: Point; b: Point }>,
+  past?: (tile: number) => boolean,
+): Array<{ a: number; b: number; line: Point[]; bridge: number }> {
   const nearest = (point: Point): { tile: number; point: Point } | undefined => {
     let best: { tile: number; point: Point; away: number } | undefined;
     rings.forEach((pieces, tile) => {
@@ -118,11 +130,27 @@ export function bridgeLinks(rings: ReadonlyArray<ReadonlyArray<readonly Point[]>
     });
     return best;
   };
-  const links: Array<{ a: number; b: number; line: Point[] }> = [];
-  for (const bridge of bridges) {
-    const [one, other] = [nearest(bridge.a), nearest(bridge.b)];
-    if (!one || !other || one.tile === other.tile) continue;
-    links.push({ a: one.tile, b: other.tile, line: [one.point, bridge.a, bridge.b, other.point] });
-  }
+  const boxes = rings.map((pieces) => (pieces.length === 0 ? undefined : boxOf(pieces.flat())));
+  /** The tile at an end of a bridge: where that is one to be passed, the next that is not, the way the bridge runs. */
+  const beyond = (end: Point, other: Point, first: { tile: number; point: Point } | undefined) => {
+    if (!first || !past || !past(first.tile)) return first;
+    const length = distance(other, end) || 1;
+    const toward: Point = [(end[0] - other[0]) / length, (end[1] - other[1]) / length];
+    for (let along = PAST_STEP; along <= PAST_WITHIN; along += PAST_STEP) {
+      const point: Point = [end[0] + toward[0] * along, end[1] + toward[1] * along];
+      for (let tile = 0; tile < rings.length; tile++) {
+        const box = boxes[tile];
+        if (!box || point[0] < box.minX || point[0] > box.maxX || point[1] < box.minY || point[1] > box.maxY || past(tile)) continue;
+        if ((rings[tile] as ReadonlyArray<readonly Point[]>).some((ring) => pointInPolygon(point, ring as Point[]))) return { tile, point };
+      }
+    }
+    return first;
+  };
+  const links: Array<{ a: number; b: number; line: Point[]; bridge: number }> = [];
+  bridges.forEach((bridge, at) => {
+    const [one, other] = [beyond(bridge.a, bridge.b, nearest(bridge.a)), beyond(bridge.b, bridge.a, nearest(bridge.b))];
+    if (!one || !other || one.tile === other.tile) return;
+    links.push({ a: one.tile, b: other.tile, line: [one.point, bridge.a, bridge.b, other.point], bridge: at });
+  });
   return links;
 }

@@ -80,6 +80,8 @@ export interface TownPlan extends WardPlan {
   tiles: Point[][][];
   /** For each of those, the others whose ground touches its own. */
   tilesBeside: number[][];
+  /** The two tiles each bridge joins, the line between them over the bridge, and which bridge. */
+  links: Array<{ a: number; b: number; line: Point[]; bridge: number }>;
   /** Which building stands in which house: only where the plan was made for a city's own buildings. */
   fitting?: Fitting;
 }
@@ -182,7 +184,9 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     const wards = planWards(site, pack, more);
     if (input.redraw) for (const ward of wards.wards) if (input.redraw.has(wardKey(ward))) ward.redraw = input.redraw.get(wardKey(ward)) as number;
     const variation = wards.wards.map((ward) => wardVariation(seed, ward, settings));
-    const districtPlan = growDistricts({ settings, districts: input.districts, variation, placementOf: (kind) => placements.get(kind) ?? 'middle', buildings: input.buildings, wards: wards.wards, mesh: wards.mesh, roads: site, streets: wards.streets, ...(site.river && { river: site.river }), ...(site.coast && { coast: site.coast }), ...(site.wall && { wall: site.wall }) });
+    // The plaza is a building of one district: that district starts beside it.
+    const square = wards.wards.some((ward) => ward.kind === 'plaza') ? input.landmarks.find((landmark) => settings.landmarks.types[landmark.type]?.reservation === 'ward' && settings.landmarks.types[landmark.type]?.ward === 'plaza')?.district : undefined;
+    const districtPlan = growDistricts({ ...(square !== undefined && { plazaDistrict: square }), settings, districts: input.districts, variation, placementOf: (kind) => placements.get(kind) ?? 'middle', buildings: input.buildings, wards: wards.wards, mesh: wards.mesh, roads: site, streets: wards.streets, ...(site.river && { river: site.river }), ...(site.coast && { coast: site.coast }), ...(site.wall && { wall: site.wall }) });
     const characters = wards.wards.map((_, index) => characterOf(settings, districtPlan.of[index] === undefined ? undefined : input.districts[districtPlan.of[index] as number]?.kind));
     const { blocks, lanes } = cutBlocks(wards.wards, settings, seed, (_, index) => characters[index] as Character);
     // Reservations first: ordinary houses fill only the blocks that are left. A landmark stands in its own district.
@@ -229,15 +233,17 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     // a district whose block stands at each end has its ground joined across the bridge.
     const touching = blocks.map((_, index) => (tiles.beside[index] as number[]).filter((other) => other < blocks.length));
     const beside = touching.map((list) => [...list]);
-    // The same links the districts' ground is joined by: the tiles nearest each end of a bridge, where both are blocks.
-    for (const link of bridgeLinks(tiles.rings, site.bridges)) {
+    const fixed = new Map<number, number>();
+    for (const landmark of placed) if (landmark.block !== undefined && landmark.district !== undefined) fixed.set(landmark.block, landmark.district);
+    // The same links the districts' ground is joined by: the blocks nearest each end of a bridge. A landmark's
+    // block, which never changes district, and the plaza and the castle are passed for the next block along the road.
+    const links = bridgeLinks(tiles.rings, site.bridges, (tile) => tile >= blocks.length || fixed.has(tile));
+    for (const link of links) {
       if (link.a >= blocks.length || link.b >= blocks.length) continue;
       (beside[link.a] as number[]).push(link.b);
       (beside[link.b] as number[]).push(link.a);
     }
-    const fixed = new Map<number, number>();
-    for (const landmark of placed) if (landmark.block !== undefined && landmark.district !== undefined) fixed.set(landmark.block, landmark.district);
-    const selection = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: districtPlan, wanted, ground: wards.ground, beside, touching, fixed, ...(site.wall && { wall: site.wall }) });
+    const selection = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: districtPlan, wanted, ground: wards.ground, beside, fixed, ...(site.wall && { wall: site.wall }) });
     if (selection.short > 0 && attempt < settings.selection.tries) {
       more *= settings.selection.moreGround;
       continue;
@@ -246,6 +252,6 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
       throw new StagedLayoutError(`${brief.name} (${brief.id}): ${houses.length} houses were made for ${input.buildings} buildings and the town is ${selection.short} short, after taking ${more.toFixed(2)} times the ground in ${attempt} further tries; raise layout.staged.ground.factor or layout.staged.selection.tries`);
     }
     const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, elsewhere: atGates, houses, kept: selection.district, roads });
-    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt, gatehouses, gateLanes: gateLanesChosen, tiles: tiles.rings, tilesBeside: tiles.beside, ...(fitting && { fitting }) };
+    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt, gatehouses, gateLanes: gateLanesChosen, tiles: tiles.rings, tilesBeside: tiles.beside, links, ...(fitting && { fitting }) };
   }
 }
