@@ -635,51 +635,33 @@ and each stage draws on streams named `staged-…`. The stages:
       them; a gate beyond the count of gatehouses is plain, kept by no
       building. A sea route's exit stands on the quay (`atQuay`).
     - *District ground.* Every block has a tile of the ground about it, cut
-      from one partition of the town. A tile is the ground of the district
-      most of its lots belong to; a district's tiles in one piece are its
-      ground. Nothing is drawn across the water: where both ends of a
-      bridge link are one district's, its pieces on the two banks are one
-      ground. A link joins the tiles nearest the bridge's ends, passing a
+      from one partition of the town, and so do the plaza and the castle.
+      A tile is the ground of the district that holds most of its lots,
+      and nothing is re-owned afterwards: a district's ground may be in
+      several pieces, and a lot in a block a neighbour holds most of stands
+      in the neighbour's ground. Nothing is drawn across the water. Where a
+      bridge has one district's ground at each end, a bridge link records
+      it. A link joins the tiles nearest the bridge's ends, passing a
       landmark's block, the plaza or the castle for the next block along
-      the road (`staged/tiles.ts`, `bridgeLinks`). A tile
-      whose houses belong to two districts is divided: the ground nearest
-      the lesser district's houses, with the houses themselves, is a part
-      of its own, and goes back to the tile if it touches none of its
-      district's ground. A tile is not divided where that would leave it
-      in pieces or part it from a neighbour of its own district. Tiles are kept without hairs of ground (narrower
-      than 12 cm), which would make neighbours of tiles that do not really
-      meet; so are the parts of a divided tile, as they are cut. A
-      landmark's ground that touches none of its district's, as a castle's
-      may, is joined to the nearest of it by a strip 2 m wide, but never
-      across the water or across another district's ground, which the strip
-      would cut in two.
+      the road (`staged/tiles.ts`, `bridgeLinks`). Tiles are kept without
+      hairs of ground (narrower than 12 cm), which would make neighbours of
+      tiles that do not really meet.
 
     Layout format version 10 adds wards, a lot's `front`, `atQuay` on an
-    exit, and a gate's building as optional. The rule for district ground
-    is now: each district's ground is one connected piece on each bank,
-    the pieces on different banks joined by a bridge link, and no ground is
-    drawn across water; grounds do not overlap; at least 97% of a
-    district's lots, or all but 2 where that allows more, lie inside its
-    own ground; and a lot outside it lies inside a district whose ground
-    touches its own or is joined to it by a bridge link. A layout's
-    `bridgeLinks` name each such bridge and the district whose ground it
-    reaches at each end. A lot whose outline runs along the ground's edge, as a house's
-    does where the neighbour through its wall is another district's, is
-    inside: it is tested drawn in by 2 cm.
+    exit, and a gate's building as optional, and `bridgeLinks`. The only
+    rule for district ground is that no two districts' grounds overlap.
+    How many lots stand outside their own district's ground, and how many
+    districts are in more than one piece, is measured, not required
+    (`measureDistrictGround`, reported by `node scripts/staged-census.ts`).
 
-    The grid is still the pack's generator. Measured on 2026-11-24, the
-    staged generator keeps every invariant in 643 of Lomia's 682
-    settlements, among them all 18 with fewer than 500 people. The other
-    39 break only the rules about district ground: a lot in ground that
-    does not touch its own in 35 (the fallback, and a plaza or castle that
-    stands amid another district), more than 3% of a district's lots
-    outside its ground in 25, a lot in no district's ground in 8. 31
-    settlements use the non-touching fallback, for 2,631 houses: most are
-    towns astride a river, where a landmark's block at the bridgehead, or
-    the rule that single houses do not cross a bridge, keeps one bank's
-    spare houses from the other. All 682 are laid out and checked in about
-    5 minutes; Badanos takes about 1 second and Pombal, the largest,
-    about 5.
+    Measured on 2026-11-24, the staged generator keeps every invariant in
+    all 682 of Lomia's settlements. Of their 540,856 lots, 3,049 (0.56%)
+    stand outside their own district's ground, in 371 settlements; 284 of
+    2,229 districts are in more than one piece (108 when a district's own
+    bridge links count as joins); 17 settlements use the non-touching
+    fallback, for 1,372 houses. All 682 are laid out and checked in about
+    5 minutes; Badanos takes about 1 second and Pombal, the largest, about
+    4.
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
 point, and each block's rows on a stream of the block's own, so that a

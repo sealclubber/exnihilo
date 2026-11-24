@@ -3,12 +3,11 @@
  * places and districts, written in the one layout format and checked
  * against its invariants.
  */
-import { Delaunay } from 'd3-delaunay';
 import type { City } from '../../city/records.ts';
 import type { SettingPack } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { interiorPoint } from '../cutting.ts';
-import { boxOf, distance, distancePolygonToPolyline, pointAlongPolyline, pointInPolygon, polylineLength, slicePolyline, polygonsOverlap, sharedBoundaryLength, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
+import { boxOf, distance, distancePolygonToPolyline, pointInPolygon, polylineLength, slicePolyline, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
 import { checkLayout } from '../invariants.ts';
 import { ringShare } from '../measure.ts';
 import { type BridgeLink, type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
@@ -16,13 +15,10 @@ import { builtInChecks } from './checks.ts';
 import { type NetEdge, type NetNode, buildNetwork } from './network.ts';
 import { StagedLayoutError, type TownPlan, planTown, stagedSettings, townInput } from './plan.ts';
 import { cornersOf } from './rects.ts';
-import { grown, shared, united, widened, without } from './shapes.ts';
-import { HAIR, plainly, touching } from './tiles.ts';
+import { grown, without } from './shapes.ts';
+import { plainly } from './tiles.ts';
 
 export const STAGED_GENERATOR = 'staged';
-
-/** How finely a strip's line is tested against other districts' ground, in metres. */
-const STRIP_STEP = 1;
 
 /** A reservation a person made, for the editor to come: a ward, a block or a slot, given a building or a footprint, at a place. */
 export interface Pin {
@@ -497,376 +493,59 @@ function pointAt(line: readonly Point[], along: number): Point {
 }
 
 /**
- * Each district's ground: the tiles of its blocks, and of the plaza and the castle where its building stands
- * there. The tiles of one district are let overlap a little, which joins them; those of different districts keep
- * a finger's breadth apart, so that no ground is counted twice. A district on both banks is joined across each
- * bridge whose two ends are its own.
+ * Each district's ground: every block's tile, and the plaza's and the castle's, given to the district that holds
+ * most of its lots. Nothing is re-owned afterwards, so a district's ground may be in several pieces and a lot may
+ * stand in a neighbour's; the census counts both. The tiles of one district are let overlap a little, which joins
+ * them; those of different districts keep a finger's breadth apart, so that no ground is counted twice. Where a
+ * bridge has one district's ground at each end, the two are joined by a bridge link; nothing is drawn across it.
  */
 function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): { areas: DistrictArea[]; joins: Array<{ bridge: number; a: string; b: string }> } {
   const districtOfBuilding = new Map(lots.map((lot) => [lot.buildingId, lot.districtId]));
   const blocks = plan.blocks.length;
   const specials = plan.wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind !== 'ordinary');
-  // Whose ground each tile is: the district most of its lots belong to. A house or two at a border may belong to
-  // a neighbour; they stand in this district's ground all the same.
-  /** A ring without what of it is narrower than a hair. */
-  const unhaired = (ring: Point[]) => grown(grown([ring], -HAIR / 2).rings, HAIR / 2).rings.filter((piece) => polygonArea(piece) > 0.5);
-  // The tiles, and after them the parts cut from tiles that two districts share; a part knows the tile it was cut from.
-  const tiles: Point[][][] = plan.tiles.map((rings) => rings);
-  const parent: number[] = tiles.map((_, tile) => tile);
   const votes: Array<Map<string, number>> = plan.tiles.map(() => new Map());
-  const vote = (tile: number, district: string | undefined, weight = 1) => district !== undefined && (votes[tile] as Map<string, number>).set(district, ((votes[tile] as Map<string, number>).get(district) ?? 0) + weight);
-  // The houses kept in each block, by the district of the building in each.
-  const standing: Array<Array<{ house: number; district: string }>> = plan.tiles.map(() => []);
+  const vote = (tile: number, district: string | undefined) => {
+    if (district === undefined || tile < 0) return;
+    const map = votes[tile] as Map<string, number>;
+    map.set(district, (map.get(district) ?? 0) + 1);
+  };
   plan.houses.forEach((house, at) => {
     const held = plan.fitting?.holder[at];
-    const district = held === undefined ? undefined : districtOfBuilding.get(held);
-    if (district === undefined) return;
-    vote(house.block, district);
-    (standing[house.block] as Array<{ house: number; district: string }>).push({ house: at, district });
+    if (held !== undefined) vote(house.block, districtOfBuilding.get(held));
   });
   for (const landmark of plan.landmarks) {
-    if (landmark.block !== undefined) vote(landmark.block, districtOfBuilding.get(landmark.building), 1000);
-    else vote(blocks + specials.findIndex(({ index }) => index === landmark.ward), districtOfBuilding.get(landmark.building), 1000);
+    vote(landmark.block ?? blocks + specials.findIndex(({ index }) => index === landmark.ward), districtOfBuilding.get(landmark.building));
   }
-  // A tile with a landmark, or the plaza or the castle, is never given to another district.
-  const pinned = new Set<number>(plan.landmarks.map((landmark) => landmark.block ?? blocks + specials.findIndex(({ index }) => index === landmark.ward)));
-  // Tiles beside each other: those that touch, and the two at the ends of each bridge.
-  const beside = plan.tilesBeside.map((list) => [...list]);
-  // ---- A block of two districts ------------------------------------------------------------------------------------
-  // Where a block's houses belong to more than one district, as at a border where single houses changed hands, its
-  // tile is divided: the ground nearest the houses of each lesser district, and those houses' own ground, is a part
-  // of its own, and the rest stays the tile. A part is a tile like any other from here on.
-  const outlines: Point[][][] = tiles.map(() => []);
-  const blockLandmarks = new Set(plan.landmarks.filter((landmark) => landmark.reservation === 'block' && landmark.block !== undefined).map((landmark) => landmark.block as number));
-  for (let tile = 0; tile < blocks; tile++) {
-    const here = standing[tile] as Array<{ house: number; district: string }>;
-    const rings = tiles[tile] as Point[][];
-    const map = votes[tile] as Map<string, number>;
-    if (map.size < 2 || rings.length === 0 || blockLandmarks.has(tile) || here.length < 2) continue;
-    const most = [...map].sort(([a, one], [b, other]) => other - one || (a < b ? -1 : 1))[0]?.[0] as string;
-    const box = boxOf(rings.flat(), 1);
-    const cells = Delaunay.from(here.map(({ house }) => (plan.houses[house] as TownPlan['houses'][number]).centre)).voronoi([box.minX, box.minY, box.maxX, box.maxY]);
-    const landmarksHere = plan.landmarks.filter((landmark) => landmark.block === tile && landmark.outline.length > 2);
-    let rest = rings;
-    const parts: number[] = [];
-    const before = { tiles: tiles.length, votes: new Map(map) };
-    for (const district of [...new Set(here.map((entry) => entry.district))].filter((id) => id !== most).sort()) {
-      const own: Point[][] = [];
-      const others: Point[][] = landmarksHere.filter((landmark) => districtOfBuilding.get(landmark.building) !== district).map((landmark) => landmark.outline);
-      const near: Point[][] = [];
-      here.forEach((entry, at) => {
-        const outline = (plan.houses[entry.house] as TownPlan['houses'][number]).outline;
-        if (entry.district !== district) return void others.push(outline);
-        own.push(outline);
-        const cell = cells.cellPolygon(at) as Point[] | null;
-        if (cell && cell.length > 3) near.push(cell.slice(0, -1).map(([x, y]): Point => [x, y]));
-      });
-      const ground = without(united([...shared(rest, near).rings, ...own]).rings, others);
-      // Without hairs, as the tiles are, so that which tiles meet is the same here as when the ground is drawn.
-      const part = plainly(ground.rings, ground.holes).filter((ring) => polygonArea(ring) > 0.5).flatMap(unhaired);
-      if (part.length === 0) continue;
-      const left = without(rest, part);
-      const kept = plainly(left.rings, left.holes).filter((ring) => polygonArea(ring) > 0.5).flatMap(unhaired);
-      if (kept.length === 0) continue;
-      rest = kept;
-      map.delete(district);
-      // Each piece of it is a part of its own, with the houses that stand there.
-      const mine = here.filter((entry) => entry.district === district).map((entry) => plan.houses[entry.house] as TownPlan['houses'][number]);
-      part.forEach((ring, at) => {
-        const stand = mine.filter((house) => Math.max(part.findIndex((other) => pointInPolygon(house.centre, other)), 0) === at);
-        const index = tiles.length;
-        tiles.push([ring]);
-        parent.push(tile);
-        outlines.push(stand.map((house) => house.outline));
-        votes.push(new Map([[district, stand.length]]));
-        beside.push([]);
-        parts.push(index);
-      });
-    }
-    if (parts.length === 0) continue;
-    // A tile is not divided where that would part its own district: where what is left of it is in pieces, or no
-    // longer meets a neighbour of the same district that it met. Its lesser houses then stand in its ground.
-    const touch = (one: Point[][], two: Point[][]) => one.some((a) => two.some((b) => touching(a, b) || touching(b, a)));
-    const joined = [0];
-    for (let head = 0; head < joined.length; head++) rest.forEach((ring, at) => !joined.includes(at) && touch([rest[joined[head] as number] as Point[]], [ring]) && joined.push(at));
-    const mostOf = (other: number) => [...(votes[other] as Map<string, number>)].sort(([a, one], [b, two]) => two - one || (a < b ? -1 : 1))[0]?.[0] ?? (other < blocks ? plan.districts[plan.selection.blockDistrict[other] as number]?.id : undefined);
-    const parted = joined.length < rest.length || (beside[tile] as number[]).some((other) => mostOf(other) === most && touch(rings, tiles[other] as Point[][]) && !touch(rest, tiles[other] as Point[][]));
-    if (parted) {
-      for (const list of [tiles, parent, outlines, votes, beside] as unknown[][]) list.length = before.tiles;
-      map.clear();
-      for (const [district, count] of before.votes) map.set(district, count);
-      continue;
-    }
-    tiles[tile] = rest;
-    outlines[tile] = here.filter((entry) => map.has(entry.district)).map((entry) => (plan.houses[entry.house] as TownPlan['houses'][number]).outline);
-    // Which tiles the tile and its parts are beside is found again from their outlines.
-    const around = [...(beside[tile] as number[])];
-    const meet = (a: number, b: number) => (tiles[a] as Point[][]).some((one) => (tiles[b] as Point[][]).some((two) => touching(one, two) || touching(two, one)));
-    for (const other of around) beside[other] = (beside[other] as number[]).filter((next) => next !== tile);
-    beside[tile] = [];
-    const group = [tile, ...parts];
-    group.forEach((one, at) => {
-      for (const other of [...around, ...group.slice(at + 1)]) {
-        if (!meet(one, other)) continue;
-        (beside[one] as number[]).push(other);
-        (beside[other] as number[]).push(one);
-      }
-    });
-  }
-  // How many lots stand on each tile: a landmark's vote is heavy, but it is one lot.
-  const lotsIn = votes.map((map) => [...map.values()].reduce((sum, count) => sum + (count % 1000) + Math.floor(count / 1000), 0));
+  // The district holding most of a tile's lots, the first by ID on a tie; a block with none keeps its district.
   const owner: Array<string | undefined> = votes.map((map, tile) => {
     const best = [...map].sort(([a, one], [b, other]) => other - one || (a < b ? -1 : 1))[0];
     if (best) return best[0];
-    const of = (parent[tile] as number) < blocks ? plan.selection.blockDistrict[parent[tile] as number] : undefined;
+    const of = tile < blocks ? plan.selection.blockDistrict[tile] : undefined;
     return of === undefined ? undefined : plan.districts[of]?.id;
   });
-  // A part that touches none of its district's ground would be an island in the tile it was cut from: it stays that
-  // tile's district's ground, and its houses are counted as standing in a neighbour's.
-  for (let part = plan.tiles.length; part < tiles.length; part++) {
-    if (!(beside[part] as number[]).some((next) => next < plan.tiles.length && owner[next] === owner[part])) owner[part] = owner[parent[part] as number];
-  }
-  // The bridge links the town's houses were chosen by. A link with no bridge, added below, is a strip of ground.
-  const links: Array<{ a: number; b: number; line: Point[]; bridge?: number }> = plan.links.map((link) => ({ ...link }));
-  for (const link of links) {
-    (beside[link.a] as number[]).push(link.b);
-    (beside[link.b] as number[]).push(link.a);
-  }
-  // One piece each: of a district in several pieces, the piece with most of its lots is its ground, and the tiles
-  // of the others, like tiles that are nobody's, become the ground of whichever district is beside them.
-  const fold = () => {
-    const spread = owner.map((_, tile) => tile).filter((tile) => owner[tile] !== undefined);
-    for (let head = 0; head < spread.length; head++) {
-      for (const next of beside[spread[head] as number] ?? []) {
-        if (owner[next] !== undefined) continue;
-        owner[next] = owner[spread[head] as number];
-        spread.push(next);
-      }
-    }
-  };
-  for (let pass = 0; pass < 4; pass++) {
-   for (const district of city.districts) {
-    const own = owner.map((_, tile) => tile).filter((tile) => owner[tile] === district.id);
-    const seen = new Set<number>();
-    const pieces: number[][] = [];
-    for (const tile of own) {
-      if (seen.has(tile)) continue;
-      const piece = [tile];
-      seen.add(tile);
-      for (let head = 0; head < piece.length; head++) {
-        for (const next of beside[piece[head] as number] ?? []) {
-          if (seen.has(next) || owner[next] !== district.id) continue;
-          seen.add(next);
-          piece.push(next);
-        }
-      }
-      pieces.push(piece);
-    }
-    if (pieces.length < 2) continue;
-    const weight = (piece: number[]) => piece.reduce((sum, tile) => sum + (lotsIn[tile] as number) + 0.001, 0);
-    const main = pieces.reduce((best, piece) => (weight(piece) > weight(best) ? piece : best));
-    const body = new Set(main);
-    for (const piece of [...pieces].sort((a, b) => weight(b) - weight(a))) {
-      if (piece === main) continue;
-      // Joined to the district's ground by the way across other tiles that costs their districts fewest lots, if
-      // that is fewer than the piece holds; otherwise the piece becomes its neighbours' ground.
-      const cost = new Map<number, number>(piece.map((tile) => [tile, 0]));
-      const from = new Map<number, number>();
-      const open = [...piece];
-      let reached: number | undefined;
-      while (open.length > 0 && reached === undefined) {
-        open.sort((a, b) => (cost.get(a) as number) - (cost.get(b) as number) || a - b);
-        const tile = open.shift() as number;
-        for (const next of beside[tile] ?? []) {
-          if (body.has(next)) {
-            reached = tile;
-            break;
-          }
-          const price = (cost.get(tile) as number) + (lotsIn[next] as number) + 0.01 + (pinned.has(next) ? 1e6 : 0);
-          if (cost.has(next) && (cost.get(next) as number) <= price) continue;
-          cost.set(next, price);
-          from.set(next, tile);
-          if (!open.includes(next)) open.push(next);
-        }
-      }
-      // On the last pass nothing is joined: what is still apart is folded in, which parts no other district.
-      if (pass < 3 && reached !== undefined && (cost.get(reached) as number) < weight(piece)) {
-        for (let tile: number | undefined = reached; tile !== undefined; tile = from.get(tile)) {
-          owner[tile] = district.id;
-          body.add(tile);
-        }
-        for (const tile of piece) body.add(tile);
-      } else for (const tile of piece) if (!pinned.has(tile)) owner[tile] = undefined;
-    }
-   }
-   fold();
-  }
-  // A landmark's ground that touches none of its district's, as a castle's may with open ground all round it, is
-  // joined to the nearest of its district's by a strip, as a bridge joins two banks.
-  for (const tile of [...pinned].sort((a, b) => a - b)) {
-    const district = owner[tile];
-    if (district === undefined || (tiles[tile] ?? []).length === 0 || (beside[tile] ?? []).some((next) => owner[next] === district)) continue;
-    const from = polygonCentroid((tiles[tile] as Point[][])[0] as Point[]);
-    let best = -1;
-    let least = Infinity;
-    tiles.forEach((rings, other) => {
-      if (other === tile || owner[other] !== district || rings.length === 0) return;
-      // Never across the water: no ground is drawn there.
-      if (plan.river?.crossed(from, polygonCentroid(rings[0] as Point[]))) return;
-      const away = distance(from, polygonCentroid(rings[0] as Point[]));
-      if (away < least) {
-        least = away;
-        best = other;
-      }
-    });
-    if (best < 0) continue;
-    (beside[tile] as number[]).push(best);
-    (beside[best] as number[]).push(tile);
-    links.push({ a: tile, b: best, line: [from, polygonCentroid((tiles[best] as Point[][])[0] as Point[])] });
-  }
-  const solid = tiles;
-  const build = () => {
-    const boxes = solid.map((rings) => (rings.length === 0 ? undefined : boxOf(rings.flat(), 0.2)));
-    const near = new SpatialIndex<number>(60);
-    boxes.forEach((box, at) => box && owner[at] !== undefined && near.add(box, at));
-    // From a landmark's ground that stands apart to its district's: a strip of ground that is the district's. No
-    // ground is drawn across a bridge: the two banks are joined by the link alone.
-    const strips: Array<{ ring: Point[]; district: string; box: ReturnType<typeof boxOf> }> = [];
-    for (const { a, b, line, bridge } of links) {
-      if (bridge !== undefined || owner[a] === undefined || owner[a] !== owner[b]) continue;
-      // Nor across another district's ground, which it would cut in two: the landmark's ground then stands apart.
-      const length = polylineLength(line);
-      let across = false;
-      for (let along = 0; along <= length && !across; along += STRIP_STEP) {
-        const point = pointAlongPolyline(line, along);
-        for (const other of near.near(boxOf([point], 0))) {
-          if (owner[other] === owner[a] || other === a || other === b) continue;
-          if ((solid[other] as Point[][]).some((ring) => pointInPolygon(point, ring))) {
-            across = true;
-            break;
-          }
-        }
-      }
-      if (across) continue;
-      for (const ring of widened([line], 2)) strips.push({ ring, district: owner[a] as string, box: boxOf(ring, 0.2) });
-    }
-    const meets = (a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>) => a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
-    const pieces = new Map<string, Point[][]>();
-    const byTile = new Map<number, Point[][]>();
-    solid.forEach((rings, at) => {
-      const district = owner[at];
-      const box = boxes[at];
-      if (district === undefined || !box || rings.length === 0) return;
-      const foreign = [...near.near(box)].filter((other) => other !== at && owner[other] !== district).sort((x, y) => x - y).flatMap((other) => grown(solid[other] as Point[][], 0.05).rings);
-      const over = strips.filter((strip) => strip.district !== district && meets(strip.box, box)).flatMap((strip) => grown([strip.ring], 0.05).rings);
-      const from = parent[at] as number;
-      const keep = from < blocks ? (plan.blocks[from] as TownPlan['blocks'][number]).polygon : (specials[from - blocks] as (typeof specials)[number]).ward.polygon;
-      let cut = without(grown(rings, 0.03).rings, [...foreign, ...over]);
-      // The houses that stand on a divided tile stand whole on its ground, though a neighbour's wall is their own.
-      if ((outlines[at] as Point[][]).length > 0) {
-        const holes = cut.holes;
-        cut = united([...cut.rings, ...(outlines[at] as Point[][])]);
-        cut.holes.push(...holes);
-      }
-      const plain = plainly(cut.rings, cut.holes, keep).filter((ring) => polygonArea(ring) > 0.5);
-      if (!pieces.has(district)) pieces.set(district, []);
-      pieces.get(district)?.push(...plain);
-      byTile.set(at, plain);
-    });
-    const across: Array<{ district: string; rings: Point[][] }> = [];
-    for (const strip of strips) {
-      // Never over another district's block: only over the ground between.
-      const foreign = [...near.near(strip.box)].filter((other) => owner[other] !== strip.district).flatMap((other) => grown(other >= plan.tiles.length || (outlines[other] as Point[][]).length > 0 ? (tiles[other] as Point[][]) : [other < plan.blocks.length ? (plan.blocks[other] as TownPlan['blocks'][number]).polygon : (specials[other - plan.blocks.length] as (typeof specials)[number]).ward.polygon], 0.6).rings);
-      const cut = without([strip.ring], foreign);
-      const plain = plainly(cut.rings, cut.holes).filter((ring) => polygonArea(ring) > 0.5);
-      pieces.get(strip.district)?.push(...plain);
-      across.push({ district: strip.district, rings: plain });
-    }
-    return { pieces, byTile, across };
-  };
-  // The ground as drawn is what must be one piece. Where a district's is not, the lesser pieces become the
-  // ground of a district beside them, and the ground is drawn again.
-  let built = build();
-  for (let pass = 0; pass < 6; pass++) {
-    const strays: number[] = [];
-    for (const district of city.districts) {
-      // Outline by outline, as the ground is judged in the end: a tile drawn in two pieces may have one of them apart.
-      const items: Array<{ tile: number; rings: Point[][]; box: ReturnType<typeof boxOf> }> = [];
-      for (const [tile, rings] of built.byTile) if (owner[tile] === district.id) for (const ring of rings) items.push({ tile, rings: [ring], box: boxOf(ring, 0.1) });
-      for (const strip of built.across) if (strip.district === district.id) for (const ring of strip.rings) items.push({ tile: -1, rings: [ring], box: boxOf(ring, 0.1) });
-      if (items.length < 2) continue;
-      const index = new SpatialIndex<number>(60);
-      items.forEach((item, at) => index.add(item.box, at));
-      const group = items.map((_, at) => at);
-      const find = (at: number): number => (group[at] === at ? at : (group[at] = find(group[at] as number)));
-      items.forEach((item, at) => {
-        for (const other of index.near(item.box)) {
-          if (other <= at || find(other) === find(at)) continue;
-          if (item.rings.some((one) => (items[other] as (typeof items)[number]).rings.some((two) => polygonsOverlap(one, two) || sharedBoundaryLength(one, two) > 1e-6))) group[find(other)] = find(at);
-        }
-      });
-      // The pieces on two banks are one where a bridge link of the district's own joins them.
-      for (const link of links) {
-        if (link.bridge === undefined || owner[link.a] !== district.id || owner[link.b] !== district.id) continue;
-        const [one, other] = [items.findIndex((item) => item.tile === link.a), items.findIndex((item) => item.tile === link.b)];
-        if (one >= 0 && other >= 0) group[find(other)] = find(one);
-      }
-      const size = new Map<number, number>();
-      items.forEach((item, at) => size.set(find(at), (size.get(find(at)) ?? 0) + item.rings.reduce((sum, ring) => sum + polygonArea(ring), 0)));
-      const main = [...size].sort(([a, one], [b, other]) => other - one || a - b)[0]?.[0];
-      // A tile is apart if at least as much of it is apart as is joined on.
-      const joined = new Map<number, number>();
-      const apart = new Map<number, number>();
-      items.forEach((item, at) => {
-        if (item.tile < 0) return;
-        const into = find(at) === main ? joined : apart;
-        into.set(item.tile, (into.get(item.tile) ?? 0) + polygonArea(item.rings[0] as Point[]));
-      });
-      for (const [tile, area] of [...apart].sort(([a], [b]) => a - b)) if (area >= (joined.get(tile) ?? 0)) strays.push(tile);
-    }
-    if (strays.length === 0) break;
-    for (const tile of strays) {
-      const old = owner[tile];
-      // On the last pass a piece still apart is nobody's ground: better that than a district in two.
-      // A part goes back to the tile it was cut from.
-      if (parent[tile] !== tile && owner[parent[tile] as number] !== old) owner[tile] = owner[parent[tile] as number];
-      else owner[tile] = pass === 5 ? undefined : (beside[tile] ?? []).map((next) => owner[next]).filter((other) => other !== undefined && other !== old).sort()[0];
-    }
-    built = build();
-  }
+  const boxes = plan.tiles.map((rings) => (rings.length === 0 ? undefined : boxOf(rings.flat(), 0.2)));
+  const near = new SpatialIndex<number>(60);
+  boxes.forEach((box, at) => box && owner[at] !== undefined && near.add(box, at));
+  const pieces = new Map<string, Point[][]>();
+  plan.tiles.forEach((rings, at) => {
+    const district = owner[at];
+    const box = boxes[at];
+    if (district === undefined || !box) return;
+    const foreign = [...near.near(box)].filter((other) => other !== at && owner[other] !== district).sort((x, y) => x - y).flatMap((other) => grown(plan.tiles[other] as Point[][], 0.05).rings);
+    const keep = at < blocks ? (plan.blocks[at] as TownPlan['blocks'][number]).polygon : (specials[at - blocks] as (typeof specials)[number]).ward.polygon;
+    const cut = without(grown(rings, 0.03).rings, foreign);
+    const plain = plainly(cut.rings, cut.holes, keep).filter((ring) => polygonArea(ring) > 0.5);
+    if (!pieces.has(district)) pieces.set(district, []);
+    pieces.get(district)?.push(...plain);
+  });
   const areas: DistrictArea[] = [];
   for (const district of city.districts) {
-    const every: Array<{ tile: number; polygon: Point[] }> = [];
-    for (const [tile, rings] of built.byTile) if (owner[tile] === district.id) for (const polygon of rings) every.push({ tile, polygon });
-    for (const strip of built.across) if (strip.district === district.id) for (const polygon of strip.rings) every.push({ tile: -1, polygon });
-    if (every.length === 0) continue;
-    // Only what joins on, by a shared edge or by a bridge link: a length of strip left hanging where another
-    // district's block cut it is no one's ground.
-    const boxed = every.map(({ polygon }) => boxOf(polygon, 0.1));
-    const group = every.map((_, at) => at);
-    const find = (at: number): number => (group[at] === at ? at : (group[at] = find(group[at] as number)));
-    const index = new SpatialIndex<number>(60);
-    boxed.forEach((box, at) => index.add(box, at));
-    every.forEach(({ polygon }, at) => {
-      for (const other of index.near(boxed[at] as ReturnType<typeof boxOf>)) {
-        if (other <= at || find(other) === find(at)) continue;
-        const next = (every[other] as (typeof every)[number]).polygon;
-        if (polygonsOverlap(polygon, next) || sharedBoundaryLength(polygon, next) > 1e-6) group[find(other)] = find(at);
-      }
-    });
-    for (const link of links) {
-      if (link.bridge === undefined || owner[link.a] !== district.id || owner[link.b] !== district.id) continue;
-      const [one, other] = [every.findIndex((item) => item.tile === link.a), every.findIndex((item) => item.tile === link.b)];
-      if (one >= 0 && other >= 0) group[find(other)] = find(one);
-    }
-    const size = new Map<number, number>();
-    every.forEach(({ polygon }, at) => size.set(find(at), (size.get(find(at)) ?? 0) + polygonArea(polygon)));
-    const main = [...size].sort(([a, one], [b, other]) => other - one || a - b)[0]?.[0];
-    const polygons = every.filter((_, at) => find(at) === main).map(({ polygon }) => polygon);
+    const polygons = pieces.get(district.id) ?? [];
+    if (polygons.length === 0) continue;
     const largest = polygons.reduce((best, polygon) => (polygonArea(polygon) > polygonArea(best) ? polygon : best));
     const middle = polygonCentroid(largest);
     areas.push({ districtId: district.id, polygons, labelPoint: pointInPolygon(middle, largest) ? middle : interiorPoint(largest) });
   }
-  const joins = links.flatMap((link) => (link.bridge === undefined || owner[link.a] === undefined || owner[link.b] === undefined ? [] : [{ bridge: link.bridge, a: owner[link.a] as string, b: owner[link.b] as string }]));
+  const joins = plan.links.flatMap((link) => (owner[link.a] === undefined || owner[link.b] === undefined ? [] : [{ bridge: link.bridge, a: owner[link.a] as string, b: owner[link.b] as string }]));
   return { areas, joins };
 }

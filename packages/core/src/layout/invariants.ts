@@ -26,11 +26,9 @@ import {
   pointInPolygon,
   polygonArea,
   polygonWithin,
-  projectOnPolyline,
   polylineLength,
   slicePolyline,
   polygonsOverlap,
-  sharedBoundaryLength,
   strictlyInside,
 } from './geometry.ts';
 import { riverWidthAt } from './measure.ts';
@@ -40,14 +38,6 @@ import { type Layout, type Lot, type Segment, type Water, LAYOUT_VERSION } from 
 export const BEARING_TOLERANCE = 20;
 
 const MOST_PROBLEMS_LISTED = 20;
-/** At least this share of a district's lots lie inside its own ground. */
-export const LOTS_IN_OWN_GROUND = 0.97;
-/** However few lots a district has, this many may lie outside its ground. */
-export const LOTS_OUTSIDE_ALLOWED = 2;
-/** A lot on the very edge of ground is inside it: it is tested drawn in by this much, in metres. */
-const ON_THE_EDGE = 0.02;
-/** Two districts' grounds touch if they come this near each other, in metres: they never overlap, so they are a hair apart. */
-const GROUNDS_TOUCH = 0.5;
 /** The clear ground a layout may leave between a roadway and the lots along it, in metres. */
 const VERGE = 3;
 /** A segment that ends at a gate is on the wall's line there; it is looked at from this far along, in metres. */
@@ -395,119 +385,13 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       problem(`the bridge link of ${link.segmentId} names ${link.from} and ${link.to} at the wrong ends`);
     }
   }
-  const linked = (one: string, other: string) => bridgeLinks.some((link) => (link.from === one && link.to === other) || (link.from === other && link.to === one));
 
-  // District areas: they enclose their lots, hold together, and keep apart from each other.
-  const lotsByDistrict = new Map<string, Lot[]>();
-  for (const lot of lots) {
-    const list = lotsByDistrict.get(lot.districtId);
-    if (list) list.push(lot);
-    else lotsByDistrict.set(lot.districtId, [lot]);
-  }
-  for (const [districtId, districtLots] of lotsByDistrict) {
-    const area = areaByDistrict.get(districtId);
-    if (!area) {
-      problem(`${districtId} has lots but no district area`);
-      continue;
-    }
-    // Nearly every lot of a district lies inside its own ground. A few may stand in a neighbour's: a house at the
-    // border that changed district when the town's houses were chosen. Such a lot lies inside the ground of a
-    // district whose ground touches its own.
-    // A lot whose outline runs along the ground's edge, as a house's does where its neighbour through the wall is
-    // another district's, is inside it: the lot is tested drawn in by a finger's breadth.
-    const within = (lot: Lot, ground: { polygons: Point[][] }) => {
-      // Each corner is moved along the line that halves its angle, to whichever side is inside the lot.
-      const drawnIn = lot.polygon.map((point, at): Point => {
-        const before = lot.polygon[(at + lot.polygon.length - 1) % lot.polygon.length] as Point;
-        const after = lot.polygon[(at + 1) % lot.polygon.length] as Point;
-        const [a, b] = [Math.hypot(before[0] - point[0], before[1] - point[1]) || 1, Math.hypot(after[0] - point[0], after[1] - point[1]) || 1];
-        const toward: Point = [(before[0] - point[0]) / a + (after[0] - point[0]) / b, (before[1] - point[1]) / a + (after[1] - point[1]) / b];
-        const size = Math.hypot(toward[0], toward[1]);
-        if (size < EPSILON) return point;
-        const moved: Point = [point[0] + (toward[0] * ON_THE_EDGE) / size, point[1] + (toward[1] * ON_THE_EDGE) / size];
-        return pointInPolygon(moved, lot.polygon) ? moved : [point[0] - (toward[0] * ON_THE_EDGE) / size, point[1] - (toward[1] * ON_THE_EDGE) / size];
-      });
-      const box = boxOf(drawnIn);
-      return ground.polygons.some((polygon) => {
-        const outer = boxOf(polygon, EPSILON);
-        return box.minX >= outer.minX && box.maxX <= outer.maxX && box.minY >= outer.minY && box.maxY <= outer.maxY && polygonWithin(drawnIn, polygon);
-      });
-    };
-    const touching = new Map<string, boolean>();
-    const touches = (other: { districtId: string; polygons: Point[][] }) => {
-      let known = touching.get(other.districtId);
-      if (known === undefined) {
-        const boxes = other.polygons.map((polygon) => boxOf(polygon, GROUNDS_TOUCH));
-        known = area.polygons.some((one) => {
-          const box = boxOf(one);
-          return other.polygons.some((two, at) => {
-            const outer = boxes[at] as ReturnType<typeof boxOf>;
-            return box.minX <= outer.maxX && outer.minX <= box.maxX && box.minY <= outer.maxY && outer.minY <= box.maxY && distanceBetweenPolygons(one, two) <= GROUNDS_TOUCH;
-          });
-        });
-        touching.set(other.districtId, known);
-      }
-      return known;
-    };
-    let outside = 0;
-    for (const lot of districtLots) {
-      // A gatehouse stands at its gate, wherever its district lies.
-      if (gatehouses.has(lot.buildingId) || within(lot, area)) continue;
-      outside++;
-      const host = districtAreas.find((other) => other.districtId !== districtId && within(lot, other));
-      if (!host) problem(`${lot.id} lies outside the ground of ${districtId} and inside no other district's`);
-      else if (!touches(host) && !linked(host.districtId, districtId)) problem(`${lot.id} of ${districtId} lies in the ground of ${host.districtId}, which neither touches its own nor is joined to it by a bridge`);
-    }
-    if (outside > Math.max((1 - LOTS_IN_OWN_GROUND) * districtLots.length, LOTS_OUTSIDE_ALLOWED) + EPSILON) {
-      problem(`${outside} of the ${districtLots.length} lots of ${districtId} lie outside its ground: more than ${Math.round((1 - LOTS_IN_OWN_GROUND) * 100)}% and more than ${LOTS_OUTSIDE_ALLOWED}`);
-    }
-  }
+  // District areas: every district with lots has one, and no two overlap. Whether a district's ground is in one
+  // piece, and how many of its lots lie in it, is measured (`measureDistrictGround`), not required.
+  const withLots = new Set(lots.map((lot) => lot.districtId));
+  for (const districtId of [...withLots].sort()) if (!areaByDistrict.has(districtId)) problem(`${districtId} has lots but no district area`);
   for (const area of districtAreas) {
     if (!districtById.has(area.districtId)) problem(`a district area names ${area.districtId}, which does not exist`);
-    // One connected piece on each bank: polygons that share a boundary are one piece, and pieces are joined only
-    // by a bridge link of the district's own, between the piece nearest each end of the bridge.
-    const piece = area.polygons.map((_, at) => at);
-    const find = (at: number): number => (piece[at] === at ? at : (piece[at] = find(piece[at] as number)));
-    area.polygons.forEach((polygon, at) => {
-      for (let other = at + 1; other < area.polygons.length; other++) {
-        if (find(other) === find(at)) continue;
-        const next = area.polygons[other] as Point[];
-        if (sharedBoundaryLength(polygon, next) > EPSILON || polygonsOverlap(polygon, next)) piece[find(other)] = find(at);
-      }
-    });
-    if (new Set(piece.map((_, at) => find(at))).size > 1) {
-      // The piece nearest a bridge's end on that end's own bank: a link may reach past a landmark's block to the
-      // next block along the road.
-      const nearest = (point: Point) => {
-        let best = 0;
-        let least = Infinity;
-        area.polygons.forEach((polygon, at) => {
-          const inside = pointInPolygon(point, polygon);
-          const near = inside ? point : projectOnPolyline([...polygon, polygon[0] as Point], point).point;
-          if (!inside && rivers.some((river) => crossingsOfPolyline(point, near, river.centreLine) > 0)) return;
-          const away = inside ? 0 : distance(point, near);
-          if (away < least) {
-            least = away;
-            best = at;
-          }
-        });
-        return best;
-      };
-      for (const link of bridgeLinks) {
-        if (link.from !== area.districtId || link.to !== area.districtId) continue;
-        const bridge = segmentById.get(link.segmentId);
-        if (!bridge) continue;
-        piece[find(nearest(bridge.points[0] as Point))] = find(nearest(bridge.points[bridge.points.length - 1] as Point));
-      }
-    }
-    const pieces = new Set(piece.map((_, at) => find(at))).size;
-    if (pieces > 1) problem(`the area of ${area.districtId} is in ${pieces} pieces that no bridge link joins`);
-    // No ground is drawn across water.
-    for (const river of rivers) {
-      if (area.polygons.some((polygon) => polygon.some((point, at) => crossingsOfPolyline(point, polygon[(at + 1) % polygon.length] as Point, river.centreLine) > 0))) {
-        problem(`the area of ${area.districtId} is drawn across ${river.id}`);
-      }
-    }
     if (!area.polygons.some((polygon) => pointInPolygon(area.labelPoint, polygon))) {
       problem(`the label point of ${area.districtId} is outside its area`);
     }

@@ -23,7 +23,7 @@ export { describeCity, packLabels } from './city/report.ts';
 export * from './layout/records.ts';
 export * as geometry from './layout/geometry.ts';
 export { checkLayout, distanceToWater, gapToRiver, BEARING_TOLERANCE } from './layout/invariants.ts';
-export { ringShare, riverOutline, riverWidthAt } from './layout/measure.ts';
+export { measureDistrictGround, ringShare, riverOutline, riverWidthAt, type DistrictGroundMeasure } from './layout/measure.ts';
 export { generateGridLayout, LayoutGenerationError, GRID_GENERATOR, type LayoutOptions } from './layout/grid.ts';
 export { generateStagedLayout, STAGED_GENERATOR, type Pin, type StagedOptions } from './layout/staged/layout.ts';
 export { generateLayout } from './layout/generate.ts';
