@@ -705,6 +705,11 @@ kind of building in them and not by district. `docs/renders/*-6e-step1.svg`,
 workplace, landmark in a row), and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
 the prototype.
 
+`node scripts/staged-census.ts [every] [--towns]` lays out every settlement
+(or every nth) with the staged generator and counts which invariants are
+broken and how often the non-touching fallback is used.
+`PROBLEM-6E-districts.md` describes what is still open.
+
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
 length within 20° of a circle about the centre or of a line to it, leaving

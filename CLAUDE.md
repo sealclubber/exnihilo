@@ -23,6 +23,7 @@ current phase before starting, and the README for how things run today.
 | Print a settlement's day | `npm run day -- <settlement id> --day <number>` |
 | Draw a town's layout to SVG | `npm run render -- <settlement id>` |
 | Draw the staged generator's plan of a town | `node scripts/render-stages.ts <out folder> <suffix> [--kinds] [--as flag,flag] <name>...` |
+| Count what the staged generator breaks across Lomia | `node scripts/staged-census.ts [every] [--towns]` |
 
 **How long things take** (measured 2026-11-23 on the development machine,
 with the grid laying every town out). Run a single test file with
