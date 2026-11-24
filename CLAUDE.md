@@ -30,11 +30,12 @@ with the grid laying every town out). Run a single test file with
 
 | Task | Time |
 | --- | --- |
-| `npm run check` (type-check and every test) | about 3.5 minutes |
+| `npm run check` (type-check and every test) | about 5 minutes |
 | `npm run test:viewer` | about 1 minute |
 | `packages/core/test/staged-roads.test.ts` (stages 1 to 3 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-wall.test.ts` (stages 4 and 5 for all 682 settlements) | about 10 seconds |
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
+| `packages/core/test/staged-layout.test.ts` (staged layouts for a sample of 57 settlements, and life on them) | about 1 minute |
 | `packages/core/test/staged-town.test.ts` (blocks, houses, landmarks, districts, selection and fitting for all 682 settlements, planned once) | about 3 minutes |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
@@ -185,8 +186,10 @@ centre, x east and y south; bearings are degrees clockwise from north.
   entrance point on its segment. Lots do not connect to each other directly.
 - **The brief's bearings are facts.** Exits and water honour them, within
   `BEARING_TOLERANCE` as seen from the centre.
-- **District areas** are one or more polygons that touch each other and enclose
-  the district's lots.
+- **District ground** is one or more polygons that touch each other, one
+  connected piece for each district, and no two districts' overlap. At least
+  97% of a district's lots lie inside its own ground; a lot outside lies
+  inside a district whose ground touches its own.
 - **Footprints** are the outlines of a lot's buildings: they lie inside the
   lot and do not overlap each other, and the rest of the lot is open ground.
 - **Walls and places.** A town has at most one wall: one closed line, or open
@@ -235,9 +238,11 @@ centre, x east and y south; bearings are degrees clockwise from north.
   nothing is generated again.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
-- **It is not a layout yet.** Until its last stage is built it makes a plan
-  (`staged/plan.ts`), drawn by `scripts/render-stages.ts`; the grid lays
-  every town out.
+- **It makes layouts, and the grid is still the default.** `staged/layout.ts`
+  writes the plan (`staged/plan.ts`) in the layout format when asked for by
+  name (`generator: 'staged'`). The pack names the grid until the staged
+  generator keeps every invariant in every settlement. `check: false`
+  returns a layout unchecked, for measuring what a town breaks.
 - **The prototype is a sketch to port, not code to keep.** Where
   `docs/prototypes/proto_wards9.py` and `sim-6e.md` disagree, the document
   wins; where the brief's facts and either disagree, report it.
@@ -256,7 +261,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 9 and 5.
+  inputs would change. Today they are 6, 10 and 5.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

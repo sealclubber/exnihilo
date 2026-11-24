@@ -39,6 +39,10 @@ import { type Layout, type Lot, type Segment, type Water, LAYOUT_VERSION } from 
 export const BEARING_TOLERANCE = 20;
 
 const MOST_PROBLEMS_LISTED = 20;
+/** At least this share of a district's lots lie inside its own ground. */
+export const LOTS_IN_OWN_GROUND = 0.97;
+/** Two districts' grounds touch if they come this near each other, in metres: they never overlap, so they are a hair apart. */
+const GROUNDS_TOUCH = 0.5;
 /** The clear ground a layout may leave between a roadway and the lots along it, in metres. */
 const VERGE = 3;
 /** A segment that ends at a gate is on the wall's line there; it is looked at from this far along, in metres. */
@@ -187,7 +191,8 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     exitJunctions.add(junction.id);
     if (!degree.has(junction.id)) problem(`${exit.id} is at ${junction.id}, which no segment reaches`);
     const seen = exactBearing(ORIGIN, junction.position);
-    if (bearingDifference(seen, exit.bearing) > BEARING_TOLERANCE) {
+    // A sea route's exit stands at the quay, wherever that is: ships leave by water.
+    if (!exit.atQuay && bearingDifference(seen, exit.bearing) > BEARING_TOLERANCE) {
       problem(`${exit.id} lies at bearing ${seen.toFixed(1)} from the centre, more than ${BEARING_TOLERANCE} degrees from the brief's ${exit.bearing}`);
     }
   });
@@ -280,6 +285,8 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       }
       if (gateJunctions.has(gate.junctionId)) problem(`${gate.junctionId} is a gate more than once`);
       gateJunctions.add(gate.junctionId);
+      // A plain gate is kept by no building.
+      if (gate.buildingId === undefined) continue;
       if (!buildingById.has(gate.buildingId)) problem(`${wall.id} has a gate kept by ${gate.buildingId}, which does not exist`);
       if (gatehouses.has(gate.buildingId)) problem(`${gate.buildingId} keeps more than one gate`);
       gatehouses.add(gate.buildingId);
@@ -377,16 +384,43 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       problem(`${districtId} has lots but no district area`);
       continue;
     }
-    const boxes = area.polygons.map((polygon) => boxOf(polygon, EPSILON));
+    // Nearly every lot of a district lies inside its own ground. A few may stand in a neighbour's: a house at the
+    // border that changed district when the town's houses were chosen. Such a lot lies inside the ground of a
+    // district whose ground touches its own.
+    const within = (lot: Lot, ground: { polygons: Point[][] }) => {
+      const box = boxOf(lot.polygon);
+      return ground.polygons.some((polygon) => {
+        const outer = boxOf(polygon, EPSILON);
+        return box.minX >= outer.minX && box.maxX <= outer.maxX && box.minY >= outer.minY && box.maxY <= outer.maxY && polygonWithin(lot.polygon, polygon);
+      });
+    };
+    const touching = new Map<string, boolean>();
+    const touches = (other: { districtId: string; polygons: Point[][] }) => {
+      let known = touching.get(other.districtId);
+      if (known === undefined) {
+        const boxes = other.polygons.map((polygon) => boxOf(polygon, GROUNDS_TOUCH));
+        known = area.polygons.some((one) => {
+          const box = boxOf(one);
+          return other.polygons.some((two, at) => {
+            const outer = boxes[at] as ReturnType<typeof boxOf>;
+            return box.minX <= outer.maxX && outer.minX <= box.maxX && box.minY <= outer.maxY && outer.minY <= box.maxY && distanceBetweenPolygons(one, two) <= GROUNDS_TOUCH;
+          });
+        });
+        touching.set(other.districtId, known);
+      }
+      return known;
+    };
+    let outside = 0;
     for (const lot of districtLots) {
       // A gatehouse stands at its gate, wherever its district lies.
-      if (gatehouses.has(lot.buildingId)) continue;
-      const box = boxOf(lot.polygon);
-      const holds = (polygon: Point[], at: number) => {
-        const outer = boxes[at] as ReturnType<typeof boxOf>;
-        return box.minX >= outer.minX && box.maxX <= outer.maxX && box.minY >= outer.minY && box.maxY <= outer.maxY && polygonWithin(lot.polygon, polygon);
-      };
-      if (!area.polygons.some(holds)) problem(`${lot.id} lies outside the area of ${districtId}`);
+      if (gatehouses.has(lot.buildingId) || within(lot, area)) continue;
+      outside++;
+      const host = districtAreas.find((other) => other.districtId !== districtId && within(lot, other));
+      if (!host) problem(`${lot.id} lies outside the ground of ${districtId} and inside no other district's`);
+      else if (!touches(host)) problem(`${lot.id} of ${districtId} lies in the ground of ${host.districtId}, which does not touch its own`);
+    }
+    if (outside > (1 - LOTS_IN_OWN_GROUND) * districtLots.length + EPSILON) {
+      problem(`${outside} of the ${districtLots.length} lots of ${districtId} lie outside its ground: more than ${Math.round((1 - LOTS_IN_OWN_GROUND) * 100)}%`);
     }
   }
   for (const area of districtAreas) {

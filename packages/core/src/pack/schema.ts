@@ -343,7 +343,7 @@ const metres = z.number().positive();
 const LotSizeSchema = z.strictObject({ frontage: metres, depth: metres });
 export type LotSize = z.infer<typeof LotSizeSchema>;
 
-export const LayoutGeneratorSchema = z.enum(['grid']);
+export const LayoutGeneratorSchema = z.enum(['grid', 'staged']);
 export type LayoutGenerator = z.infer<typeof LayoutGeneratorSchema>;
 
 const span = z.strictObject({ min: z.number().nonnegative(), max: z.number().nonnegative() });
@@ -616,6 +616,8 @@ const StagedSettingsSchema = z.strictObject({
         ward: z.enum(['castle', 'plaza']).optional(),
         template: id.optional(),
         place: z.enum(['plaza', 'road', 'harbour']).optional(),
+        /** For a slot: the building is a small thing in the open, this many metres a side, and the rest of its place open ground. */
+        open: metres.optional(),
       }),
     ),
     templates: z.record(

@@ -318,15 +318,16 @@ export function planRoads(input: RoadInput): RoadPlan {
       const out = add(end, across, sign * spans.run);
       const roads = [...highways.map((highway) => highway.points), ...mainStreets];
       // Where a road already passes in front of the bridge, the bridge's road runs straight to it and stops.
+      // But not where that road is on its own bridge: a road joins another on the bank, never over the water.
       const meets = Math.min(...roads.map((road) => firstCrossing([end, out], road) ?? Infinity));
-      if (meets < Infinity) return [end, add(end, across, sign * meets)];
+      if (meets < Infinity && (river as River).gap(add(end, across, sign * meets)) >= clear) return [end, add(end, across, sign * meets)];
       let best: Point | undefined;
       let least = Infinity;
       for (const road of roads) {
         const length = polylineLength(road);
         for (let along = 0; along < length; along += JOIN_STEP) {
           const point = pointAlongPolyline(road, along);
-          if (size(point) > spans.joinWithin * radius || (river as River).crossed(out, point)) continue;
+          if (size(point) > spans.joinWithin * radius || (river as River).crossed(out, point) || (river as River).gap(point) < clear) continue;
           // Going on ahead is preferred to veering along the bank.
           const away = distance(out, point) + spans.veer * Math.abs(dot([point[0] - out[0], point[1] - out[1]], left(across)));
           if (away < least) {

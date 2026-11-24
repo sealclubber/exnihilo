@@ -27,9 +27,10 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * gates and open places to the format, and a second generator, `grown`. Version 6 lets a river's width vary along
  * its length, and has the grown generator scatter blocks and leave streets between them. Version 7 lays the grown
  * generator's roads first. Version 8 cuts its ground into wards along the roads, and each ward into its buildings.
- * Version 9 gives a wall several lines where water parts it, and keeps lots to a least width.
+ * Version 9 gives a wall several lines where water parts it, and keeps lots to a least width. Version 10 is the
+ * staged generator's: wards, a lot's front, a sea route's exit at the quay, and gates that no building keeps.
  */
-export const LAYOUT_VERSION = 9;
+export const LAYOUT_VERSION = 10;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -42,6 +43,7 @@ export const WaterIdSchema = recordId('water', 3);
 export const WallIdSchema = recordId('wall', 3);
 export const PlaceIdSchema = recordId('place', 3);
 export const BlockIdSchema = recordId('block', 6);
+export const WardIdSchema = recordId('ward', 4);
 
 const text = z.string().min(1);
 const count = z.int().nonnegative();
@@ -87,6 +89,8 @@ export const ExitSchema = z.strictObject({
   kind: RouteKindSchema,
   /** The brief's bearing for this exit. */
   bearing: BearingSchema,
+  /** A sea route's exit stands at the quay, where ships leave by water, and not on the route's bearing. */
+  atQuay: z.boolean().optional(),
 });
 export type Exit = z.infer<typeof ExitSchema>;
 
@@ -105,10 +109,13 @@ export const WaterSchema = z.discriminatedUnion('kind', [
 ]);
 export type Water = z.infer<typeof WaterSchema>;
 
-/** A way through a wall: the junction where a street passes, the gatehouse that keeps it, and whether a main road uses it. */
+/**
+ * A way through a wall: the junction where a street passes, the gatehouse that keeps it, and whether a main road
+ * uses it. A town with more ways through its wall than gatehouses has plain gates that no building keeps.
+ */
 export const GateSchema = z.strictObject({
   junctionId: JunctionIdSchema,
-  buildingId: BuildingIdSchema,
+  buildingId: BuildingIdSchema.optional(),
   arterial: z.boolean(),
 });
 export type Gate = z.infer<typeof GateSchema>;
@@ -149,6 +156,8 @@ export const LotSchema = z.strictObject({
    * is not footprint is open ground.
    */
   footprints: z.array(polygon),
+  /** The side of the lot that faces the way it is entered from, where the generator knows it. */
+  front: z.tuple([PointSchema, PointSchema]).optional(),
 });
 export type Lot = z.infer<typeof LotSchema>;
 
@@ -171,6 +180,19 @@ export const BlockSchema = z.strictObject({
   growthRank: z.number().min(0).max(1),
 });
 export type Block = z.infer<typeof BlockSchema>;
+
+/**
+ * A ward: a cell of the town's mesh, bounded by highways, main streets, water, the wall and its neighbours. The
+ * plaza and the castle are wards too. `growthRank` is 0 for the first ground built on and 1 for the last.
+ */
+export const WardSchema = z.strictObject({
+  id: WardIdSchema,
+  polygon,
+  kind: z.enum(['ordinary', 'plaza', 'castle']),
+  districtId: DistrictIdSchema.optional(),
+  growthRank: z.number().min(0).max(1),
+});
+export type Ward = z.infer<typeof WardSchema>;
 
 export const LayoutSummarySchema = z.strictObject({
   settlementId: SettlementIdSchema,
@@ -219,6 +241,8 @@ export const LayoutSchema = z.strictObject({
   places: z.array(PlaceSchema),
   /** The blocks of a generator that has them; the grid has none. */
   blocks: z.array(BlockSchema).optional(),
+  /** The wards of a generator that has them; the grid has none. */
+  wards: z.array(WardSchema).optional(),
   summary: LayoutSummarySchema,
 });
 export type Layout = z.infer<typeof LayoutSchema>;

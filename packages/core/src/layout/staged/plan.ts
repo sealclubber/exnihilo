@@ -10,7 +10,7 @@
 import { stepRng } from '../../city/random.ts';
 import type { SettingPack, StagedSettings } from '../../pack/schema.ts';
 import type { Building } from '../../city/records.ts';
-import type { SettlementBrief } from '../../schema.ts';
+import type { Point, SettlementBrief } from '../../schema.ts';
 import { type Block, type Lane, cutBlocks, wardVariation } from './blocks.ts';
 import { polygonCentroid } from '../geometry.ts';
 import { type Character, type DistrictPlan, type Placement, type TownDistrict, characterOf, growDistricts, roomIn } from './districts.ts';
@@ -23,6 +23,8 @@ import { type Ward, cutWards } from './wards.ts';
 import { type LandmarkBuilding, type PlacedLandmark, reserve } from './landmarks.ts';
 import { type House, type Passage, layRows } from './rows.ts';
 import { type Selection, chooseHouses } from './selection.ts';
+import { gateLanes } from './network.ts';
+import { tileBlocks } from './tiles.ts';
 import { type SpecialWard, planSpecialWards, plazaRadius } from './special.ts';
 import { type Wall, planWall } from './wall.ts';
 import { type Coast, type River, makeCoast, makeRiver } from './water.ts';
@@ -71,6 +73,13 @@ export interface TownPlan extends WardPlan {
   selection: Selection;
   /** How many times more ground was taken because the town had too few houses. */
   moreGround: number;
+  /** The gatehouses that stand at gates, in the order gates are given them, and the ward borders let through the wall for them. */
+  gatehouses: string[];
+  gateLanes: Array<[number, number]>;
+  /** The ground about each block, and after the blocks about the plaza and the castle in the order of the wards. */
+  tiles: Point[][][];
+  /** For each of those, the others whose ground touches its own. */
+  tilesBeside: number[][];
   /** Which building stands in which house: only where the plan was made for a city's own buildings. */
   fitting?: Fitting;
 }
@@ -195,8 +204,21 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     });
     const reserved = new Set(placed.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
     const { houses, passages } = layRows(blocks, wards.wards, settings, seed, reserved, (_, index) => characters[index] as Character);
-    // A landmark with a ward or a block of its own is one of its district's buildings, and needs no house.
-    const wanted = input.districts.map((district, index) => district.buildings - placed.filter((landmark) => landmark.district === index).length);
+    // Gatehouses stand at gates: at the highways' and the bridges' first, then at as many ward borders as are let
+    // through the wall for them. Any beyond that are ordinary houses.
+    const place = new Map(input.districts.map((district, index) => [district.id, index]));
+    const keepers = (input.list ?? []).filter((building) => settings.landmarks.types[building.type]?.reservation === 'gate');
+    const atRoads = site.wall ? site.wall.gates.length : 0;
+    const gateLanesChosen = site.wall ? gateLanes({ mesh: wards.mesh, streets: wards.streets, wall: site.wall }, keepers.length - atRoads) : [];
+    const gatehouses = keepers.slice(0, site.wall ? atRoads + gateLanesChosen.length : 0).map((building) => building.id);
+    const atGates = new Set(gatehouses);
+    // A landmark with a ward or a block of its own, or a gate, is one of its district's buildings and needs no house.
+    const wanted = input.districts.map((district, index) => district.buildings - placed.filter((landmark) => landmark.district === index).length - keepers.filter((building) => atGates.has(building.id) && place.get(building.districtId) === index).length);
+    // The ground about every block, and about the plaza and the castle after them: blocks whose ground touches
+    // are neighbours, as are the two at the ends of a bridge.
+    const corridor = settings.widths.highway + 2 * settings.wards.highwayVerge + settings.widths.wardBorder;
+    const specials = wards.wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind !== 'ordinary');
+    const tiles = tileBlocks([...blocks.map((block) => block.polygon), ...specials.map(({ ward }) => ward.polygon)], [settings.widths.lane / 2 + 0.2, settings.widths.wardBorder / 2 + 0.25, settings.widths.mainStreet / 2 + 1, corridor / 2 + 0.6]);
     const selection = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: districtPlan, wanted, ground: wards.ground, ...(site.wall && { wall: site.wall }) });
     if (selection.short > 0 && attempt < settings.selection.tries) {
       more *= settings.selection.moreGround;
@@ -205,8 +227,7 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     if (selection.short > 0) {
       throw new StagedLayoutError(`${brief.name} (${brief.id}): ${houses.length} houses were made for ${input.buildings} buildings and the town is ${selection.short} short, after taking ${more.toFixed(2)} times the ground in ${attempt} further tries; raise layout.staged.ground.factor or layout.staged.selection.tries`);
     }
-    const place = new Map(input.districts.map((district, index) => [district.id, index]));
-    const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, houses, kept: selection.district, roads });
-    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt, ...(fitting && { fitting }) };
+    const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, elsewhere: atGates, houses, kept: selection.district, roads });
+    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, districtPlan, characters, selection, moreGround: attempt, gatehouses, gateLanes: gateLanesChosen, tiles: tiles.rings, tilesBeside: tiles.beside, ...(fitting && { fitting }) };
   }
 }

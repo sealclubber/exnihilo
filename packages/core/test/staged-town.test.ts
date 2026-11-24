@@ -328,11 +328,13 @@ describe('exact counts', () => {
     for (const { brief, input, plan } of everyPlan()) {
       plan.districts.forEach((district, index) => {
         const landmarks = plan.landmarks.filter((landmark) => landmark.district === index).length;
-        expect((plan.selection.kept[index] as number) + landmarks, `${brief.name}: ${district.id}`).toBe(district.buildings);
+        // A gatehouse at a gate needs no house either.
+        const atGates = (input.list ?? []).filter((building) => building.districtId === district.id && plan.gatehouses.includes(building.id)).length;
+        expect((plan.selection.kept[index] as number) + landmarks + atGates, `${brief.name}: ${district.id}`).toBe(district.buildings);
         expect(plan.selection.district.filter((of) => of === index).length, `${brief.name}: ${district.id}`).toBe(plan.selection.kept[index]);
       });
       expect(plan.selection.short, brief.name).toBe(0);
-      expect(keptHouses(plan).length + plan.landmarks.length, brief.name).toBe(input.buildings);
+      expect(keptHouses(plan).length + plan.landmarks.length + plan.gatehouses.length, brief.name).toBe(input.buildings);
       more += plan.moreGround;
     }
     // The generator's only loop: no settlement of Lomia needs it.
@@ -499,7 +501,7 @@ describe('determinism, the one loop, and pack edits', () => {
     expect(tight.moreGround).toBeGreaterThan(0);
     expect(tight.moreGround).toBeLessThanOrEqual(3);
     expect(tight.selection.short).toBe(0);
-    expect(tight.selection.kept.reduce((sum, count) => sum + count, 0) + tight.landmarks.length).toBe(input.buildings);
+    expect(tight.selection.kept.reduce((sum, count) => sum + count, 0) + tight.landmarks.length + tight.gatehouses.length).toBe(input.buildings);
     raw.layout.staged.selection.tries = 0;
     expect(() => planTown(brief, input, parsePack(raw))).toThrow(StagedLayoutError);
     expect(() => planTown(brief, input, parsePack(raw))).toThrow(/Flupines.*short/);
@@ -517,7 +519,7 @@ describe('determinism, the one loop, and pack edits', () => {
     // Not the whole 1.6: a district's border shifts by blocks cut to its neighbours' character.
     expect(craft(grand)).toBeGreaterThan(1.2 * craft(plan));
     // Larger blocks may hold a landmark more or fewer; houses and landmarks together are still the town's buildings.
-    expect(grand.selection.kept.reduce((sum, count) => sum + count, 0) + grand.landmarks.length).toBe(input.buildings);
+    expect(grand.selection.kept.reduce((sum, count) => sum + count, 0) + grand.landmarks.length + grand.gatehouses.length).toBe(input.buildings);
   });
 });
 
@@ -547,7 +549,7 @@ describe('which building goes where', () => {
   it('every building of every city has exactly one place: a house or a reservation, in its own district', () => {
     for (const { brief, input, plan } of everyPlan()) {
       const buildings = typeOf(input);
-      const places = [...plan.landmarks.map((landmark) => landmark.building), ...(plan.fitting?.holder ?? []).filter((id): id is string => id !== undefined)];
+      const places = [...plan.landmarks.map((landmark) => landmark.building), ...plan.gatehouses, ...(plan.fitting?.holder ?? []).filter((id): id is string => id !== undefined)];
       expect(places.length, brief.name).toBe(buildings.size);
       expect(new Set(places).size, brief.name).toBe(buildings.size);
       for (const id of places) expect(buildings.has(id), brief.name).toBe(true);

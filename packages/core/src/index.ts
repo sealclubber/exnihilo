@@ -25,6 +25,7 @@ export * as geometry from './layout/geometry.ts';
 export { checkLayout, distanceToWater, gapToRiver, BEARING_TOLERANCE } from './layout/invariants.ts';
 export { ringShare, riverOutline, riverWidthAt } from './layout/measure.ts';
 export { generateGridLayout, LayoutGenerationError, GRID_GENERATOR, type LayoutOptions } from './layout/grid.ts';
+export { generateStagedLayout, STAGED_GENERATOR, type Pin, type StagedOptions } from './layout/staged/layout.ts';
 export { generateLayout } from './layout/generate.ts';
 export { renderLayoutSvg, type RenderOptions } from './layout/render.ts';
 export { createPathFinder, shortestPath, LayoutPathError, type PathFinder } from './layout/path.ts';

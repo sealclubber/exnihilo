@@ -32,6 +32,8 @@ export interface FittingInput {
   buildings: readonly Building[];
   districtOf: (building: Building) => number;
   landmarks: readonly PlacedLandmark[];
+  /** Buildings that stand somewhere other than a house or a reservation: gatehouses at their gates. */
+  elsewhere?: ReadonlySet<string>;
   houses: readonly House[];
   /** For each house, the district that keeps it. */
   kept: ReadonlyArray<number | undefined>;
@@ -39,9 +41,9 @@ export interface FittingInput {
   roads: ReadonlyArray<readonly Point[]>;
 }
 
-export function fitBuildings({ pack, buildings, districtOf, landmarks, houses, kept, roads }: FittingInput): Fitting {
+export function fitBuildings({ pack, buildings, districtOf, landmarks, elsewhere, houses, kept, roads }: FittingInput): Fitting {
   const rules = pack.layout.staged?.fitting ?? { onRoads: [], roadWithin: 0 };
-  const placed = new Set(landmarks.map((landmark) => landmark.building));
+  const placed = new Set([...landmarks.map((landmark) => landmark.building), ...(elsewhere ?? [])]);
   const lotArea = (building: Building) => {
     const lot = lotSizeOf(building.type, pack);
     return lot.frontage * lot.depth;

@@ -154,7 +154,10 @@ describe('special wards', () => {
       const rules = settings.castle;
       const wanted = specialArea(plan.buildings, settings, rules);
       expect(wanted, brief.name).toBeLessThanOrEqual(rules.max);
-      expect(polygonArea(castle.polygon), brief.name).toBeCloseTo(wanted, 4);
+      // The size asked for, or where that fits nowhere a smaller castle of the same shape.
+      expect(polygonArea(castle.polygon), brief.name).toBeCloseTo(castle.area, 4);
+      expect(castle.area, brief.name).toBeLessThanOrEqual(wanted + 1e-6);
+      expect(castle.area, brief.name).toBeGreaterThan(0.3 * wanted);
       expect(castle.polygon.length, brief.name).toBe(rules.sides);
       if (plan.wall) {
         for (const corner of castle.polygon) expect(plan.wall.inside(corner), brief.name).toBe(true);

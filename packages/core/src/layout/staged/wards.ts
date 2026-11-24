@@ -56,7 +56,8 @@ export function cutWards({ settings, mesh, ground, roads, streets, river, coast,
   // After the ward is moved in by half a border, its edge stands a verge beyond the roadway.
   for (const highway of roads.highways) for (const length of lengths(highway.points)) take(widened([length], widths.highway + 2 * rules.highwayVerge));
   for (const street of streets) for (const length of lengths(street.points)) take(widened([length], Math.max(widths.mainStreet + 2 * rules.mainStreetVerge - widths.wardBorder, 0.01)));
-  if (roads.harbour) take(widened([roads.harbour.quay], roads.harbour.width + 2 * rules.highwayVerge));
+  // The quay has no verge: houses face the harbour across it.
+  if (roads.harbour) take(widened([roads.harbour.quay], roads.harbour.width));
   if (river) for (const length of lengths(river.line)) take(widened([length], river.width + 2 * rules.fromWater));
   if (coast) take(grown([coast.polygon], rules.fromWater, true).rings);
   if (wall) for (const part of wall.parts) for (const length of lengths(part.closed ? [...part.points, part.points[0] as Point] : part.points)) take(widened([length], 2 * rules.fromWall));

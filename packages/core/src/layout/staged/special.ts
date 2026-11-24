@@ -36,6 +36,8 @@ export interface SpecialInput {
 }
 
 const CENTRE: Point = [0, 0];
+/** The sizes tried for a castle, as shares of its sides, largest first. */
+const SMALLER = [1, 0.85, 0.7, 0.55];
 
 /** The area of a special ward of a town of so many buildings. */
 export function specialArea(buildings: number, settings: StagedSettings, rule: { perBuilding: number; min: number; max: number; groundShare: number }): number {
@@ -72,7 +74,8 @@ export function planSpecialWards({ settings, rng, buildings, radius, flags, road
       if (wall && !(polygon.every((corner) => wall.inside(corner)) && wall.parts.every((part) => distancePolygonToPolyline(polygon, part.closed ? [...part.points, part.points[0] as Point] : part.points) >= rules.fromWall))) return false;
       if (river && distancePolygonToPolyline(polygon, river.line) - river.width / 2 < rules.fromWater) return false;
       if (coast && !(polygon.every((corner) => coast.gap(corner) >= rules.fromWater) && distancePolygonToPolyline(polygon, coast.shore) >= rules.fromWater)) return false;
-      if (roads.highways.some((highway) => distancePolygonToPolyline(polygon, highway.points) < settings.widths.highway / 2 + rules.fromRoad)) return false;
+      // A highway's ground reaches to the house fronts either side of it: the castle stands clear of all of it.
+      if (roads.highways.some((highway) => distancePolygonToPolyline(polygon, highway.points) < settings.widths.highway / 2 + settings.wards.highwayVerge + settings.widths.wardBorder / 2 + rules.fromRoad)) return false;
       if (roads.mainStreets.some((street) => distancePolygonToPolyline(polygon, street) < settings.widths.mainStreet / 2 + rules.fromRoad)) return false;
       if (roads.harbour && distancePolygonToPolyline(polygon, roads.harbour.quay) < roads.harbour.width / 2 + rules.fromRoad) return false;
       return true;
@@ -87,13 +90,16 @@ export function planSpecialWards({ settings, rng, buildings, radius, flags, road
     // With no plaza it may stand as near the centre as the roads leave room for.
     const from = plaza ? plazaRadius(buildings, settings) + reach + rules.offPlaza : reach;
     const limit = wall ? wall.long : radius;
-    search: for (const way of ways) {
-      for (let out = from; out <= Math.max(limit, from); out += rules.step) {
-        const centre = add(CENTRE, [Math.cos(way), Math.sin(way)], out);
-        const polygon = shape.map((corner) => add(centre, corner));
-        if (!fits(polygon)) continue;
-        castle = { kind: 'castle', centre, polygon, area: wanted };
-        break search;
+    // Where a castle of the size asked for fits nowhere, a smaller one is tried: the same shape, scaled down.
+    search: for (const scale of SMALLER) {
+      for (const way of ways) {
+        for (let out = from * scale; out <= Math.max(limit, from * scale); out += rules.step) {
+          const centre = add(CENTRE, [Math.cos(way), Math.sin(way)], out);
+          const polygon = shape.map((corner) => add(centre, corner, scale));
+          if (!fits(polygon)) continue;
+          castle = { kind: 'castle', centre, polygon, area: wanted * scale * scale };
+          break search;
+        }
       }
     }
     if (!castle) notes.push(`no ground for the castle ${wall ? 'inside the wall' : 'within the town'}, clear of roads and water`);

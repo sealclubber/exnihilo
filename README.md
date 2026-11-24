@@ -587,8 +587,44 @@ and each stage draws on streams named `staged-…`. So far:
     types the pack spreads stand apart; and last the types listed under
     `fitting.onRoads` change places so as to front a highway or main
     street.
-    The walking network and the layout format are not built yet: the staged
-    generator still makes a plan, and the grid lays every town out.
+12. **The layout** (`staged/network.ts`, `staged/layout.ts`,
+    `staged/tiles.ts`). `generateLayout(city, brief, pack, { generator:
+    'staged' })` writes the plan in the one layout format and checks it.
+    - *The walking network* is built from the town's own geometry: a
+      highway's line, a main street's mesh edges, each ward border, the line
+      of each cut between blocks, each passage's axis, a ring round the
+      plaza and the castle, the quay, and lanes along the wall, the bank and
+      the shore where houses face them. Ways are trimmed out of the water
+      and off the wall, carried on to meet the next way, and joined into one
+      graph; a pocket of lanes cut off from the rest is joined by the
+      shortest lane that passes no house. A way no building fronts and
+      nothing needs is left out.
+    - *Widths.* A highway's segment is as wide as the whole ground between
+      the house fronts either side (19.3 m), since the format wants a lot's
+      entrance near its lot; it narrows beside the plaza and near the water.
+    - *Lots.* A house's lot is its footprint, with its front; a well is a
+      small footprint in an open lot; a block landmark's lot is its block; a
+      lot opens onto the nearest way.
+    - *Gates.* Every way through the wall is a gate. Gatehouses keep the
+      highways' gates first, then the gates at bridges into a bank the river
+      closes, then as many ward borders as are let through the wall for
+      them; a gate beyond the count of gatehouses is plain, kept by no
+      building. A sea route's exit stands on the quay (`atQuay`).
+    - *District ground.* Every block has a tile of the ground about it, cut
+      from one partition of the town. A tile is the ground of the district
+      most of its lots belong to; a district's tiles in one piece are its
+      ground, joined across a bridge where both ends are its own.
+
+    Layout format version 10 adds wards, a lot's `front`, `atQuay` on an
+    exit, and a gate's building as optional. The rule for district ground
+    is now: each district's ground is one connected piece and grounds do not
+    overlap; at least 97% of a district's lots lie inside its own ground;
+    and a lot outside it lies inside a district whose ground touches its
+    own.
+
+    The grid is still the pack's generator: across Lomia the staged
+    generator does not yet keep the two rules about lots and district
+    ground everywhere (see the report of phase 6E).
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
 point, and each block's rows on a stream of the block's own, so that a

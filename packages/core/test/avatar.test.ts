@@ -545,7 +545,7 @@ describe('unchanged', () => {
 
   it('keeps every version where it was', () => {
     expect(LIFE_VERSION).toBe(5);
-    expect(LAYOUT_VERSION).toBe(9);
+    expect(LAYOUT_VERSION).toBe(10);
     expect(GENERATOR_VERSION).toBe(6);
   });
 });

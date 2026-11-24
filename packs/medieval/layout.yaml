@@ -439,7 +439,9 @@ staged:
   # reserves, is setting content; this list is a first proposal.
   #   reservation  ward: the castle or the plaza, named by `ward`.
   #                block: a whole block, with a footprint from `template`.
-  #                slot: a place in a row, or in a courtyard or on the plaza.
+  #                slot: a place in a row. With `open`, the building is a
+  #                small thing that many metres a side, as a well is, and
+  #                the rest of its place is open ground.
   #                gate: one at each gate of the wall.
   #   place        which block a block landmark prefers: the one nearest the
   #                `plaza`, a highway or main street (`road`), or the
@@ -462,7 +464,7 @@ staged:
       docks: {reservation: block, template: plain, place: harbour}
       tavern: {reservation: slot}
       chapel: {reservation: slot}
-      well: {reservation: slot}
+      well: {reservation: slot, open: 3}
       public-oven: {reservation: slot}
       gatehouse: {reservation: gate}
 

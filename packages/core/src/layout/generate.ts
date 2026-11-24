@@ -9,8 +9,10 @@ import type { SettingPack } from '../pack/schema.ts';
 import type { SettlementBrief } from '../schema.ts';
 import { type LayoutOptions, generateGridLayout } from './grid.ts';
 import type { Layout } from './records.ts';
+import { generateStagedLayout } from './staged/layout.ts';
 
 export function generateLayout(city: City, brief: SettlementBrief, pack: SettingPack, options: LayoutOptions = {}): Layout {
-  // The grid is the only finished generator: the staged one of phase 6E is being built in `staged/`.
+  const generator = options.generator ?? pack.layout.generator ?? 'grid';
+  if (generator === 'staged') return generateStagedLayout(city, brief, pack, { ...(options.seed !== undefined && { seed: options.seed }), ...(options.pins && { pins: options.pins }) });
   return generateGridLayout(city, brief, pack, options);
 }

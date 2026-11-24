@@ -62,6 +62,8 @@ export interface LayoutOptions {
    * trades along streets. The lots themselves are the same either way; this is for comparing the two.
    */
   arrange?: boolean;
+  /** Reservations people made, for the staged generator. An empty list and no list give the same town. */
+  pins?: readonly import('./staged/layout.ts').Pin[];
 }
 
 /** How many blocks a district may grow to find a street that has none of a spread civic type yet. */
