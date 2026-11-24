@@ -581,10 +581,16 @@ and each stage draws on streams named `staged-…`. The stages:
     short first takes the unbuilt blocks between it and the nearest houses,
     and is then supplied from the nearest district with houses to spare
     through the districts between, a block changing hands across each
-    shared border on the way. What blocks cannot settle is settled the same
-    way by single houses: the house of a border block nearest the
-    neighbour's ground, and only from a block that could go itself, since
-    a block that has given houses no longer holds its district together.
+    shared border on the way. A thin district, every block of which holds
+    it together, can give nothing: it is passed through like any district
+    between, taking first a block that frees one of its own at the border
+    beyond, or one that lies behind that border, and the chain is tried
+    again with the district thicker. What blocks cannot settle is settled
+    the same way by single houses: the house of a border block nearest the
+    neighbour's ground, first only from a block that could go itself,
+    since a block that has given houses no longer holds its district
+    together, and then, for a district still short, from any border block
+    so long as most of its houses stay its district's.
     Where a short district has no neighbour across a border with houses to
     spare it takes the nearest kept houses of any district that has: the
     last resort, counted in the selection's `fallback`. If the whole
@@ -632,7 +638,8 @@ and each stage draws on streams named `staged-…`. The stages:
       whose houses belong to two districts is divided: the ground nearest
       the lesser district's houses, with the houses themselves, is a part
       of its own, and goes back to the tile if it touches none of its
-      district's ground. Tiles are kept without hairs of ground (narrower
+      district's ground. A tile is not divided where that would leave it
+      in pieces or part it from a neighbour of its own district. Tiles are kept without hairs of ground (narrower
       than 12 cm), which would make neighbours of tiles that do not really
       meet.
 
@@ -646,15 +653,18 @@ and each stage draws on streams named `staged-…`. The stages:
     inside: it is tested drawn in by 2 cm.
 
     The grid is still the pack's generator. Measured on 2026-11-24, the
-    staged generator keeps every invariant in 637 of Lomia's 682
+    staged generator keeps every invariant in 643 of Lomia's 682
     settlements, among them all 18 with fewer than 500 people. The other
-    45 break only the rules about district ground: a lot in ground that
-    does not touch its own in 40 (the fallback, and a plaza or castle that
+    39 break only the rules about district ground: a lot in ground that
+    does not touch its own in 35 (the fallback, and a plaza or castle that
     stands amid another district), more than 3% of a district's lots
-    outside its ground in 20, a lot in no district's ground in 3. 36
-    settlements use the non-touching fallback, for 3,929 houses. All 682
-    are laid out and checked in about 5 minutes; Badanos takes about 1
-    second and Pombal, the largest, about 5.
+    outside its ground in 25, a lot in no district's ground in 8. 31
+    settlements use the non-touching fallback, for 2,631 houses: most are
+    towns astride a river, where a landmark's block at the bridgehead, or
+    the rule that single houses do not cross a bridge, keeps one bank's
+    spare houses from the other. All 682 are laid out and checked in about
+    5 minutes; Badanos takes about 1 second and Pombal, the largest,
+    about 5.
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
 point, and each block's rows on a stream of the block's own, so that a

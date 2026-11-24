@@ -238,7 +238,8 @@ centre, x east and y south; bearings are degrees clockwise from north.
   houses, change district only across a border where the two grounds
   touch, and the non-touching fallback is counted. A district grows only
   from its body, the largest piece of its blocks that touch; a block that
-  holds its district together is never taken, nor emptied house by house.
+  holds its district together is never taken, nor emptied house by house;
+  a thin district is passed through by being made thicker first.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
 - **It makes layouts, and the grid is still the default.** `staged/layout.ts`

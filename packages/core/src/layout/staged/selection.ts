@@ -57,6 +57,8 @@ export interface SelectionInput {
 /** How many chains are tried for each district, and how near exact a district's count must be for whole blocks to leave it alone. */
 const CHAINS = 12;
 const SETTLED = 3;
+/** How many times a chain that stopped at a thin district is tried again, the district being thicker each time. */
+const THICKENINGS = 8;
 
 export function chooseHouses({ settings, seed, houses, blocks, wards, plan, wanted, ground, wall, beside, touching, fixed }: SelectionInput): Selection {
   const rules = settings.selection;
@@ -246,6 +248,7 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
   // so that each district between gains one block and gives up another. What is left for single houses is a
   // handful.
   const stuck = new Set<number>();
+  const tries = new Map<number, number>();
   for (let turn = 0; turn < CHAINS * wanted.length; turn++) {
     const borders = new Map<string, number[]>();
     blockDistrict.forEach((from, index) => {
@@ -275,7 +278,9 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
       for (let other = 0; other < wanted.length; other++) {
         if (from.has(other) || !borders.has(`${other}>${here}`)) continue;
         from.set(other, here);
-        if (balance(other) >= SETTLED) {
+        // A district with houses to spare is the source if it has a block it can give this way. A thin one has
+        // none, and is passed through like any district between.
+        if (balance(other) >= SETTLED && (borders.get(`${other}>${here}`) ?? []).some((index) => blockDistrict[index] === other && whole(other, index))) {
           source = other;
           break;
         }
@@ -287,15 +292,38 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
       continue;
     }
     const amount = Math.min(-balance(taker), balance(source));
+    const fits = (giver: number, to: number) => (borders.get(`${giver}>${to}`) ?? []).filter((index) => blockDistrict[index] === giver && (keptIn[index] as number) <= 2 * amount);
     let passed = true;
+    let gave = false;
     for (let giver = source; giver !== taker && passed; giver = from.get(giver) as number) {
       const to = from.get(giver) as number;
+      // A thin district between two others can give nothing without coming apart: every block of it holds it
+      // together. It is passed through by being made thicker first. Where the district that takes here must give
+      // further on and has no block it can spare, it takes, of the blocks that fit, one that frees a block of
+      // its own at the border beyond, or failing that one that lies behind that border.
+      const beyond = to === taker ? undefined : (from.get(to) as number);
+      const onward = beyond === undefined ? [] : fits(to, beyond);
+      const blocked = beyond !== undefined && !onward.some((index) => whole(to, index));
+      const behind = new Set<number>();
+      if (blocked) for (const index of onward) for (const next of beside[index] ?? []) if (blockDistrict[next] === to) behind.add(next);
       let best: number | undefined;
-      for (const index of borders.get(`${giver}>${to}`) ?? []) {
-        if (blockDistrict[index] !== giver || (keptIn[index] as number) > 2 * amount) continue;
-        if ((best === undefined || Math.abs((keptIn[index] as number) - amount) < Math.abs((keptIn[best] as number) - amount)) && whole(giver, index)) best = index;
+      let rank = Infinity;
+      for (const index of fits(giver, to)) {
+        if (!whole(giver, index)) continue;
+        let tier = 0;
+        if (blocked) {
+          blockDistrict[index] = to;
+          const frees = onward.some((other) => whole(to, other));
+          blockDistrict[index] = giver;
+          tier = frees ? 0 : (beside[index] ?? []).some((next) => behind.has(next) || onward.includes(next)) ? 1 : 2;
+        }
+        const score = tier * 1e6 + Math.abs((keptIn[index] as number) - amount);
+        if (score < rank) {
+          rank = score;
+          best = index;
+        }
       }
-      if (best === undefined || (keptIn[best] as number) > 2 * amount) {
+      if (best === undefined) {
         passed = false;
         break;
       }
@@ -303,8 +331,14 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
       have[to] = (have[to] as number) + (keptIn[best] as number);
       blockDistrict[best] = to;
       inBody[best] = 1;
+      gave = true;
     }
-    if (!passed) stuck.add(taker);
+    // A chain that stopped part of the way has still thickened the district it stopped at, and is tried again; one
+    // that moved nothing, or has been tried often enough, is given up.
+    if (!passed) {
+      tries.set(taker, (tries.get(taker) ?? 0) + 1);
+      if (!gave || (tries.get(taker) as number) > THICKENINGS) stuck.add(taker);
+    }
   }
 
   // Single houses. A district still short is supplied from the nearest district with a house to spare, through
@@ -350,11 +384,16 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
     return order;
   };
   const spared = new Map<number, boolean>();
-  const mayGive = (from: number, block: number): boolean => {
+  const couldGo = (from: number, block: number): boolean => {
     let known = spared.get(block);
     if (known === undefined) spared.set(block, (known = lent.has(block) || (!fixed.has(block) && whole(from, block))));
     return known;
   };
+  // Second, where that leaves a district short: a block that holds its district together gives too, so long as
+  // most of its houses stay its district's, for then it stays its district's ground.
+  let freely = false;
+  const mayGive = (from: number, block: number): boolean =>
+    couldGo(from, block) || (freely && !fixed.has(block) && 2 * ((ownIn[block] as number) - 1) > (inBlock[block] as number[]).length);
   const atBorder = (from: number, to: number): number | undefined => {
     for (const { index: block, next } of borderBlocks.get(`${from}>${to}`) ?? []) {
       if (blockDistrict[block] !== from || (ownIn[block] as number) === 0) continue;
@@ -364,7 +403,10 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
     }
     return undefined;
   };
-  for (let turn = 0; turn < chosen.length; turn++) {
+  for (const second of [false, true]) {
+   freely = second;
+   for (const of of wanted.keys()) stuck.delete(-1 - of);
+   for (let turn = 0; turn < chosen.length; turn++) {
     let taker: number | undefined;
     wanted.forEach((_, of) => {
       if (stuck.has(-1 - of) || balance(of) >= 0) return;
@@ -402,7 +444,7 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
       // A block whose every house has gone to the neighbour is the neighbour's block.
       const block = (houses[index] as House).block;
       ownIn[block] = (ownIn[block] as number) - 1;
-      if (!lent.has(block)) {
+      if (!lent.has(block) && couldGo(giver, block)) {
         lent.add(block);
         spared.clear();
       }
@@ -415,6 +457,7 @@ export function chooseHouses({ settings, seed, houses, blocks, wards, plan, want
         spared.clear();
       }
     }
+   }
   }
   // The last resort, counted: a district still short, with no neighbour across a shared border that has houses to
   // spare, takes the nearest kept houses of whichever districts have too many.

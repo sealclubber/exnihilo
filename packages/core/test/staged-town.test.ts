@@ -415,7 +415,7 @@ describe('exact counts', () => {
       blocks += plan.blocks.length;
       expect(plan.blocks.filter((block, index) => plan.selection.blockDistrict[index] !== plan.districtPlan.of[block.ward]).length, brief.name).toBe(plan.selection.moved);
     }
-    // Measured: about 1.8% of houses stand in a neighbour's block at a shared border. A third of all blocks are in
+    // Measured: about 1% of houses stand in a neighbour's block at a shared border. A third of all blocks are in
     // another district than their ward's: most of them unbuilt ground at the town's edge, which a district that is
     // short crosses to reach houses.
     expect(borrowed / kept).toBeLessThan(0.03);

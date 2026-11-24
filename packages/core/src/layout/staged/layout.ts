@@ -522,6 +522,7 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
     const landmarksHere = plan.landmarks.filter((landmark) => landmark.block === tile && landmark.outline.length > 2);
     let rest = rings;
     const parts: number[] = [];
+    const before = { tiles: tiles.length, votes: new Map(map) };
     for (const district of [...new Set(here.map((entry) => entry.district))].filter((id) => id !== most).sort()) {
       const own: Point[][] = [];
       const others: Point[][] = landmarksHere.filter((landmark) => districtOfBuilding.get(landmark.building) !== district).map((landmark) => landmark.outline);
@@ -555,6 +556,19 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
       });
     }
     if (parts.length === 0) continue;
+    // A tile is not divided where that would part its own district: where what is left of it is in pieces, or no
+    // longer meets a neighbour of the same district that it met. Its lesser houses then stand in its ground.
+    const touch = (one: Point[][], two: Point[][]) => one.some((a) => two.some((b) => touching(a, b) || touching(b, a)));
+    const joined = [0];
+    for (let head = 0; head < joined.length; head++) rest.forEach((ring, at) => !joined.includes(at) && touch([rest[joined[head] as number] as Point[]], [ring]) && joined.push(at));
+    const mostOf = (other: number) => [...(votes[other] as Map<string, number>)].sort(([a, one], [b, two]) => two - one || (a < b ? -1 : 1))[0]?.[0] ?? (other < blocks ? plan.districts[plan.selection.blockDistrict[other] as number]?.id : undefined);
+    const parted = joined.length < rest.length || (beside[tile] as number[]).some((other) => mostOf(other) === most && touch(rings, tiles[other] as Point[][]) && !touch(rest, tiles[other] as Point[][]));
+    if (parted) {
+      for (const list of [tiles, parent, outlines, votes, beside] as unknown[][]) list.length = before.tiles;
+      map.clear();
+      for (const [district, count] of before.votes) map.set(district, count);
+      continue;
+    }
     tiles[tile] = rest;
     outlines[tile] = here.filter((entry) => map.has(entry.district)).map((entry) => (plan.houses[entry.house] as TownPlan['houses'][number]).outline);
     // Which tiles the tile and its parts are beside is found again from their outlines.

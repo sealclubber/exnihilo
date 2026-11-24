@@ -48,7 +48,7 @@ describe('the staged generator as a layout', () => {
       for (const problem of problems) if (!ofGround(problem)) others.push(`${name}: ${problem}`);
     }
     console.log(`Staged layouts, ${SAMPLE.length} settlements: ${whole} pass every invariant; the rest break only the district-ground rules`);
-    // Measured: 54 of the 57. Nothing else is broken anywhere in the sample.
+    // Measured: 55 of the 57. Nothing else is broken anywhere in the sample.
     expect(others).toEqual([]);
     expect(whole / SAMPLE.length).toBeGreaterThan(0.9);
   });
