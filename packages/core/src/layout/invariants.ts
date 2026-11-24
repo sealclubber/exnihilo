@@ -41,6 +41,8 @@ export const BEARING_TOLERANCE = 20;
 const MOST_PROBLEMS_LISTED = 20;
 /** At least this share of a district's lots lie inside its own ground. */
 export const LOTS_IN_OWN_GROUND = 0.97;
+/** A lot on the very edge of ground is inside it: it is tested drawn in by this much, in metres. */
+const ON_THE_EDGE = 0.02;
 /** Two districts' grounds touch if they come this near each other, in metres: they never overlap, so they are a hair apart. */
 const GROUNDS_TOUCH = 0.5;
 /** The clear ground a layout may leave between a roadway and the lots along it, in metres. */
@@ -387,11 +389,24 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     // Nearly every lot of a district lies inside its own ground. A few may stand in a neighbour's: a house at the
     // border that changed district when the town's houses were chosen. Such a lot lies inside the ground of a
     // district whose ground touches its own.
+    // A lot whose outline runs along the ground's edge, as a house's does where its neighbour through the wall is
+    // another district's, is inside it: the lot is tested drawn in by a finger's breadth.
     const within = (lot: Lot, ground: { polygons: Point[][] }) => {
-      const box = boxOf(lot.polygon);
+      // Each corner is moved along the line that halves its angle, to whichever side is inside the lot.
+      const drawnIn = lot.polygon.map((point, at): Point => {
+        const before = lot.polygon[(at + lot.polygon.length - 1) % lot.polygon.length] as Point;
+        const after = lot.polygon[(at + 1) % lot.polygon.length] as Point;
+        const [a, b] = [Math.hypot(before[0] - point[0], before[1] - point[1]) || 1, Math.hypot(after[0] - point[0], after[1] - point[1]) || 1];
+        const toward: Point = [(before[0] - point[0]) / a + (after[0] - point[0]) / b, (before[1] - point[1]) / a + (after[1] - point[1]) / b];
+        const size = Math.hypot(toward[0], toward[1]);
+        if (size < EPSILON) return point;
+        const moved: Point = [point[0] + (toward[0] * ON_THE_EDGE) / size, point[1] + (toward[1] * ON_THE_EDGE) / size];
+        return pointInPolygon(moved, lot.polygon) ? moved : [point[0] - (toward[0] * ON_THE_EDGE) / size, point[1] - (toward[1] * ON_THE_EDGE) / size];
+      });
+      const box = boxOf(drawnIn);
       return ground.polygons.some((polygon) => {
         const outer = boxOf(polygon, EPSILON);
-        return box.minX >= outer.minX && box.maxX <= outer.maxX && box.minY >= outer.minY && box.maxY <= outer.maxY && polygonWithin(lot.polygon, polygon);
+        return box.minX >= outer.minX && box.maxX <= outer.maxX && box.minY >= outer.minY && box.maxY <= outer.maxY && polygonWithin(drawnIn, polygon);
       });
     };
     const touching = new Map<string, boolean>();

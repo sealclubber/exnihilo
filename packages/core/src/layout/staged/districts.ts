@@ -133,7 +133,11 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
   const middles = wards.map((ward) => polygonCentroid(ward.polygon));
 
   // ---- The town proper, ranked by growth -------------------------------------------------------------------------
-  const ranked = [...ordinary].sort((a, b) => a.ward.growthRank - b.ward.growthRank || a.index - b.index);
+  // Ground is ranked as it is when the town's houses are chosen: inside the wall before outside it. Otherwise a
+  // district would be given ground whose houses the town then does not keep.
+  const { wall } = input;
+  const rank = wards.map((ward, index) => ward.growthRank * (wall?.inside(middles[index] as Point) ? settings.selection.insideWall : 1));
+  const ranked = [...ordinary].sort((a, b) => (rank[a.index] as number) - (rank[b.index] as number) || a.index - b.index);
   const proper: number[] = [];
   let held = 0;
   for (const { ward, index } of ranked) {
@@ -168,7 +172,7 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
       // By the water; or where no district has started yet, at the heart of the band; otherwise far from the others.
       // The ward whose own ground comes nearest the water, and of those the one whose middle does.
       if (placement === 'waterside' && water) score = -Math.min(...(wards[index] as Ward).polygon.map((corner) => distanceToPolyline(corner, water))) - 1e-3 * distanceToPolyline(middle, water);
-      else if (!heart) score = -(wards[index] as Ward).growthRank;
+      else if (!heart) score = -(rank[index] as number);
       else score = Math.min(...[...taken].map((other) => distance(middle, middles[other] as Point)));
       if (score > most) {
         most = score;
@@ -190,7 +194,7 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
   // lies: districts fill the inner ground first, and compete for it.
   type Claim = { order: number; cost: number; district: number; ward: number };
   let frontier: Claim[] = [];
-  const claim = (cost: number, district: number, ward: number): Claim => ({ order: cost + rules.inward * (wards[ward] as Ward).growthRank, cost, district, ward });
+  const claim = (cost: number, district: number, ward: number): Claim => ({ order: cost + rules.inward * (rank[ward] as number), cost, district, ward });
   const grow = (capped: boolean) => {
     for (;;) {
       let pick = -1;

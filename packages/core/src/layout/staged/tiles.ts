@@ -77,6 +77,15 @@ export function tileBlocks(polygons: ReadonlyArray<readonly Point[]>, steps: rea
       rings[at] = [...had, ...more.filter((ring) => had.length === 0 || had.some((piece) => touching(piece, ring) || touching(ring, piece)))];
     });
   }
+  // A tile may reach out in a hair of ground along the line where two others meet. A hair is nobody's ground and
+  // makes no neighbours: each tile is kept without what is narrower than one.
+  polygons.forEach((polygon, at) => {
+    const had = rings[at] as Point[][];
+    if (had.length === 0) return;
+    const solid = grown(grown(had, -HAIR / 2).rings, HAIR / 2).rings.filter((ring) => polygonArea(ring) > 0.5);
+    const holds = solid.findIndex((ring) => pointInPolygon(polygon[0] as Point, ring));
+    rings[at] = holds > 0 ? [solid[holds] as Point[], ...solid.filter((_, index) => index !== holds)] : solid;
+  });
   const beside: number[][] = polygons.map(() => []);
   polygons.forEach((_, at) => {
     for (const other of near[at] as number[]) {
@@ -89,6 +98,9 @@ export function tileBlocks(polygons: ReadonlyArray<readonly Point[]>, steps: rea
   });
   return { rings, beside };
 }
+
+/** Ground narrower than this, in metres, is a hair. */
+export const HAIR = 0.12;
 
 /** How long a common edge two tiles must have to be neighbours, in metres. */
 const TOUCH = 0.5;

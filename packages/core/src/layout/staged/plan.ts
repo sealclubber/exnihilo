@@ -229,7 +229,9 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     // a district whose block stands at each end has its ground joined across the bridge.
     const touching = blocks.map((_, index) => (tiles.beside[index] as number[]).filter((other) => other < blocks.length));
     const beside = touching.map((list) => [...list]);
-    for (const link of bridgeLinks(tiles.rings.slice(0, blocks.length), site.bridges)) {
+    // The same links the districts' ground is joined by: the tiles nearest each end of a bridge, where both are blocks.
+    for (const link of bridgeLinks(tiles.rings, site.bridges)) {
+      if (link.a >= blocks.length || link.b >= blocks.length) continue;
       (beside[link.a] as number[]).push(link.b);
       (beside[link.b] as number[]).push(link.a);
     }

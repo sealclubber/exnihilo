@@ -48,14 +48,9 @@ describe('the staged generator as a layout', () => {
       for (const problem of problems) if (!ofGround(problem)) others.push(`${name}: ${problem}`);
     }
     console.log(`Staged layouts, ${SAMPLE.length} settlements: ${whole} pass every invariant; the rest break only the district-ground rules`);
-    // Known and reported: in Boytayay the harbour's ground is the larger, inland piece of a district that block
-    // trades left in two, and so lies 41.5 m from the water where the pack allows 40.
-    const towns = new Set(others.map((problem) => problem.split(':')[0]));
-    if (others.length > 0) console.log(`Other problems, in ${[...towns].join(', ')}: ${others.slice(0, 3).join(' | ')}`);
-    expect(towns.size).toBeLessThanOrEqual(2);
-    expect(towns.size).toBeLessThanOrEqual(1);
-    for (const problem of others) expect(problem).toMatch(/is a waterside district but lies/);
-    expect(whole / SAMPLE.length).toBeGreaterThan(0.55);
+    // Measured: 54 of the 57. Nothing else is broken anywhere in the sample.
+    expect(others).toEqual([]);
+    expect(whole / SAMPLE.length).toBeGreaterThan(0.9);
   });
 
   it('gives every building one lot, a house its front, and each lot an entrance on a way of the one network', () => {

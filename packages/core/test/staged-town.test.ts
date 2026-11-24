@@ -10,6 +10,7 @@ import { smallestRectangle } from '../src/layout/cutting.ts';
 import { distanceBetweenPolygons, distanceToPiece, distanceToPolygonEdge, pointInPolygon, polygonArea, polygonCentroid } from '../src/layout/geometry.ts';
 import type { LandmarkBuilding } from '../src/layout/staged/landmarks.ts';
 import { wardKey } from '../src/layout/staged/blocks.ts';
+import { bridgeLinks } from '../src/layout/staged/tiles.ts';
 import { builtInChecks } from '../src/layout/staged/checks.ts';
 import { StagedLayoutError, type TownInput, type TownPlan, landmarksOf, planTown, stagedSettings, townInput } from '../src/layout/staged/plan.ts';
 import { outlineOf, rectInside, standingOf, standingOverlap, widenedRect } from '../src/layout/staged/rects.ts';
@@ -343,6 +344,46 @@ describe('exact counts', () => {
     expect(more).toBe(0);
   });
 
+  it('leaves each district\u2019s blocks in one piece, but for a landmark\u2019s block and ground no district touches', () => {
+    let apart = 0;
+    let kept = 0;
+    for (const { plan } of everyPlan()) {
+      const count = plan.blocks.length;
+      const beside = plan.blocks.map((_, index) => (plan.tilesBeside[index] as number[]).filter((other) => other < count));
+      for (const link of bridgeLinks(plan.tiles, plan.bridges)) {
+        if (link.a >= count || link.b >= count) continue;
+        (beside[link.a] as number[]).push(link.b);
+        (beside[link.b] as number[]).push(link.a);
+      }
+      const keptIn = plan.blocks.map(() => 0);
+      plan.houses.forEach((house, index) => {
+        if (plan.selection.district[index] === undefined) return;
+        keptIn[house.block] = (keptIn[house.block] as number) + 1;
+        kept++;
+      });
+      const seen = new Set<number>();
+      const pieces = new Map<number, number[]>();
+      plan.selection.blockDistrict.forEach((of, index) => {
+        if (of === undefined || seen.has(index)) return;
+        const piece = [index];
+        seen.add(index);
+        let houses = 0;
+        for (let head = 0; head < piece.length; head++) {
+          houses += keptIn[piece[head] as number] as number;
+          for (const next of beside[piece[head] as number] as number[]) {
+            if (seen.has(next) || plan.selection.blockDistrict[next] !== of) continue;
+            seen.add(next);
+            piece.push(next);
+          }
+        }
+        pieces.set(of, [...(pieces.get(of) ?? []), houses]);
+      });
+      for (const sizes of pieces.values()) apart += sizes.reduce((sum, size) => sum + size, 0) - Math.max(...sizes);
+    }
+    console.log(`Kept houses in a block apart from the body of its district: ${apart} of ${kept}`);
+    expect(apart / kept).toBeLessThan(0.01);
+  });
+
   it('falls back on a district that does not touch only in a few settlements, and counts the houses', () => {
     let settlements = 0;
     let houses = 0;
@@ -374,10 +415,11 @@ describe('exact counts', () => {
       blocks += plan.blocks.length;
       expect(plan.blocks.filter((block, index) => plan.selection.blockDistrict[index] !== plan.districtPlan.of[block.ward]).length, brief.name).toBe(plan.selection.moved);
     }
-    // Measured: about 2.4% of houses stand in a neighbour's block at a shared border. Borders shift by many whole
-    // blocks, since wards are coarse.
-    expect(borrowed / kept).toBeLessThan(0.04);
-    expect(moved / blocks).toBeLessThan(0.35);
+    // Measured: about 1.8% of houses stand in a neighbour's block at a shared border. A third of all blocks are in
+    // another district than their ward's: most of them unbuilt ground at the town's edge, which a district that is
+    // short crosses to reach houses.
+    expect(borrowed / kept).toBeLessThan(0.03);
+    expect(moved / blocks).toBeLessThan(0.4);
   });
 });
 

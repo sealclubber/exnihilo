@@ -189,7 +189,8 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - **District ground** is one or more polygons that touch each other, one
   connected piece for each district, and no two districts' overlap. At least
   97% of a district's lots lie inside its own ground; a lot outside lies
-  inside a district whose ground touches its own.
+  inside a district whose ground touches its own. A lot on the very
+  edge of ground, sharing a wall with another district's house, is inside.
 - **Footprints** are the outlines of a lot's buildings: they lie inside the
   lot and do not overlap each other, and the rest of the lot is open ground.
 - **Walls and places.** A town has at most one wall: one closed line, or open
@@ -235,7 +236,9 @@ centre, x east and y south; bearings are degrees clockwise from north.
   which houses exist: making each district's count exact never drops, adds,
   cuts or remakes one. A district is a group of wards; blocks, then single
   houses, change district only across a border where the two grounds
-  touch, and the non-touching fallback is counted.
+  touch, and the non-touching fallback is counted. A district grows only
+  from its body, the largest piece of its blocks that touch; a block that
+  holds its district together is never taken, nor emptied house by house.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
 - **It makes layouts, and the grid is still the default.** `staged/layout.ts`

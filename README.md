@@ -557,7 +557,9 @@ and each stage draws on streams named `staged-…`. The stages:
     starts at a seed ward chosen by its kind's placement (a waterside one
     first, at the ward whose ground comes nearest the quay; then the first
     at the heart of the town and the rest spread through their band of it) and takes neighbouring wards, nearest and
-    innermost first. Crossing a highway, a main street, the wall or the
+    innermost first; ground is ranked as it is when the town's houses are
+    chosen, inside the wall before outside it, so that a district is not
+    given ground whose houses the town will not keep. Crossing a highway, a main street, the wall or the
     river (only at a bridge) costs extra, so those become district borders.
     A district stops when its wards have room for its buildings, and what
     is left over goes to the nearest district. A district
@@ -570,16 +572,22 @@ and each stage draws on streams named `staged-…`. The stages:
     that luck inflates with distance, so the centre is solid and the town
     thins toward its edge. A kept house belongs to the district of its
     block. Wards are coarse, so each district's count is then made exact at
-    its borders, and no house is dropped or added in doing so. A block
-    changes district only where its ground touches the taker's (or stands
-    across a bridge from it), and never where its loss would part the
-    district that gives it; a district that is short is supplied from the
-    nearest one with houses to spare through the districts between, a block
-    changing hands across each shared border on the way. What blocks cannot
-    settle is settled the same way by single houses in blocks at a shared
-    border. Where a short district has no neighbour across a border with
-    houses to spare it takes the nearest kept houses of any district that
-    has: the last resort, counted in the selection's `fallback`. If the whole
+    its borders, and no house is dropped or added in doing so. A district's
+    body is the largest piece of its blocks that touch; a block apart from
+    it, but for a landmark's own, first goes to the district whose body it
+    touches. A block then changes district only where its ground touches
+    the taker's body (or stands across a bridge from it), and never where
+    its loss would part the district that gives it; a district that is
+    short first takes the unbuilt blocks between it and the nearest houses,
+    and is then supplied from the nearest district with houses to spare
+    through the districts between, a block changing hands across each
+    shared border on the way. What blocks cannot settle is settled the same
+    way by single houses: the house of a border block nearest the
+    neighbour's ground, and only from a block that could go itself, since
+    a block that has given houses no longer holds its district together.
+    Where a short district has no neighbour across a border with houses to
+    spare it takes the nearest kept houses of any district that has: the
+    last resort, counted in the selection's `fallback`. If the whole
     town has too few houses, ground is taken again half as large again, at
     most three times: the generator's only loop, which no settlement of
     Lomia needs.
@@ -620,25 +628,33 @@ and each stage draws on streams named `staged-…`. The stages:
     - *District ground.* Every block has a tile of the ground about it, cut
       from one partition of the town. A tile is the ground of the district
       most of its lots belong to; a district's tiles in one piece are its
-      ground, joined across a bridge where both ends are its own.
+      ground, joined across a bridge where both ends are its own. A tile
+      whose houses belong to two districts is divided: the ground nearest
+      the lesser district's houses, with the houses themselves, is a part
+      of its own, and goes back to the tile if it touches none of its
+      district's ground. Tiles are kept without hairs of ground (narrower
+      than 12 cm), which would make neighbours of tiles that do not really
+      meet.
 
     Layout format version 10 adds wards, a lot's `front`, `atQuay` on an
     exit, and a gate's building as optional. The rule for district ground
     is now: each district's ground is one connected piece and grounds do not
     overlap; at least 97% of a district's lots lie inside its own ground;
     and a lot outside it lies inside a district whose ground touches its
-    own.
+    own. A lot whose outline runs along the ground's edge, as a house's
+    does where the neighbour through its wall is another district's, is
+    inside: it is tested drawn in by 2 cm.
 
     The grid is still the pack's generator. Measured on 2026-11-24, the
-    staged generator keeps every invariant in 589 of Lomia's 682
+    staged generator keeps every invariant in 637 of Lomia's 682
     settlements, among them all 18 with fewer than 500 people. The other
-    93 break only the rules about district ground: more than 3% of a
-    district's lots outside its ground in 74, a lot in ground that does
-    not touch its own in 47, a lot in no district's ground in 8, and in
-    one (Boytayay) the harbour's ground 41.5 m from the water where the
-    pack allows 40. 31 settlements use the non-touching fallback, for
-    2,825 houses. All 682 are laid out and checked in about 5 minutes;
-    Badanos takes about 1 second and Pombal, the largest, about 5.
+    45 break only the rules about district ground: a lot in ground that
+    does not touch its own in 40 (the fallback, and a plaza or castle that
+    stands amid another district), more than 3% of a district's lots
+    outside its ground in 20, a lot in no district's ground in 3. 36
+    settlements use the non-touching fallback, for 3,929 houses. All 682
+    are laid out and checked in about 5 minutes; Badanos takes about 1
+    second and Pombal, the largest, about 5.
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
 point, and each block's rows on a stream of the block's own, so that a
