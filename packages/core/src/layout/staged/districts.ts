@@ -60,6 +60,8 @@ export interface DistrictInput {
   river?: River;
   coast?: Coast;
   wall?: Wall;
+  /** The district whose building the plaza is, where the town has one: it starts beside the plaza. */
+  plazaDistrict?: number;
 }
 
 /** The character of the wards of a kind of district. */
@@ -155,13 +157,18 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
   let heart = false;
   // A waterside district chooses first: the water is where it is, and the others can start anywhere in their band.
   const byWater = (district: (typeof districts)[number]) => placementOf(district.kind) === 'waterside' && water !== undefined;
-  const inTurn = [...districts.keys()].sort((a, b) => Number(byWater(districts[b] as (typeof districts)[number])) - Number(byWater(districts[a] as (typeof districts)[number])) || a - b);
+  // Before any, the district that owns the plaza: it starts at the ward nearest it, so that the plaza stands in
+  // its own district's ground.
+  const plaza = input.plazaDistrict === undefined ? undefined : wards.find((ward) => ward.kind === 'plaza');
+  const first = (index: number) => (plaza && index === input.plazaDistrict ? 2 : byWater(districts[index] as (typeof districts)[number]) ? 1 : 0);
+  const inTurn = [...districts.keys()].sort((a, b) => first(b) - first(a) || a - b);
   for (const turn of inTurn) {
     const district = districts[turn] as (typeof districts)[number];
     const placement = placementOf(district.kind);
     const band = rules.bands[placement] ?? [0, 1];
     const free = (list: readonly number[]) => list.filter((index) => !taken.has(index));
-    let candidates = free(proper.filter((index) => (place.get(index) as number) >= band[0] && (place.get(index) as number) < band[1]));
+    const ownsPlaza = plaza !== undefined && turn === input.plazaDistrict;
+    let candidates = ownsPlaza ? free(proper) : free(proper.filter((index) => (place.get(index) as number) >= band[0] && (place.get(index) as number) < band[1]));
     if (candidates.length === 0) candidates = free(proper);
     if (candidates.length === 0) candidates = free(ordinary.map(({ index }) => index));
     let best: number | undefined;
@@ -170,8 +177,9 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
       const middle = middles[index] as Point;
       let score: number;
       // By the water; or where no district has started yet, at the heart of the band; otherwise far from the others.
-      // The ward whose own ground comes nearest the water, and of those the one whose middle does.
-      if (placement === 'waterside' && water) score = -Math.min(...(wards[index] as Ward).polygon.map((corner) => distanceToPolyline(corner, water))) - 1e-3 * distanceToPolyline(middle, water);
+      // Beside the plaza; the ward whose own ground comes nearest the water, and of those the one whose middle does.
+      if (ownsPlaza) score = -Math.min(...(wards[index] as Ward).polygon.map((corner) => distanceToPolyline(corner, [...(plaza as Ward).polygon, (plaza as Ward).polygon[0] as Point])));
+      else if (placement === 'waterside' && water) score = -Math.min(...(wards[index] as Ward).polygon.map((corner) => distanceToPolyline(corner, water))) - 1e-3 * distanceToPolyline(middle, water);
       else if (!heart) score = -(rank[index] as number);
       else score = Math.min(...[...taken].map((other) => distance(middle, middles[other] as Point)));
       if (score > most) {
@@ -180,7 +188,7 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
       }
     }
     seeds[turn] = best;
-    if (!byWater(district)) heart = true;
+    if (!byWater(district) || ownsPlaza) heart = true;
     if (best !== undefined) taken.add(best);
   }
 

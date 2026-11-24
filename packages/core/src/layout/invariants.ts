@@ -26,6 +26,7 @@ import {
   pointInPolygon,
   polygonArea,
   polygonWithin,
+  projectOnPolyline,
   polylineLength,
   slicePolyline,
   polygonsOverlap,
@@ -41,6 +42,8 @@ export const BEARING_TOLERANCE = 20;
 const MOST_PROBLEMS_LISTED = 20;
 /** At least this share of a district's lots lie inside its own ground. */
 export const LOTS_IN_OWN_GROUND = 0.97;
+/** However few lots a district has, this many may lie outside its ground. */
+export const LOTS_OUTSIDE_ALLOWED = 2;
 /** A lot on the very edge of ground is inside it: it is tested drawn in by this much, in metres. */
 const ON_THE_EDGE = 0.02;
 /** Two districts' grounds touch if they come this near each other, in metres: they never overlap, so they are a hair apart. */
@@ -373,6 +376,27 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     if (strictlyInside(ORIGIN, sea.polygon)) problem(`${sea.id} covers the town centre`);
   }
 
+  // Bridge links: each names a bridge, and the districts whose ground it reaches at its two ends.
+  const bridgeLinks = layout.bridgeLinks ?? [];
+  const groundAway = (districtId: string, point: Point) => Math.min(...(areaByDistrict.get(districtId)?.polygons ?? []).map((polygon) => (pointInPolygon(point, polygon) ? 0 : distanceToPolygonEdge(point, polygon))));
+  for (const link of bridgeLinks) {
+    const bridge = segmentById.get(link.segmentId);
+    if (!bridge || bridge.kind !== 'bridge') {
+      problem(`a bridge link names ${link.segmentId}, which is not a bridge`);
+      continue;
+    }
+    if (!areaByDistrict.has(link.from) || !areaByDistrict.has(link.to)) {
+      problem(`the bridge link of ${link.segmentId} names a district without ground`);
+      continue;
+    }
+    const [start, end] = [bridge.points[0] as Point, bridge.points[bridge.points.length - 1] as Point];
+    // The ground it reaches at each end is nearer that end than the other.
+    if (groundAway(link.from, start) > groundAway(link.from, end) && groundAway(link.to, end) > groundAway(link.to, start)) {
+      problem(`the bridge link of ${link.segmentId} names ${link.from} and ${link.to} at the wrong ends`);
+    }
+  }
+  const linked = (one: string, other: string) => bridgeLinks.some((link) => (link.from === one && link.to === other) || (link.from === other && link.to === one));
+
   // District areas: they enclose their lots, hold together, and keep apart from each other.
   const lotsByDistrict = new Map<string, Lot[]>();
   for (const lot of lots) {
@@ -432,29 +456,57 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
       outside++;
       const host = districtAreas.find((other) => other.districtId !== districtId && within(lot, other));
       if (!host) problem(`${lot.id} lies outside the ground of ${districtId} and inside no other district's`);
-      else if (!touches(host)) problem(`${lot.id} of ${districtId} lies in the ground of ${host.districtId}, which does not touch its own`);
+      else if (!touches(host) && !linked(host.districtId, districtId)) problem(`${lot.id} of ${districtId} lies in the ground of ${host.districtId}, which neither touches its own nor is joined to it by a bridge`);
     }
-    if (outside > (1 - LOTS_IN_OWN_GROUND) * districtLots.length + EPSILON) {
-      problem(`${outside} of the ${districtLots.length} lots of ${districtId} lie outside its ground: more than ${Math.round((1 - LOTS_IN_OWN_GROUND) * 100)}%`);
+    if (outside > Math.max((1 - LOTS_IN_OWN_GROUND) * districtLots.length, LOTS_OUTSIDE_ALLOWED) + EPSILON) {
+      problem(`${outside} of the ${districtLots.length} lots of ${districtId} lie outside its ground: more than ${Math.round((1 - LOTS_IN_OWN_GROUND) * 100)}% and more than ${LOTS_OUTSIDE_ALLOWED}`);
     }
   }
   for (const area of districtAreas) {
     if (!districtById.has(area.districtId)) problem(`a district area names ${area.districtId}, which does not exist`);
-    // One connected area: every polygon can be reached from the first through shared boundaries.
-    const joined = new Set([0]);
-    const queue = [0];
-    for (let at = 0; at < queue.length; at++) {
-      area.polygons.forEach((polygon, other) => {
-        if (joined.has(other)) return;
-        const current = area.polygons[queue[at] as number] as Point[];
-        if (sharedBoundaryLength(current, polygon) > EPSILON || polygonsOverlap(current, polygon)) {
-          joined.add(other);
-          queue.push(other);
-        }
-      });
+    // One connected piece on each bank: polygons that share a boundary are one piece, and pieces are joined only
+    // by a bridge link of the district's own, between the piece nearest each end of the bridge.
+    const piece = area.polygons.map((_, at) => at);
+    const find = (at: number): number => (piece[at] === at ? at : (piece[at] = find(piece[at] as number)));
+    area.polygons.forEach((polygon, at) => {
+      for (let other = at + 1; other < area.polygons.length; other++) {
+        if (find(other) === find(at)) continue;
+        const next = area.polygons[other] as Point[];
+        if (sharedBoundaryLength(polygon, next) > EPSILON || polygonsOverlap(polygon, next)) piece[find(other)] = find(at);
+      }
+    });
+    if (new Set(piece.map((_, at) => find(at))).size > 1) {
+      // The piece nearest a bridge's end on that end's own bank: a link may reach past a landmark's block to the
+      // next block along the road.
+      const nearest = (point: Point) => {
+        let best = 0;
+        let least = Infinity;
+        area.polygons.forEach((polygon, at) => {
+          const inside = pointInPolygon(point, polygon);
+          const near = inside ? point : projectOnPolyline([...polygon, polygon[0] as Point], point).point;
+          if (!inside && rivers.some((river) => crossingsOfPolyline(point, near, river.centreLine) > 0)) return;
+          const away = inside ? 0 : distance(point, near);
+          if (away < least) {
+            least = away;
+            best = at;
+          }
+        });
+        return best;
+      };
+      for (const link of bridgeLinks) {
+        if (link.from !== area.districtId || link.to !== area.districtId) continue;
+        const bridge = segmentById.get(link.segmentId);
+        if (!bridge) continue;
+        piece[find(nearest(bridge.points[0] as Point))] = find(nearest(bridge.points[bridge.points.length - 1] as Point));
+      }
     }
-    if (joined.size !== area.polygons.length) {
-      problem(`the area of ${area.districtId} is in ${area.polygons.length - joined.size + 1} or more separate pieces`);
+    const pieces = new Set(piece.map((_, at) => find(at))).size;
+    if (pieces > 1) problem(`the area of ${area.districtId} is in ${pieces} pieces that no bridge link joins`);
+    // No ground is drawn across water.
+    for (const river of rivers) {
+      if (area.polygons.some((polygon) => polygon.some((point, at) => crossingsOfPolyline(point, polygon[(at + 1) % polygon.length] as Point, river.centreLine) > 0))) {
+        problem(`the area of ${area.districtId} is drawn across ${river.id}`);
+      }
     }
     if (!area.polygons.some((polygon) => pointInPolygon(area.labelPoint, polygon))) {
       problem(`the label point of ${area.districtId} is outside its area`);

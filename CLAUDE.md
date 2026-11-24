@@ -187,10 +187,12 @@ centre, x east and y south; bearings are degrees clockwise from north.
   entrance point on its segment. Lots do not connect to each other directly.
 - **The brief's bearings are facts.** Exits and water honour them, within
   `BEARING_TOLERANCE` as seen from the centre.
-- **District ground** is one or more polygons that touch each other, one
-  connected piece for each district, and no two districts' overlap. At least
-  97% of a district's lots lie inside its own ground; a lot outside lies
-  inside a district whose ground touches its own. A lot on the very
+- **District ground** is one or more polygons: one connected piece for each
+  district on each bank, the pieces on different banks joined by a bridge
+  link (`bridgeLinks`), and none drawn across water. No two districts'
+  overlap. At least 97% of a district's lots, or all but 2 where that
+  allows more, lie inside its own ground; a lot outside lies inside a
+  district whose ground touches its own or is joined to it by a bridge link. A lot on the very
   edge of ground, sharing a wall with another district's house, is inside.
 - **Footprints** are the outlines of a lot's buildings: they lie inside the
   lot and do not overlap each other, and the rest of the lot is open ground.

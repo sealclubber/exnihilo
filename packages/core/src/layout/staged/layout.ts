@@ -8,18 +8,21 @@ import type { City } from '../../city/records.ts';
 import type { SettingPack } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { interiorPoint } from '../cutting.ts';
-import { boxOf, distance, distancePolygonToPolyline, pointInPolygon, polylineLength, slicePolyline, polygonsOverlap, sharedBoundaryLength, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
+import { boxOf, distance, distancePolygonToPolyline, pointAlongPolyline, pointInPolygon, polylineLength, slicePolyline, polygonsOverlap, sharedBoundaryLength, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
 import { checkLayout } from '../invariants.ts';
 import { ringShare } from '../measure.ts';
-import { type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
+import { type BridgeLink, type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
 import { builtInChecks } from './checks.ts';
 import { type NetEdge, type NetNode, buildNetwork } from './network.ts';
 import { StagedLayoutError, type TownPlan, planTown, stagedSettings, townInput } from './plan.ts';
 import { cornersOf } from './rects.ts';
 import { grown, shared, united, widened, without } from './shapes.ts';
-import { HAIR, bridgeLinks, plainly, touching } from './tiles.ts';
+import { HAIR, plainly, touching } from './tiles.ts';
 
 export const STAGED_GENERATOR = 'staged';
+
+/** How finely a strip's line is tested against other districts' ground, in metres. */
+const STRIP_STEP = 1;
 
 /** A reservation a person made, for the editor to come: a ward, a block or a slot, given a building or a footprint, at a place. */
 export interface Pin {
@@ -406,7 +409,28 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
   const places: Layout['places'] = plan.plaza && square ? [{ id: `place-${number}-001`, kind: 'plaza', polygon: plan.plaza.polygon, buildingId: square.building }] : [];
 
   // ---- Districts: the ground about each one's blocks ----------------------------------------------------------------------
-  const districtAreas = districtGround(plan, city, lots);
+  const { areas: districtAreas, joins } = districtGround(plan, city, lots);
+  // Each join is written with the bridge's segment, and the district at each of the segment's ends.
+  const bridgeLinks: BridgeLink[] = [];
+  for (const join of joins) {
+    const bridge = plan.bridges[join.bridge] as TownPlan['bridges'][number];
+    const middle: Point = [(bridge.a[0] + bridge.b[0]) / 2, (bridge.a[1] + bridge.b[1]) / 2];
+    let over: Segment | undefined;
+    let least = Infinity;
+    for (const segment of segments) {
+      if (segment.kind !== 'bridge') continue;
+      const away = projectOnPolyline(segment.points, middle).distance;
+      if (away < least) {
+        least = away;
+        over = segment;
+      }
+    }
+    if (!over) continue;
+    const forward = distance(over.points[0] as Point, bridge.a) <= distance(over.points[0] as Point, bridge.b);
+    const link: BridgeLink = { segmentId: over.id, from: forward ? join.a : join.b, to: forward ? join.b : join.a };
+    if (!bridgeLinks.some((other) => other.segmentId === link.segmentId && other.from === link.from && other.to === link.to)) bridgeLinks.push(link);
+  }
+  bridgeLinks.sort((a, b) => (a.segmentId < b.segmentId ? -1 : a.segmentId > b.segmentId ? 1 : a.from < b.from ? -1 : a.from > b.from ? 1 : a.to < b.to ? -1 : 1));
 
   const waters: Layout['waters'] = [];
   if (plan.river) waters.push({ id: `water-${number}-${pad(waters.length + 1, 3)}`, kind: 'river', centreLine: plan.river.line, width: plan.river.width });
@@ -421,6 +445,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     waters,
     lots,
     districtAreas,
+    ...(bridgeLinks.length > 0 && { bridgeLinks }),
     walls,
     places,
     blocks: plan.blocks.flatMap((block, at) => (builtBlocks.has(at) ? [{ id: `block-${number}-${pad(at + 1, 6)}`, polygon: block.polygon, ...(districtIdOf(plan.selection.blockDistrict[at]) !== undefined && { districtId: districtIdOf(plan.selection.blockDistrict[at]) as string }), growthRank: Math.min((plan.wards[block.ward] as TownPlan['wards'][number]).growthRank / most, 1) }] : [])),
@@ -477,12 +502,14 @@ function pointAt(line: readonly Point[], along: number): Point {
  * a finger's breadth apart, so that no ground is counted twice. A district on both banks is joined across each
  * bridge whose two ends are its own.
  */
-function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): DistrictArea[] {
+function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): { areas: DistrictArea[]; joins: Array<{ bridge: number; a: string; b: string }> } {
   const districtOfBuilding = new Map(lots.map((lot) => [lot.buildingId, lot.districtId]));
   const blocks = plan.blocks.length;
   const specials = plan.wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind !== 'ordinary');
   // Whose ground each tile is: the district most of its lots belong to. A house or two at a border may belong to
   // a neighbour; they stand in this district's ground all the same.
+  /** A ring without what of it is narrower than a hair. */
+  const unhaired = (ring: Point[]) => grown(grown([ring], -HAIR / 2).rings, HAIR / 2).rings.filter((piece) => polygonArea(piece) > 0.5);
   // The tiles, and after them the parts cut from tiles that two districts share; a part knows the tile it was cut from.
   const tiles: Point[][][] = plan.tiles.map((rings) => rings);
   const parent: number[] = tiles.map((_, tile) => tile);
@@ -535,10 +562,11 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
         if (cell && cell.length > 3) near.push(cell.slice(0, -1).map(([x, y]): Point => [x, y]));
       });
       const ground = without(united([...shared(rest, near).rings, ...own]).rings, others);
-      const part = plainly(ground.rings, ground.holes).filter((ring) => polygonArea(ring) > 0.5);
+      // Without hairs, as the tiles are, so that which tiles meet is the same here as when the ground is drawn.
+      const part = plainly(ground.rings, ground.holes).filter((ring) => polygonArea(ring) > 0.5).flatMap(unhaired);
       if (part.length === 0) continue;
       const left = without(rest, part);
-      const kept = plainly(left.rings, left.holes).filter((ring) => polygonArea(ring) > 0.5);
+      const kept = plainly(left.rings, left.holes).filter((ring) => polygonArea(ring) > 0.5).flatMap(unhaired);
       if (kept.length === 0) continue;
       rest = kept;
       map.delete(district);
@@ -598,7 +626,8 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
   for (let part = plan.tiles.length; part < tiles.length; part++) {
     if (!(beside[part] as number[]).some((next) => next < plan.tiles.length && owner[next] === owner[part])) owner[part] = owner[parent[part] as number];
   }
-  const links = bridgeLinks(plan.tiles, plan.bridges);
+  // The bridge links the town's houses were chosen by. A link with no bridge, added below, is a strip of ground.
+  const links: Array<{ a: number; b: number; line: Point[]; bridge?: number }> = plan.links.map((link) => ({ ...link }));
   for (const link of links) {
     (beside[link.a] as number[]).push(link.b);
     (beside[link.b] as number[]).push(link.a);
@@ -682,6 +711,8 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
     let least = Infinity;
     tiles.forEach((rings, other) => {
       if (other === tile || owner[other] !== district || rings.length === 0) return;
+      // Never across the water: no ground is drawn there.
+      if (plan.river?.crossed(from, polygonCentroid(rings[0] as Point[]))) return;
       const away = distance(from, polygonCentroid(rings[0] as Point[]));
       if (away < least) {
         least = away;
@@ -693,16 +724,30 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
     (beside[best] as number[]).push(tile);
     links.push({ a: tile, b: best, line: [from, polygonCentroid((tiles[best] as Point[][])[0] as Point[])] });
   }
-  // Dividing a tile may leave a hair of ground; like the tiles themselves, the parts are drawn without any.
-  const solid = tiles.map((rings, tile) => (rings.length === 0 || (tile < plan.tiles.length && (outlines[tile] as Point[][]).length === 0) ? rings : grown(grown(rings, -HAIR / 2).rings, HAIR / 2).rings));
+  const solid = tiles;
   const build = () => {
     const boxes = solid.map((rings) => (rings.length === 0 ? undefined : boxOf(rings.flat(), 0.2)));
     const near = new SpatialIndex<number>(60);
     boxes.forEach((box, at) => box && owner[at] !== undefined && near.add(box, at));
-    // Across each bridge whose two ends are one district's: a strip of ground that is the district's.
+    // From a landmark's ground that stands apart to its district's: a strip of ground that is the district's. No
+    // ground is drawn across a bridge: the two banks are joined by the link alone.
     const strips: Array<{ ring: Point[]; district: string; box: ReturnType<typeof boxOf> }> = [];
-    for (const { a, b, line } of links) {
-      if (owner[a] === undefined || owner[a] !== owner[b]) continue;
+    for (const { a, b, line, bridge } of links) {
+      if (bridge !== undefined || owner[a] === undefined || owner[a] !== owner[b]) continue;
+      // Nor across another district's ground, which it would cut in two: the landmark's ground then stands apart.
+      const length = polylineLength(line);
+      let across = false;
+      for (let along = 0; along <= length && !across; along += STRIP_STEP) {
+        const point = pointAlongPolyline(line, along);
+        for (const other of near.near(boxOf([point], 0))) {
+          if (owner[other] === owner[a] || other === a || other === b) continue;
+          if ((solid[other] as Point[][]).some((ring) => pointInPolygon(point, ring))) {
+            across = true;
+            break;
+          }
+        }
+      }
+      if (across) continue;
       for (const ring of widened([line], 2)) strips.push({ ring, district: owner[a] as string, box: boxOf(ring, 0.2) });
     }
     const meets = (a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>) => a.minX <= b.maxX && b.minX <= a.maxX && a.minY <= b.maxY && b.minY <= a.maxY;
@@ -760,6 +805,12 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
           if (item.rings.some((one) => (items[other] as (typeof items)[number]).rings.some((two) => polygonsOverlap(one, two) || sharedBoundaryLength(one, two) > 1e-6))) group[find(other)] = find(at);
         }
       });
+      // The pieces on two banks are one where a bridge link of the district's own joins them.
+      for (const link of links) {
+        if (link.bridge === undefined || owner[link.a] !== district.id || owner[link.b] !== district.id) continue;
+        const [one, other] = [items.findIndex((item) => item.tile === link.a), items.findIndex((item) => item.tile === link.b)];
+        if (one >= 0 && other >= 0) group[find(other)] = find(one);
+      }
       const size = new Map<number, number>();
       items.forEach((item, at) => size.set(find(at), (size.get(find(at)) ?? 0) + item.rings.reduce((sum, ring) => sum + polygonArea(ring), 0)));
       const main = [...size].sort(([a, one], [b, other]) => other - one || a - b)[0]?.[0];
@@ -783,30 +834,39 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): Distr
     }
     built = build();
   }
-  const pieces = built.pieces;
   const areas: DistrictArea[] = [];
   for (const district of city.districts) {
-    const every = pieces.get(district.id) ?? [];
+    const every: Array<{ tile: number; polygon: Point[] }> = [];
+    for (const [tile, rings] of built.byTile) if (owner[tile] === district.id) for (const polygon of rings) every.push({ tile, polygon });
+    for (const strip of built.across) if (strip.district === district.id) for (const polygon of strip.rings) every.push({ tile: -1, polygon });
     if (every.length === 0) continue;
-    // Only what joins on: a length of strip left hanging where another district's block cut it is no one's ground.
-    const boxed = every.map((polygon) => boxOf(polygon, 0.1));
+    // Only what joins on, by a shared edge or by a bridge link: a length of strip left hanging where another
+    // district's block cut it is no one's ground.
+    const boxed = every.map(({ polygon }) => boxOf(polygon, 0.1));
     const group = every.map((_, at) => at);
     const find = (at: number): number => (group[at] === at ? at : (group[at] = find(group[at] as number)));
     const index = new SpatialIndex<number>(60);
     boxed.forEach((box, at) => index.add(box, at));
-    every.forEach((polygon, at) => {
+    every.forEach(({ polygon }, at) => {
       for (const other of index.near(boxed[at] as ReturnType<typeof boxOf>)) {
         if (other <= at || find(other) === find(at)) continue;
-        if (polygonsOverlap(polygon, every[other] as Point[]) || sharedBoundaryLength(polygon, every[other] as Point[]) > 1e-6) group[find(other)] = find(at);
+        const next = (every[other] as (typeof every)[number]).polygon;
+        if (polygonsOverlap(polygon, next) || sharedBoundaryLength(polygon, next) > 1e-6) group[find(other)] = find(at);
       }
     });
+    for (const link of links) {
+      if (link.bridge === undefined || owner[link.a] !== district.id || owner[link.b] !== district.id) continue;
+      const [one, other] = [every.findIndex((item) => item.tile === link.a), every.findIndex((item) => item.tile === link.b)];
+      if (one >= 0 && other >= 0) group[find(other)] = find(one);
+    }
     const size = new Map<number, number>();
-    every.forEach((polygon, at) => size.set(find(at), (size.get(find(at)) ?? 0) + polygonArea(polygon)));
+    every.forEach(({ polygon }, at) => size.set(find(at), (size.get(find(at)) ?? 0) + polygonArea(polygon)));
     const main = [...size].sort(([a, one], [b, other]) => other - one || a - b)[0]?.[0];
-    const polygons = every.filter((_, at) => find(at) === main);
+    const polygons = every.filter((_, at) => find(at) === main).map(({ polygon }) => polygon);
     const largest = polygons.reduce((best, polygon) => (polygonArea(polygon) > polygonArea(best) ? polygon : best));
     const middle = polygonCentroid(largest);
     areas.push({ districtId: district.id, polygons, labelPoint: pointInPolygon(middle, largest) ? middle : interiorPoint(largest) });
   }
-  return areas;
+  const joins = links.flatMap((link) => (link.bridge === undefined || owner[link.a] === undefined || owner[link.b] === undefined ? [] : [{ bridge: link.bridge, a: owner[link.a] as string, b: owner[link.b] as string }]));
+  return { areas, joins };
 }

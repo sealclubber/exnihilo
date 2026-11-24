@@ -10,7 +10,6 @@ import { smallestRectangle } from '../src/layout/cutting.ts';
 import { distanceBetweenPolygons, distanceToPiece, distanceToPolygonEdge, pointInPolygon, polygonArea, polygonCentroid } from '../src/layout/geometry.ts';
 import type { LandmarkBuilding } from '../src/layout/staged/landmarks.ts';
 import { wardKey } from '../src/layout/staged/blocks.ts';
-import { bridgeLinks } from '../src/layout/staged/tiles.ts';
 import { builtInChecks } from '../src/layout/staged/checks.ts';
 import { StagedLayoutError, type TownInput, type TownPlan, landmarksOf, planTown, stagedSettings, townInput } from '../src/layout/staged/plan.ts';
 import { outlineOf, rectInside, standingOf, standingOverlap, widenedRect } from '../src/layout/staged/rects.ts';
@@ -350,7 +349,7 @@ describe('exact counts', () => {
     for (const { plan } of everyPlan()) {
       const count = plan.blocks.length;
       const beside = plan.blocks.map((_, index) => (plan.tilesBeside[index] as number[]).filter((other) => other < count));
-      for (const link of bridgeLinks(plan.tiles, plan.bridges)) {
+      for (const link of plan.links) {
         if (link.a >= count || link.b >= count) continue;
         (beside[link.a] as number[]).push(link.b);
         (beside[link.b] as number[]).push(link.a);
@@ -382,6 +381,22 @@ describe('exact counts', () => {
     }
     console.log(`Kept houses in a block apart from the body of its district: ${apart} of ${kept}`);
     expect(apart / kept).toBeLessThan(0.01);
+  });
+
+  it('joins the banks by links that pass a landmark\u2019s block for the next block along the road', () => {
+    let links = 0;
+    let onLandmarks = 0;
+    for (const { plan } of everyPlan()) {
+      const fixed = new Set(plan.landmarks.flatMap((landmark) => (landmark.block !== undefined && landmark.district !== undefined ? [landmark.block] : [])));
+      for (const link of plan.links) {
+        links++;
+        if ([link.a, link.b].some((tile) => tile >= plan.blocks.length || fixed.has(tile))) onLandmarks++;
+      }
+    }
+    expect(links).toBeGreaterThan(100);
+    expect(onLandmarks / links).toBeLessThan(0.02);
+    // Montica's one bridge ends at a landmark's block: its banks trade all the same.
+    expect(named('Montica').plan.selection.fallback).toBe(0);
   });
 
   it('falls back on a district that does not touch only in a few settlements, and counts the houses', () => {
@@ -460,7 +475,9 @@ describe('districts', () => {
   it('the first district starts at the heart of the town, and a harbour district by the water', () => {
     for (const name of ['Badanos', 'Pombal', 'Cevilefon', 'Tames', 'Karlen']) {
       const { plan } = named(name);
-      const first = plan.wards[plan.districtPlan.seeds[0] as number] as TownPlan['wards'][number];
+      // The district that owns the plaza starts beside it; where there is no plaza, the first district at the heart.
+      const square = plan.landmarks.find((landmark) => landmark.reservation === 'ward' && plan.wards[landmark.ward]?.kind === 'plaza');
+      const first = plan.wards[plan.districtPlan.seeds[square?.district ?? 0] as number] as TownPlan['wards'][number];
       expect(first.growthRank, name).toBeLessThan(quantile(plan.wards.map((ward) => ward.growthRank), 0.2));
     }
     const { plan } = named('Cevilefon');

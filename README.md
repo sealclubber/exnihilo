@@ -554,9 +554,12 @@ and each stage draws on streams named `staged-…`. The stages:
     and a half times as many houses are made as the town has buildings.
 11. **Districts** (`staged/districts.ts`), which in the order of work come
     before blocks. The city's districts are grown over the wards: each
-    starts at a seed ward chosen by its kind's placement (a waterside one
-    first, at the ward whose ground comes nearest the quay; then the first
-    at the heart of the town and the rest spread through their band of it) and takes neighbouring wards, nearest and
+    starts at a seed ward chosen by its kind's placement (first the
+    district that owns the plaza, at the ward nearest it, so that the plaza
+    stands in its own district; then a waterside one, at the ward whose
+    ground comes nearest the quay; then, where there is no plaza, the first
+    at the heart of the town; and the rest spread through their band of
+    it) and takes neighbouring wards, nearest and
     innermost first; ground is ranked as it is when the town's houses are
     chosen, inside the wall before outside it, so that a district is not
     given ground whose houses the town will not keep. Crossing a highway, a main street, the wall or the
@@ -576,7 +579,7 @@ and each stage draws on streams named `staged-…`. The stages:
     body is the largest piece of its blocks that touch; a block apart from
     it, but for a landmark's own, first goes to the district whose body it
     touches. A block then changes district only where its ground touches
-    the taker's body (or stands across a bridge from it), and never where
+    the taker's body (or a bridge link joins the two), and never where
     its loss would part the district that gives it; a district that is
     short first takes the unbuilt blocks between it and the nearest houses,
     and is then supplied from the nearest district with houses to spare
@@ -586,8 +589,8 @@ and each stage draws on streams named `staged-…`. The stages:
     between, taking first a block that frees one of its own at the border
     beyond, or one that lies behind that border, and the chain is tried
     again with the district thicker. What blocks cannot settle is settled
-    the same way by single houses: the house of a border block nearest the
-    neighbour's ground, first only from a block that could go itself,
+    the same way by single houses, which cross a bridge link as blocks do:
+    the house of a border block nearest the neighbour's ground, first only from a block that could go itself,
     since a block that has given houses no longer holds its district
     together, and then, for a district still short, from any border block
     so long as most of its houses stay its district's.
@@ -634,21 +637,33 @@ and each stage draws on streams named `staged-…`. The stages:
     - *District ground.* Every block has a tile of the ground about it, cut
       from one partition of the town. A tile is the ground of the district
       most of its lots belong to; a district's tiles in one piece are its
-      ground, joined across a bridge where both ends are its own. A tile
+      ground. Nothing is drawn across the water: where both ends of a
+      bridge link are one district's, its pieces on the two banks are one
+      ground. A link joins the tiles nearest the bridge's ends, passing a
+      landmark's block, the plaza or the castle for the next block along
+      the road (`staged/tiles.ts`, `bridgeLinks`). A tile
       whose houses belong to two districts is divided: the ground nearest
       the lesser district's houses, with the houses themselves, is a part
       of its own, and goes back to the tile if it touches none of its
       district's ground. A tile is not divided where that would leave it
       in pieces or part it from a neighbour of its own district. Tiles are kept without hairs of ground (narrower
       than 12 cm), which would make neighbours of tiles that do not really
-      meet.
+      meet; so are the parts of a divided tile, as they are cut. A
+      landmark's ground that touches none of its district's, as a castle's
+      may, is joined to the nearest of it by a strip 2 m wide, but never
+      across the water or across another district's ground, which the strip
+      would cut in two.
 
     Layout format version 10 adds wards, a lot's `front`, `atQuay` on an
     exit, and a gate's building as optional. The rule for district ground
-    is now: each district's ground is one connected piece and grounds do not
-    overlap; at least 97% of a district's lots lie inside its own ground;
-    and a lot outside it lies inside a district whose ground touches its
-    own. A lot whose outline runs along the ground's edge, as a house's
+    is now: each district's ground is one connected piece on each bank,
+    the pieces on different banks joined by a bridge link, and no ground is
+    drawn across water; grounds do not overlap; at least 97% of a
+    district's lots, or all but 2 where that allows more, lie inside its
+    own ground; and a lot outside it lies inside a district whose ground
+    touches its own or is joined to it by a bridge link. A layout's
+    `bridgeLinks` name each such bridge and the district whose ground it
+    reaches at each end. A lot whose outline runs along the ground's edge, as a house's
     does where the neighbour through its wall is another district's, is
     inside: it is tested drawn in by 2 cm.
 

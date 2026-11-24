@@ -163,7 +163,10 @@ export type Lot = z.infer<typeof LotSchema>;
 
 export const DistrictAreaSchema = z.strictObject({
   districtId: DistrictIdSchema,
-  /** One or more polygons that touch each other and together enclose the district's lots. */
+  /**
+   * One or more polygons that together enclose the district's lots. They touch each other in one piece, or in one
+   * piece on each bank where a bridge link joins the pieces: no ground is drawn across water.
+   */
   polygons: z.array(polygon).min(1),
   labelPoint: PointSchema,
 });
@@ -229,6 +232,19 @@ export const LayoutSummarySchema = z.strictObject({
 });
 export type LayoutSummary = z.infer<typeof LayoutSummarySchema>;
 
+/**
+ * A bridge link: a bridge that joins the ground of the district at one of its ends to the ground of the district
+ * at the other, which may be the same district. Ground so joined counts as touching.
+ */
+export const BridgeLinkSchema = z.strictObject({
+  /** The bridge: a segment of that kind. */
+  segmentId: SegmentIdSchema,
+  /** The district whose ground the bridge reaches at each end: `from` nearer the segment's start, `to` its end. */
+  from: DistrictIdSchema,
+  to: DistrictIdSchema,
+});
+export type BridgeLink = z.infer<typeof BridgeLinkSchema>;
+
 export const LayoutSchema = z.strictObject({
   junctions: z.array(JunctionSchema),
   segments: z.array(SegmentSchema),
@@ -243,6 +259,8 @@ export const LayoutSchema = z.strictObject({
   blocks: z.array(BlockSchema).optional(),
   /** The wards of a generator that has them; the grid has none. */
   wards: z.array(WardSchema).optional(),
+  /** Where a bridge joins ground on one bank to ground on the other: the grid has none. */
+  bridgeLinks: z.array(BridgeLinkSchema).optional(),
   summary: LayoutSummarySchema,
 });
 export type Layout = z.infer<typeof LayoutSchema>;
