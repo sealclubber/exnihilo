@@ -242,7 +242,14 @@ centre, x east and y south; bearings are degrees clockwise from north.
   writes the plan (`staged/plan.ts`) in the layout format when asked for by
   name (`generator: 'staged'`). The pack names the grid until the staged
   generator keeps every invariant in every settlement. `check: false`
-  returns a layout unchecked, for measuring what a town breaks.
+  returns a layout unchecked, for measuring what a town breaks; the API's
+  `?generator=staged` and the render command use it, to compare.
+- **Its own checks run on every town** (`staged/checks.ts`): overlap,
+  houses outside their block or in a passage, clipped landmarks, wards
+  without blocks. A count above zero fails the layout.
+- **Pins first.** A block pin reserves its block before any rule chooses;
+  no pins and an empty list give the same bytes. `redraw` draws named
+  wards afresh and must change no other ward's houses.
 - **The prototype is a sketch to port, not code to keep.** Where
   `docs/prototypes/proto_wards9.py` and `sim-6e.md` disagree, the document
   wins; where the brief's facts and either disagree, report it.

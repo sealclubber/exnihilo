@@ -64,6 +64,8 @@ export interface LayoutOptions {
   arrange?: boolean;
   /** Reservations people made, for the staged generator. An empty list and no list give the same town. */
   pins?: readonly import('./staged/layout.ts').Pin[];
+  /** false returns the staged generator's layout without checking it against the invariants: for comparing and measuring. The grid always checks its own. */
+  check?: boolean;
 }
 
 /** How many blocks a district may grow to find a street that has none of a spread civic type yet. */

@@ -11,6 +11,7 @@ import {
   type AvatarState,
   AvatarError,
   GRID_GENERATOR,
+  STAGED_GENERATOR,
   generateLayout,
   leaveBuilding,
   perceive,
@@ -87,7 +88,7 @@ export interface AppOptions {
 }
 
 /** The layout generators a request may name. */
-const LAYOUT_GENERATORS = [GRID_GENERATOR] as const;
+const LAYOUT_GENERATORS = [GRID_GENERATOR, STAGED_GENERATOR] as const;
 
 /** The longest window of game time one request for trips may cover. */
 export const MAX_TRIP_WINDOW = 2 * 86_400;
@@ -296,7 +297,9 @@ export function buildApp(world: World, report: ImportReport, pack: SettingPack, 
     const wanted = LAYOUT_GENERATORS.find((name) => name === generator);
     if (wanted === undefined) return send(reply, 400, `generator must be one of ${LAYOUT_GENERATORS.join(', ')}; "${String(generator)}" is not`);
     const view = cities.get(brief);
-    return reply.send(view.layout.summary.generator === wanted ? view.layout : generateLayout(view.city, brief, pack, { generator: wanted }));
+    // A layout made for comparing is sent unchecked: the staged generator does not yet keep every rule about
+    // district ground in every town, and the town is worth seeing all the same. Nobody walks it.
+    return reply.send(view.layout.summary.generator === wanted ? view.layout : generateLayout(view.city, brief, pack, { generator: wanted, check: false }));
   });
   app.get<{ Params: { id: string }; Querystring: Query }>('/api/settlements/:id/layout/path', (request, reply) => {
     const brief = briefs.get(request.params.id);

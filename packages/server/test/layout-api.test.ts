@@ -36,13 +36,17 @@ describe('GET /api/settlements/:id/layout', () => {
 
   it('serves the layout a named generator makes of the same town', async () => {
     const city = generateCity(brief, medievalPack());
-    for (const generator of ['grid'] as const) {
+    for (const generator of ['grid', 'staged'] as const) {
       const { status, body } = await get<Layout>(`${LAYOUT}?generator=${generator}`);
       expect(status, generator).toBe(200);
       expect(body.summary.generator).toBe(generator);
-      expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(generateLayout(city, brief, medievalPack(), { generator }))));
+      expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(generateLayout(city, brief, medievalPack(), { generator, check: false }))));
     }
     // The grid has no walls or open places, and asking for it changes nothing about the layout served without the query.
+    // The staged town has its river's bridges, and every building a lot.
+    const staged = (await get<Layout>(`${LAYOUT}?generator=staged`)).body;
+    expect(staged.lots).toHaveLength(1825);
+    expect(staged.wards?.length ?? 0).toBeGreaterThan(0);
     const grid = (await get<Layout>(`${LAYOUT}?generator=grid`)).body;
     expect(grid.summary.counts).toMatchObject({ walls: 0, gates: 0, places: 0 });
     expect((await get<Layout>(LAYOUT)).body).toEqual(JSON.parse(JSON.stringify(expected)));
@@ -52,7 +56,7 @@ describe('GET /api/settlements/:id/layout', () => {
     for (const query of ['?generator=rings', '?generator=', '?generator=grid&generator=rings', '?generator=grown']) {
       const { status, body } = await get<{ error: string }>(`${LAYOUT}${query}`);
       expect(status, query).toBe(400);
-      expect(body.error).toMatch(/^generator must be one of grid;/);
+      expect(body.error).toMatch(/^generator must be one of grid, staged;/);
     }
     expect((await get<{ error: string }>('/api/settlements/settlement-9999/layout?generator=grid')).status).toBe(404);
   });

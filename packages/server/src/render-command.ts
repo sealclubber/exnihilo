@@ -31,7 +31,7 @@ export function renderSettlement(request: RenderRequest): { svg: string; generat
   if (!brief) throw new Error(`no settlement has the ID "${request.settlementId}"; IDs look like settlement-641`);
   // The seed, where one is given, is for the layout alone: the city is the one the settlement has.
   const city = generateCity(brief, pack);
-  const layout = generateLayout(city, brief, pack, { ...(request.generator && { generator: request.generator }), ...(request.seed !== undefined && { seed: request.seed }) });
+  const layout = generateLayout(city, brief, pack, { ...(request.generator && { generator: request.generator, check: false }), ...(request.seed !== undefined && { seed: request.seed }) });
   const svg = renderLayoutSvg(layout, { brief, districtNames: Object.fromEntries(city.districts.map((district) => [district.id, district.name])) });
   if (request.outPath !== undefined) {
     mkdirSync(dirname(request.outPath), { recursive: true });

@@ -12,7 +12,7 @@ import type { Rng } from '../../city/random.ts';
 import type { StagedSettings } from '../../pack/schema.ts';
 import type { Point } from '../../schema.ts';
 import { smallestRectangle } from '../cutting.ts';
-import { distance, distanceBetweenPolygons, distanceToPolyline, polygonArea, polygonCentroid } from '../geometry.ts';
+import { distance, distanceBetweenPolygons, distanceToPolyline, pointInPolygon, polygonArea, polygonCentroid } from '../geometry.ts';
 import { LineIndex } from '../lines.ts';
 import type { Block } from './blocks.ts';
 import { type Rect, outlineOf, rectInside, widenedRect } from './rects.ts';
@@ -53,6 +53,8 @@ export interface LandmarkInput {
   /** Where a `harbour` landmark looks: the quay, if there is one. */
   quay?: readonly Point[];
   /** The wards a landmark may stand in, where districts say: left out, the inner wards of the town. */
+  /** Reservations a person made: a block pin gives the block at its place to a landmark of its type, before any rule chooses. */
+  pins?: ReadonlyArray<{ reservation: 'ward' | 'block' | 'slot'; at: Point; buildingType?: string }>;
   wardsOf?: (landmark: LandmarkBuilding) => ReadonlySet<number> | undefined;
   /** Whether a block is far enough in for a landmark: left out, any block of an allowed ward. */
   blockOk?: (landmark: LandmarkBuilding, block: number) => boolean;
@@ -86,7 +88,7 @@ function fitted(template: Template, middle: Point, along: Point, long: number, n
   return { parts, outline: corners.map(([x, y]) => set(x, y)) };
 }
 
-export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, wardsOf, blockOk }: LandmarkInput): { placed: PlacedLandmark[]; unplaced: LandmarkBuilding[] } {
+export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, pins = [], wardsOf, blockOk }: LandmarkInput): { placed: PlacedLandmark[]; unplaced: LandmarkBuilding[] } {
   const { types, templates, block: rules } = settings.landmarks;
   const placed: PlacedLandmark[] = [];
   const unplaced: LandmarkBuilding[] = [];
@@ -135,7 +137,26 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
   for (const road of roads) lines.add(road);
   // Those that want the plaza choose first, then the harbour, then the rest; within each, in the city's order.
   const order = { plaza: 0, harbour: 1, road: 2 } as const;
+  // Pins first: the rules fill in around them.
+  const pinned = new Set<string>();
+  for (const pin of pins) {
+    if (pin.reservation !== 'block' || pin.buildingType === undefined) continue;
+    const index = blocks.findIndex((block, at) => !reserved.has(at) && pointInPolygon(pin.at, block.polygon));
+    const landmark = landmarks.find((entry) => entry.type === pin.buildingType && !pinned.has(entry.id) && types[entry.type]?.reservation === 'block');
+    const template = landmark && templates[types[landmark.type]?.template as string];
+    if (index < 0 || !landmark || !template) continue;
+    const shape = shapes[index] as { long: number; narrow: number; along: Point; middle: Point };
+    const outline = outlineOf((blocks[index] as Block).polygon);
+    let found: Fitted | undefined;
+    for (const scale of rules.scales) if ((found = fitted(template, shape.middle, shape.along, shape.long, shape.narrow, scale, rules.margin, outline) ?? fitted(template, polygonCentroid((blocks[index] as Block).polygon), shape.along, shape.long, shape.narrow, scale, rules.margin, outline))) break;
+    if (!found) continue;
+    reserved.add(index);
+    holds.set(index, landmark.district);
+    pinned.add(landmark.id);
+    placed.push({ building: landmark.id, type: landmark.type, ...(landmark.district !== undefined && { district: landmark.district }), reservation: 'block', ward: (blocks[index] as Block).ward, block: index, parts: found.parts, outline: found.outline, area: polygonArea(found.outline) });
+  }
   const wanting = landmarks
+    .filter((landmark) => !pinned.has(landmark.id))
     .filter((landmark) => types[landmark.type]?.reservation === 'block')
     .map((landmark, at) => ({ landmark, at, place: types[landmark.type]?.place ?? 'road' }))
     .sort((a, b) => order[a.place] - order[b.place] || a.at - b.at);

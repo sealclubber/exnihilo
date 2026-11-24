@@ -837,14 +837,14 @@ describe('the town as laid out', () => {
     expect(errors).toEqual([]);
   });
 
-  // The grid has no walls or plazas. These two wait for the staged generator of phase 6E to be finished.
-  it.skip('says how many gates a walled town has and how large its plaza is, and draws them', async () => {
+  // The grid has no walls or plazas: the staged generator's town is looked at beside it, by name, until it is the pack's.
+  it('says how many gates a walled town has and how large its plaza is, and draws them, as the staged generator lays it out', async () => {
     for (const settlementId of [POMBAL, CEVILEFON, VERECELDO]) {
-      await open(main, settlementId);
-      const layout = await layoutOf(settlementId);
+      await openAs(settlementId, 'staged');
+      const layout = await layoutOf(settlementId, '?generator=staged');
       expect(layout.walls.length, settlementId).toBeGreaterThan(0);
       expect(layout.summary.counts.gates, settlementId).toBeGreaterThan(0);
-      expect(await fact('generator').innerText(), settlementId).toBe('grown');
+      expect(await fact('generator').innerText(), settlementId).toBe('staged');
       expect(await fact('gates').innerText(), settlementId).toBe(String(layout.summary.counts.gates));
       const plazas = layout.places.filter((place) => place.kind === 'plaza');
       if (plazas.length > 0) {
@@ -854,16 +854,16 @@ describe('the town as laid out', () => {
         expect(await fact('plaza').count(), settlementId).toBe(0);
       }
       expect((await drawn()).town, settlementId).toEqual({
-        generator: 'grown',
+        generator: 'staged',
         rivers: layout.waters.filter((water) => water.kind === 'river').length,
         walls: layout.walls.length,
         gates: layout.summary.counts.gates,
         places: layout.places.length,
-        living: true,
+        living: false,
       });
     }
     // Pombal and Cevilefon have a plaza each.
-    for (const settlementId of [POMBAL, CEVILEFON]) expect((await layoutOf(settlementId)).places.length, settlementId).toBeGreaterThan(0);
+    for (const settlementId of [POMBAL, CEVILEFON]) expect((await layoutOf(settlementId, '?generator=staged')).places.length, settlementId).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
 
@@ -915,13 +915,13 @@ describe('the town as laid out', () => {
     expect(errors).toEqual([]);
   });
 
-  it.skip('shows the grown layout when asked for by name, with the plaza a lot like any other under the cursor', async () => {
-    await openAs(POMBAL, 'grown');
-    expect(await fact('generator').innerText()).toBe('grown');
-    expect(await pane('summary').locator('.layout-note').innerText()).toMatch(/grown generator.*People are not shown/s);
-    const layout = await layoutOf(POMBAL);
+  it('shows the staged layout when asked for by name, with the plaza a lot like any other under the cursor', async () => {
+    await openAs(POMBAL, 'staged');
+    expect(await fact('generator').innerText()).toBe('staged');
+    expect(await pane('summary').locator('.layout-note').innerText()).toMatch(/staged generator.*People are not shown/s);
+    const layout = await layoutOf(POMBAL, '?generator=staged');
     const state = await drawn();
-    expect(state.town).toMatchObject({ generator: 'grown', walls: layout.walls.length, gates: layout.summary.counts.gates, places: layout.places.length, living: false });
+    expect(state.town).toMatchObject({ generator: 'staged', walls: layout.walls.length, gates: layout.summary.counts.gates, places: layout.places.length, living: false });
     expect(state.people).toEqual([]);
     // The plaza is no rectangle's worth of assumption: the lot found under a point inside its polygon is its own.
     const plaza = layout.places.find((place) => place.kind === 'plaza') as Extract<(typeof layout.places)[number], { kind: 'plaza' }>;
@@ -943,7 +943,7 @@ describe('the town as laid out', () => {
     // On a page of its own: the server's refusal is logged by the browser as a failed request.
     const other = await browser.newPage({ viewport: { width: 1400, height: 800 } });
     await other.goto(`${viewer}/?api=${encodeURIComponent(main.url)}&generator=rings#${BADANOS}/city`);
-    await other.waitForFunction(() => /generator must be one of grid;/.test(document.querySelector('#inspector .map-note')?.textContent ?? ''), null, { timeout: 90_000 });
+    await other.waitForFunction(() => /generator must be one of grid, staged;/.test(document.querySelector('#inspector .map-note')?.textContent ?? ''), null, { timeout: 90_000 });
     expect(await fact('generator', other).count()).toBe(0);
     await other.close();
   });

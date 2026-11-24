@@ -1,12 +1,12 @@
 /**
- * Usage: npm run render -- <settlement-id> [--generator grid] [--seed <number>] [--out <file.svg>] [--db <world.sqlite>] [--pack <folder>]
+ * Usage: npm run render -- <settlement-id> [--generator grid|staged] [--seed <number>] [--out <file.svg>] [--db <world.sqlite>] [--pack <folder>]
  */
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { packPathFromEnv, storePathFromEnv } from './config.ts';
 import { renderSettlement } from './render-command.ts';
 
-const USAGE = 'Usage: npm run render -- <settlement-id> [--generator grid] [--seed <number>] [--out <file.svg>] [--db <world.sqlite>] [--pack <folder>]';
+const USAGE = 'Usage: npm run render -- <settlement-id> [--generator grid|staged] [--seed <number>] [--out <file.svg>] [--db <world.sqlite>] [--pack <folder>]';
 
 function main(): number {
   let args;
@@ -29,8 +29,8 @@ function main(): number {
     return 2;
   }
   const { generator } = args.values;
-  if (generator !== undefined && generator !== 'grid') {
-    console.error('--generator must be grid');
+  if (generator !== undefined && generator !== 'grid' && generator !== 'staged') {
+    console.error('--generator must be grid or staged');
     return 2;
   }
   let seed: number | undefined;

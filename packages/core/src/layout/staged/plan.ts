@@ -11,7 +11,7 @@ import { stepRng } from '../../city/random.ts';
 import type { SettingPack, StagedSettings } from '../../pack/schema.ts';
 import type { Building } from '../../city/records.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
-import { type Block, type Lane, cutBlocks, wardVariation } from './blocks.ts';
+import { type Block, type Lane, cutBlocks, wardKey, wardVariation } from './blocks.ts';
 import { polygonCentroid } from '../geometry.ts';
 import { type Character, type DistrictPlan, type Placement, type TownDistrict, characterOf, growDistricts, roomIn } from './districts.ts';
 import { type Fitting, fitBuildings } from './fitting.ts';
@@ -91,6 +91,10 @@ export interface TownInput {
   landmarks: LandmarkBuilding[];
   /** The city's buildings, where each is to be given its place. */
   list?: readonly Building[];
+  /** Reservations a person made, applied before the rules. An empty list gives the same town as none. */
+  pins?: ReadonlyArray<{ reservation: 'ward' | 'block' | 'slot'; at: Point; buildingType?: string }>;
+  /** Wards to draw afresh, by their names (`wardKey`), each with a number that says which fresh draw. */
+  redraw?: ReadonlyMap<string, number>;
 }
 
 export class StagedLayoutError extends Error {}
@@ -176,6 +180,7 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
   let more = 1;
   for (let attempt = 0; ; attempt++) {
     const wards = planWards(site, pack, more);
+    if (input.redraw) for (const ward of wards.wards) if (input.redraw.has(wardKey(ward))) ward.redraw = input.redraw.get(wardKey(ward)) as number;
     const variation = wards.wards.map((ward) => wardVariation(seed, ward, settings));
     const districtPlan = growDistricts({ settings, districts: input.districts, variation, placementOf: (kind) => placements.get(kind) ?? 'middle', buildings: input.buildings, wards: wards.wards, mesh: wards.mesh, roads: site, streets: wards.streets, ...(site.river && { river: site.river }), ...(site.coast && { coast: site.coast }), ...(site.wall && { wall: site.wall }) });
     const characters = wards.wards.map((_, index) => characterOf(settings, districtPlan.of[index] === undefined ? undefined : input.districts[districtPlan.of[index] as number]?.kind));
@@ -195,6 +200,7 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
       settings,
       rng: stepRng(seed, 'staged-landmarks'),
       landmarks: input.landmarks,
+      ...(input.pins && input.pins.length > 0 && { pins: input.pins }),
       wards: wards.wards,
       blocks,
       roads,

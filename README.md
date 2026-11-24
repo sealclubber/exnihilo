@@ -91,7 +91,7 @@ with Ctrl-C so the clock is stored on the way out.
 | `GET .../city/households/<id>` | One household with its members and its home |
 | `GET .../city/buildings/<id>` | One building with the people who work and live there |
 | `GET .../city/building-types` | The type of every building, by ID, for naming lots on the map |
-| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas, walls, places and a summary. `?generator=grid` gives the named generator's layout of the same town, made for the request and kept nowhere; the grid is the only generator today |
+| `GET /api/settlements/settlement-641/layout` | The town's layout: junctions, segments, exits, water, lots, district areas, walls, places and a summary. `?generator=grid` or `?generator=staged` gives the named generator's layout of the same town, made for the request, kept nowhere and sent unchecked against the invariants |
 | `GET .../layout/path?from=<lot>&to=<lot>` | The shortest walking path between two lots: the segments in order, the length in metres, and the line walked |
 
 **The clock and daily life**
@@ -170,8 +170,8 @@ their route and a scale bar in metres. A river is drawn at its true width
 from place to place, a wall as a dark line open at each gate with a ring on
 the gate, and a plaza as pale paved ground. The summary's **Town** section
 names the generator that laid the town out, the wall's gates and the plaza's
-area. Adding `?generator=grid` before the `#` shows the grid's layout of the
-same town for comparison, without people: they walk the pack's layout, which
+area. Adding `?generator=staged` (or `grid`) before the `#` shows that
+generator's layout of the same town for comparison, without people: they walk the pack's layout, which
 is not the one on screen. Drag to pan and scroll to zoom.
 Clicking a lot shows its building; choosing a household or a building in the
 lists outlines its lot. **Path** shows the shortest walking path between two
@@ -458,10 +458,10 @@ The `grown` generator of phase 6D has been removed. Its renders are kept in
 generator that will replace it, built stage by stage after the approved
 prototype in `docs/prototypes/proto_wards9.py` (pictures `w9_*.png`); the
 gameplan is `sim-6e.md`. The town is made in a fixed order on one shared
-mesh, and a later stage never moves what an earlier one placed. Until it is
-complete the grid lays every town out, and the staged generator produces a
-plan, not a layout. Its numbers are in the `staged` block of `layout.yaml`,
-and each stage draws on streams named `staged-…`. So far:
+mesh, and a later stage never moves what an earlier one placed. It makes
+layouts when asked for by name; the grid still lays every town out by
+default. Its numbers are in the `staged` block of `layout.yaml`,
+and each stage draws on streams named `staged-…`. The stages:
 
 1. **Water** (`staged/water.ts`). A river enters and leaves on the brief's
    bearings with two broad bends and a constant width. The brief gives no
@@ -554,9 +554,9 @@ and each stage draws on streams named `staged-…`. So far:
     and a half times as many houses are made as the town has buildings.
 11. **Districts** (`staged/districts.ts`), which in the order of work come
     before blocks. The city's districts are grown over the wards: each
-    starts at a seed ward chosen by its kind's placement (the first at the
-    heart of the town, a waterside one by the quay, the rest spread through
-    their band of the town) and takes neighbouring wards, nearest and
+    starts at a seed ward chosen by its kind's placement (a waterside one
+    first, at the ward whose ground comes nearest the quay; then the first
+    at the heart of the town and the rest spread through their band of it) and takes neighbouring wards, nearest and
     innermost first. Crossing a highway, a main street, the wall or the
     river (only at a bridge) costs extra, so those become district borders.
     A district stops when its wards have room for its buildings, and what
@@ -629,15 +629,40 @@ and each stage draws on streams named `staged-…`. So far:
     and a lot outside it lies inside a district whose ground touches its
     own.
 
-    The grid is still the pack's generator: across Lomia the staged
-    generator does not yet keep the two rules about lots and district
-    ground everywhere (see the report of phase 6E).
+    The grid is still the pack's generator. Measured on 2026-11-24, the
+    staged generator keeps every invariant in 589 of Lomia's 682
+    settlements, among them all 18 with fewer than 500 people. The other
+    93 break only the rules about district ground: more than 3% of a
+    district's lots outside its ground in 74, a lot in ground that does
+    not touch its own in 47, a lot in no district's ground in 8, and in
+    one (Boytayay) the harbour's ground 41.5 m from the water where the
+    pack allows 40. 31 settlements use the non-touching fallback, for
+    2,825 houses. All 682 are laid out and checked in about 5 minutes;
+    Badanos takes about 1 second and Pombal, the largest, about 5.
 
 A ward's blocks draw on a stream of the ward's own, named by its seed
 point, and each block's rows on a stream of the block's own, so that a
 change to one ward, or reserving one block, changes no other. Whether a house
 fits is tested directly on rectangles (`staged/rects.ts`), not through the
 polygon library.
+
+**Its own checks, pins and edits.** Besides the layout invariants, the
+staged generator counts on every town it makes (`staged/checks.ts`) pairs
+of kept houses that overlap, houses not wholly inside their block, houses
+standing in a passage, landmarks clipped or outside the block or ward
+reserved for them, and ordinary wards with no blocks; any count above zero
+fails the layout, naming the count. `generateLayout` takes `pins`, the
+reservations a person made: a block pin (`{ reservation: 'block', at,
+buildingType }`) gives the block at its place to a landmark of that type
+before any rule chooses, and the rules fill in around it. Ward and slot
+pins are accepted and not yet applied. No list and an empty list give the
+same bytes. `redraw` names wards to draw afresh, as an edit to one ward
+would: that ward's own streams change and no other's, so every other
+ward's houses stay as they were, and selection keeps or drops a few houses
+elsewhere to hold the town's total (in Badanos 24 of 4,913, most of them
+at the edge). A layout asked for with `check: false`, as the comparison
+view and `npm run render -- <id> --generator staged` do, is returned
+without either set of checks.
 
 Polygon arithmetic (taking shapes out of shapes, moving outlines in, giving
 lines width) goes through `clipper2-ts`, a TypeScript port of Clipper2 with
@@ -665,12 +690,13 @@ district, the wall and its gates, the plaza, and exits labelled with where
 they lead. `npm run render` wraps it:
 
 ```sh
-npm run render -- settlement-641 [--generator grid] [--seed <number>] [--out <file.svg>]
+npm run render -- settlement-641 [--generator grid|staged] [--seed <number>] [--out <file.svg>]
 ```
 
 `docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
-and the staged generator's plans step by step (`-6e-step1` to `-6e-step7`).
+and the staged generator's plans step by step (`-6e-step1` to `-6e-step7`)
+and its layouts (`-6e-step8`, `-6e-step10`).
 
 **Paths.** `shortestPath(layout, fromLotId, toLotId)` returns the segments
 walked in order, the length in metres from entrance to entrance, and the line

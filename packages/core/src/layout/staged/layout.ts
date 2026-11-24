@@ -11,6 +11,7 @@ import { boxOf, distance, distancePolygonToPolyline, pointInPolygon, polylineLen
 import { checkLayout } from '../invariants.ts';
 import { ringShare } from '../measure.ts';
 import { type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
+import { builtInChecks } from './checks.ts';
 import { type NetEdge, type NetNode, buildNetwork } from './network.ts';
 import { StagedLayoutError, type TownPlan, planTown, stagedSettings, townInput } from './plan.ts';
 import { cornersOf } from './rects.ts';
@@ -30,10 +31,12 @@ export interface Pin {
 
 export interface StagedOptions {
   seed?: number;
-  /** Reservations people made. None are applied yet: an empty list and no list give the same town. */
+  /** Reservations people made, applied before the rules: a block pin gives the block at its place to a landmark of its type. An empty list and no list give the same town. */
   pins?: readonly Pin[];
   /** false returns the layout without checking it against the invariants: for measuring which of them a town breaks. */
   check?: boolean;
+  /** Wards to draw afresh, by name, as an edit to one ward would. */
+  redraw?: ReadonlyMap<string, number>;
 }
 
 const pad = (value: number, digits: number) => String(value).padStart(digits, '0');
@@ -55,7 +58,12 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     throw new StagedLayoutError(`${brief.name} (${brief.id}): ${message}`);
   };
   const number = brief.id.split('-')[1] as string;
-  const plan = planTown(brief, townInput(city, pack), pack, seed);
+  const plan = planTown(brief, { ...townInput(city, pack), ...(options.pins && options.pins.length > 0 && { pins: options.pins }), ...(options.redraw && { redraw: options.redraw }) }, pack, seed);
+  if (options.check !== false) {
+    const faults = builtInChecks(plan);
+    const broken = Object.entries(faults).filter(([, count]) => count > 0);
+    if (broken.length > 0) fail(`the town breaks its own checks: ${broken.map(([name, count]) => `${name} ${count}`).join(', ')}`);
+  }
   const fitting = plan.fitting as NonNullable<TownPlan['fitting']>;
   const buildingById = new Map(city.buildings.map((building) => [building.id, building]));
 

@@ -145,9 +145,15 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
 
   // ---- Seeds ------------------------------------------------------------------------------------------------------
   const water = roads.harbour?.quay ?? coast?.shore ?? river?.line;
-  const seeds: Array<number | undefined> = [];
+  const seeds: Array<number | undefined> = districts.map(() => undefined);
   const taken = new Set<number>();
-  for (const district of districts) {
+  /** Whether a district has started at the heart of the town yet: the first that is not at the water does. */
+  let heart = false;
+  // A waterside district chooses first: the water is where it is, and the others can start anywhere in their band.
+  const byWater = (district: (typeof districts)[number]) => placementOf(district.kind) === 'waterside' && water !== undefined;
+  const inTurn = [...districts.keys()].sort((a, b) => Number(byWater(districts[b] as (typeof districts)[number])) - Number(byWater(districts[a] as (typeof districts)[number])) || a - b);
+  for (const turn of inTurn) {
+    const district = districts[turn] as (typeof districts)[number];
     const placement = placementOf(district.kind);
     const band = rules.bands[placement] ?? [0, 1];
     const free = (list: readonly number[]) => list.filter((index) => !taken.has(index));
@@ -160,15 +166,17 @@ export function growDistricts(input: DistrictInput): DistrictPlan {
       const middle = middles[index] as Point;
       let score: number;
       // By the water; or where no district has started yet, at the heart of the band; otherwise far from the others.
-      if (placement === 'waterside' && water) score = -distanceToPolyline(middle, water);
-      else if (taken.size === 0) score = -(wards[index] as Ward).growthRank;
+      // The ward whose own ground comes nearest the water, and of those the one whose middle does.
+      if (placement === 'waterside' && water) score = -Math.min(...(wards[index] as Ward).polygon.map((corner) => distanceToPolyline(corner, water))) - 1e-3 * distanceToPolyline(middle, water);
+      else if (!heart) score = -(wards[index] as Ward).growthRank;
       else score = Math.min(...[...taken].map((other) => distance(middle, middles[other] as Point)));
       if (score > most) {
         most = score;
         best = index;
       }
     }
-    seeds.push(best);
+    seeds[turn] = best;
+    if (!byWater(district)) heart = true;
     if (best !== undefined) taken.add(best);
   }
 

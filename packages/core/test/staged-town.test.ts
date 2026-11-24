@@ -9,6 +9,8 @@ import { generateCity, parsePack } from '../src/index.ts';
 import { smallestRectangle } from '../src/layout/cutting.ts';
 import { distanceBetweenPolygons, distanceToPiece, distanceToPolygonEdge, pointInPolygon, polygonArea, polygonCentroid } from '../src/layout/geometry.ts';
 import type { LandmarkBuilding } from '../src/layout/staged/landmarks.ts';
+import { wardKey } from '../src/layout/staged/blocks.ts';
+import { builtInChecks } from '../src/layout/staged/checks.ts';
 import { StagedLayoutError, type TownInput, type TownPlan, landmarksOf, planTown, stagedSettings, townInput } from '../src/layout/staged/plan.ts';
 import { outlineOf, rectInside, standingOf, standingOverlap, widenedRect } from '../src/layout/staged/rects.ts';
 import type { Point, SettlementBrief } from '../src/schema.ts';
@@ -640,5 +642,47 @@ describe('which building goes where', () => {
 
   it('is left out where the plan was made for a bare number of buildings', () => {
     expect(planTown(named('Flupines').brief, 95, pack).fitting).toBeUndefined();
+  });
+});
+
+describe('built-in checks, pins and local edits', () => {
+  it('every town passes its own checks: no overlap, nothing outside its block, no clipped landmark, no ward without blocks', () => {
+    for (const { brief, plan } of everyPlan()) expect(builtInChecks(plan), brief.name).toEqual({ overlappingPairs: 0, outsideBlock: 0, inPassage: 0, landmarksOutside: 0, wardsWithoutBlocks: 0 });
+  });
+
+  it('a block pin gives its block to a landmark of its type before the rules choose, and the town still has every building', () => {
+    const { brief, input, plan } = named('Badanos');
+    const free = plan.blocks.findIndex((block, at) => !plan.landmarks.some((landmark) => landmark.block === at) && block.area > 2000 && (plan.wards[block.ward] as TownPlan['wards'][number]).growthRank < 200);
+    const type = (plan.landmarks.find((landmark) => landmark.block !== undefined) as TownPlan['landmarks'][number]).type;
+    const pinned = planTown(brief, { ...input, pins: [{ reservation: 'block', at: polygonCentroid((plan.blocks[free] as TownPlan['blocks'][number]).polygon), buildingType: type }] }, pack);
+    expect(pinned.landmarks.filter((landmark) => landmark.type === type).map((landmark) => landmark.block)).toContain(free);
+    expect(pinned.houses.some((house) => house.block === free)).toBe(false);
+    expect(keptHouses(pinned).length + pinned.landmarks.length + pinned.gatehouses.length).toBe(input.buildings);
+    expect(builtInChecks(pinned).overlappingPairs).toBe(0);
+    // No pins, and an empty list of them, are the same town.
+    expect(JSON.stringify(planTown(brief, { ...input, pins: [] }, pack).houses)).toBe(JSON.stringify(plan.houses));
+  });
+
+  it('drawing one ward afresh leaves every other ward\u2019s houses as they were, but for a block a landmark moved to or from', () => {
+    const { brief, input, plan } = named('Badanos');
+    const ward = plan.wards.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.kind === 'ordinary').sort((a, b) => a.entry.growthRank - b.entry.growthRank)[3] as { entry: TownPlan['wards'][number]; index: number };
+    const edited = planTown(brief, { ...input, redraw: new Map([[wardKey(ward.entry), 1]]) }, pack);
+    const drawn = (of: TownPlan, index: number) => JSON.stringify(of.houses.filter((house) => house.ward === index).map((house) => house.outline));
+    expect(drawn(edited, ward.index)).not.toBe(drawn(plan, ward.index));
+    const others = plan.wards.map((_, index) => index).filter((index) => index !== ward.index);
+    expect(others.filter((index) => drawn(edited, index) !== drawn(plan, index)).length).toBeLessThanOrEqual(2);
+    // Through selection a few houses elsewhere are kept that were not, or the other way about: most of them at
+    // the town's edge. Measured: 24 of 4,913, 13 of them beyond four-fifths of the kept houses.
+    const name = (house: TownPlan['houses'][number]) => `${house.outline[0]?.[0].toFixed(3)},${house.outline[0]?.[1].toFixed(3)}:${house.area.toFixed(3)}`;
+    const before = new Map(plan.houses.map((house, index) => [name(house), plan.selection.district[index] !== undefined]));
+    let changed = 0;
+    let elsewhere = 0;
+    edited.houses.forEach((house, index) => {
+      if (house.ward === ward.index || !before.has(name(house))) return;
+      elsewhere++;
+      if (before.get(name(house)) !== (edited.selection.district[index] !== undefined)) changed++;
+    });
+    expect(changed / elsewhere).toBeLessThan(0.02);
+    expect(keptHouses(edited).length + edited.landmarks.length + edited.gatehouses.length).toBe(input.buildings);
   });
 });

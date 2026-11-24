@@ -34,10 +34,10 @@ export interface Lane {
 
 /** The name of a ward's own stream: its seed point to the centimetre, and which piece of the cell it is. */
 export const wardKey = (ward: Pick<Ward, 'seed' | 'piece'>) => `${ward.seed[0].toFixed(2)}:${ward.seed[1].toFixed(2)}:${ward.piece}`;
-export const wardRng = (seed: number, ward: Pick<Ward, 'seed' | 'piece'>, step: string): Rng => stepRng(seed, `staged-${step}:${wardKey(ward)}`);
+export const wardRng = (seed: number, ward: Pick<Ward, 'seed' | 'piece' | 'redraw'>, step: string): Rng => stepRng(seed, `staged-${step}:${wardKey(ward)}${ward.redraw === undefined ? '' : `:redraw-${ward.redraw}`}`);
 
 /** How much larger or smaller than its district's a ward's houses and blocks are: every ward varies a little, by a draw of its own. */
-export function wardVariation(seed: number, ward: Pick<Ward, 'seed' | 'piece'>, settings: StagedSettings): number {
+export function wardVariation(seed: number, ward: Pick<Ward, 'seed' | 'piece' | 'redraw'>, settings: StagedSettings): number {
   const rules = settings.blocks.wardScale;
   return Math.min(Math.max(Math.exp(normal(wardRng(seed, ward, 'scale')) * rules.spread), rules.min), rules.max);
 }

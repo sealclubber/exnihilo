@@ -462,7 +462,8 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
   const tipsAt = new Map<string, number>();
   for (const { way } of known) for (const tip of [way.points[0] as Point, way.points[way.points.length - 1] as Point]) tipsAt.set(key(tip), (tipsAt.get(key(tip)) ?? 0) + 1);
   for (const a of known) {
-    if (a.way.kind === 'bridge') continue;
+    // Only a lane's end is moved: a wider way set sideways would take ground from the lots beside it.
+    if (a.way.kind === 'bridge' || a.way.width > widths.lane) continue;
     for (const end of [0, a.way.points.length - 1]) {
       const tip = a.way.points[end] as Point;
       // Not where a route leaves the town: an exit stays where it was put. Nor an end that already meets another

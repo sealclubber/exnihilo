@@ -29,6 +29,8 @@ export interface Ward {
   area: number;
   /** How late in the town's growth it would be built on. */
   growthRank: number;
+  /** Set where an edit asks for this ward to be drawn afresh: its own streams, and no other ward's, then differ. */
+  redraw?: number;
 }
 
 export interface WardInput {
