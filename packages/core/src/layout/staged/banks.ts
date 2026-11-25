@@ -39,6 +39,8 @@ export interface Bank {
 export interface BankPlan {
   /** In order of distance from the plaza. */
   banks: Bank[];
+  /** For every block, kept houses or not, the bank whose land it stands on; nothing for land that holds no kept house. */
+  bankOf: Array<number | undefined>;
   /** For each district, its share of each bank it is given, in the order given. */
   shares: Array<Array<{ bank: number; houses: number }>>;
   /** The districts given more than one bank. */
@@ -215,5 +217,6 @@ export function shareBanks(input: BankInput): BankPlan {
     const parts = shares[district] as Array<{ bank: number }>;
     return parts.some((part, at) => at > 0 && !(banks[(parts[at - 1] as { bank: number }).bank] as Bank).bridged.includes(part.bank));
   });
-  return { banks, shares, spanning, unjoined, pulled };
+  const bankOf = blocks.map((_, block) => bankOfLand.get(land[block] as number));
+  return { banks, bankOf, shares, spanning, unjoined, pulled };
 }

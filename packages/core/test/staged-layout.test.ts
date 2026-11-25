@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { type City, type Layout, VILLAGE_GENERATOR, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, measureDistrictGround, placeFlagsOf } from '../src/index.ts';
 import { groundOf, outsideGrounds } from '../src/life/wander.ts';
 import { STAGED_GENERATOR, generateStagedLayout } from '../src/layout/staged/layout.ts';
+import { planTown, townInput } from '../src/layout/staged/plan.ts';
+import { pointInPolygon, polygonCentroid } from '../src/layout/geometry.ts';
 import type { SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
 
@@ -86,6 +88,30 @@ describe('the staged generator as a layout', () => {
     // the visit says so: the courtyards are there for when it does.
     expect(where.lot).toBeGreaterThan(1000);
     expect(moving / out).toBeGreaterThan(0.5);
+  });
+
+  it('with the districts grown after selection, keeps every invariant and every count, and puts every lot and landmark in its own ground', () => {
+    const staged = pack.layout.staged!;
+    const grownPack = { ...pack, layout: { ...pack.layout, staged: { ...staged, districts: { ...staged.districts, afterSelection: true } } } };
+    for (const name of ['Badanos', 'Montica']) {
+      const brief = lomiaWorld().settlements.find((settlement) => settlement.name === name)!;
+      const city = generateCity(brief, grownPack);
+      const layout = generateStagedLayout(city, brief, grownPack, { check: false });
+      expect(checkLayout(layout, city, brief, grownPack), name).toEqual([]);
+      const plan = planTown(brief, townInput(city, grownPack), grownPack);
+      expect(plan.grown, name).toBeDefined();
+      // Every kept house has exactly one district, and every district exactly the houses selection kept for it.
+      const kept = plan.houses.filter((_, index) => plan.selection.district[index] !== undefined).length;
+      expect(plan.grown!.district.filter((district) => district !== undefined).length, name).toBe(kept);
+      expect(plan.selection.fallback, name).toBe(0);
+      expect(measureDistrictGround(layout).lotsOutside, name).toBe(0);
+      const areas = new Map(layout.districtAreas.map((area) => [area.districtId, area.polygons]));
+      const lotOf = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
+      for (const landmark of plan.landmarks) {
+        const lot = lotOf.get(landmark.building)!;
+        expect(areas.get(lot.districtId)!.some((polygon) => pointInPolygon(polygonCentroid(lot.polygon), polygon)), `${name}: ${landmark.type}`).toBe(true);
+      }
+    }
   });
 
   it('gives every building one lot, a house its front, and each lot an entrance on a way of the one network', () => {

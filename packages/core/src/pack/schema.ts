@@ -662,6 +662,11 @@ const StagedSettingsSchema = z.strictObject({
     room: z.record(z.enum(['centre', 'middle', 'edge', 'waterside']), z.number().min(1)),
     roomDefault: z.number().min(1),
     barriers: z.strictObject({ highway: z.number().nonnegative(), mainStreet: z.number().nonnegative(), river: z.number().nonnegative(), wall: z.number().nonnegative() }),
+    /**
+     * true grows the districts over the kept blocks after selection, bank by bank (phase 6F, Part B), in place of
+     * the districts selection settles at the borders. Left out, selection's.
+     */
+    afterSelection: z.boolean().optional(),
   }),
   /**
    * Ward character, by the kind of district a ward belongs to: `scale` multiplies the size of its houses and

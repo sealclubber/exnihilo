@@ -521,6 +521,10 @@ staged:
   #              Crossing a highway, a main street, the river (at a bridge)
   #              or the wall counts as this many metres more, so those
   #              become the borders between districts.
+  #   afterSelection  optional; true grows the districts over the kept
+  #              blocks after selection, bank by bank, with the same costs
+  #              (phase 6F, Part B), in place of the districts selection
+  #              settles at the borders. Left out, selection's.
   #   inward     a ward's growth rank counts this many times in the order
   #              wards are claimed, so that districts fill the inner ground
   #              first and compete for it.
