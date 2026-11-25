@@ -721,6 +721,110 @@ the prototype.
 broken and how often the non-touching fallback is used.
 `PROBLEM-6E-districts.md` describes what is still open.
 
+**The village generator (phase 6E, Villages).** A settlement under
+`village.below` residents (1,000; 136 of Lomia's 682) is laid out by
+`layout/village/`, which the staged generator hands it to, after the approved prototype
+`docs/prototypes/proto_village5.py` and the Villages section of `sim-6e.md`:
+no mesh, wards or wall ring; the road leads and buildings are placed one at a
+time. Its numbers, and which building types hold its anchors, are in the
+`village` block of `layout.yaml`, and it draws on streams named `village-…`.
+The steps:
+
+1. **Environment** (`village/plan.ts`). A stream with broad bends or a calm
+   shore, drawn by the staged generator's water stage with the village's
+   own numbers, the radius being the cap on the through road.
+2. **Road** (`village/roads.ts`). Each land route is a road 6 m wide from
+   the centre; two exits more than 140 degrees apart are one through road,
+   evened so that it bends at the centre. A small bridge wherever a road
+   crosses the stream; a road that would run into the sea stops at the shore.
+   Two exits that are not opposite are one road bending at the centre. The
+   shape follows: a coast gives *shore*; three or more land exits, or two
+   through roads, *crossroads*; otherwise *street* (40, 44 and 52 of Lomia's
+   villages). The brief carries no settlement type, so a Lake or Naval
+   settlement is a shore village only where it is coastal.
+3. **Anchors** (`village/anchors.ts`). The green, an anchor in any shape:
+   always where the brief is flagged `plaza`, otherwise by a seeded share
+   from the pack that rises with size (0.4 at 50 buildings to 0.7 at 200;
+   81 of Lomia's 136 villages). An oval beside a road at the centre, with a
+   pond, the well and a lane round its far side; one the brief did not ask
+   for belongs to no building. Without a green, the well by the road at the
+   centre. A church
+   (flag `temple`, or a chapel in the city) in its churchyard by the green
+   or near the centre; a manor (flag `citadel`) in its own yard with a barn;
+   a mill beside the stream's crossing; a landing (flag `port`) with one
+   jetty and a lane to it. Each holds the first building of its pack types
+   the city has.
+4. **Central forks** (`village/forks.ts`). From 90 buildings, lanes fork off
+   the road arms near the centre at 25 to 45 degrees, two under 150
+   buildings and three above, each round of arms a little farther out so
+   that they do not meet at one point; about half loop back to the road
+   farther out. At a crossroads a curved link joins each two neighbouring
+   arms. A lane that meets the water is cut short there; one that meets an
+   anchor is drawn again.
+5. **Plots** (`village/plots.ts`). Every way is walked along both sides from
+   its point nearest the centre, and the next plot always goes to the walk
+   nearest the centre (a road's distance weighted, so that bigger villages
+   fill their lanes and do not string out). Buildings are taken largest lot
+   first, so the larger a building's lot the nearer the centre and the wider
+   its plot (13 to 21 m, 30 to 58 m deep), its house at the front and its
+   garden behind; about a third of the wider plots are farmsteads with a
+   barn and a shed, drawing only. An open-air place is built over only as
+   far as its `footprints` coverage. From 140 buildings, plots within 70 m of
+   the centre are 7 to 9.5 m wide with their houses joined in a terraced
+   row; these go to the buildings with small lots (`row.most`), the larger
+   ones standing just beyond. A road is built no farther than the cap each
+   way. What does not fit waits for step 6.
+6. **Thicken, never lengthen** (`village/lanes.ts`). While a building has no
+   plot, a lane is added: the best of 40 candidates leaving a lane or the
+   road inside the village, square to it or straight on from a lane's end,
+   and of lanes joining two lane ends near each other, so that some lanes
+   loop. A candidate that meets another way joins it; one that crosses water
+   or an anchor, comes near the green or runs alongside another way is
+   refused. Near its start a lane may cut through the plots lining the way
+   it leaves: their buildings are placed again, at a cost to its score. The
+   lane with the most free frontage is kept, favouring joins and ground near
+   the centre. Where none will do it tries once more, and then reaches a
+   little farther. Every building of all 136 villages has a plot; 86 needed
+   lanes beyond the pack's reach, by 1.15 times at the median and 2 at most.
+7. **Palisade** (`village/palisade.ts`). For a village flagged `walls`,
+   fitted after all plots: a near-circle along the spread of the plots, its
+   shorter axis no less than 0.8 of its longer, with a slight wobble, every
+   plot 9 m inside. A gap where a road or lane passes; none across water. A
+   lane's tail beyond it is cut off.
+8. **Fields** (`village/fields.ts`). The envelope is the palisade, or a
+   smooth outline round the plots. Fields lie outside it, cut only by the
+   roads and kept off water and the green: long strips near the village,
+   closes farther out, commons beyond, some woodland, with furrows; trees at
+   some plots' backs and boats by a landing. All of it is drawing.
+
+`node scripts/render-village.ts <out> <suffix> [--as flag,flag] <name>...`
+draws a village's plan; `docs/renders/*-village-step3.svg`,
+`*-village-step5.svg` and `*-village-step8.svg` are Vereceldo (65
+buildings) and Monhas (180) after steps 3, 5 and 8.
+
+**A village as a layout** (`village/layout.ts`, layout version 12). Every way
+is cut into segments where another meets or crosses it, at a bridge's ends
+and at the exits; roads are arterials, a bridge's length a bridge, the rest
+lanes. A sea route leaves from the end of the lane to the landing. Each
+building's lot is its plot or its anchor's site; the mill and the landing
+have lanes of their own. A green is a place: the plaza, the lot of its
+building, where the brief is flagged `plaza`, otherwise a green that
+belongs to no building; the well is a lot at its edge, cut out of it. A
+district's ground is its lots. A palisade is a wall of open lines with gaps
+where ways pass, and no gates; gatehouses stand on plots like any building.
+Fields, trees, barns and boats are not in the format. All 136 villages keep
+every invariant, and daily life runs on them (3.77 trips per resident in
+Vereceldo on day 1, 3.11 in Monhas). `docs/renders/*-village.svg` are
+Vereceldo, Flupines and Monhas drawn by `npm run render`.
+
+A village's plots have gardens, so it is less dense than a town: the
+pack's `village.density` (30 to 700 residents per hectare of lots) stands in
+for the town's 60 to 700 in the layout invariant. Lomia's villages come to
+50 to 110; a made-up village of 100 residents to about 38. The first towns over 1,000 residents (Kalduzunbe,
+Sudaber, Sernov, about 200 buildings) are compact blocks about 150 m across
+where a village of 180 buildings spreads about 300 m: the jump at the
+boundary is plain.
+
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
 length within 20° of a circle about the centre or of a line to it, leaving

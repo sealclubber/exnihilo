@@ -24,6 +24,7 @@ current phase before starting, and the README for how things run today.
 | Draw a town's layout to SVG | `npm run render -- <settlement id>` |
 | Draw the staged generator's plan of a town | `node scripts/render-stages.ts <out folder> <suffix> [--kinds] [--as flag,flag] <name>...` |
 | Count what the staged generator breaks across Lomia | `node scripts/staged-census.ts [every] [--towns]` |
+| Draw the village generator's plan of a village | `node scripts/render-village.ts <out folder> <suffix> [--as flag,flag] <name>...` |
 
 **How long things take** (measured 2026-11-23 on the development machine,
 with the grid laying every town out). Run a single test file with
@@ -38,6 +39,7 @@ with the grid laying every town out). Run a single test file with
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
 | `packages/core/test/staged-layout.test.ts` (staged layouts for a sample of 57 settlements, and life on them) | about 1 minute |
 | `packages/core/test/staged-town.test.ts` (blocks, houses, landmarks, districts, selection and fitting for all 682 settlements, planned once) | about 3 minutes |
+| `packages/core/test/village.test.ts` (the village generator's eight steps and layouts for all 136 villages, and life on two) | about 3 minutes |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -252,6 +254,10 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - **It makes the pack's layouts.** `staged/layout.ts` writes the plan
   (`staged/plan.ts`) in the layout format; the pack names it
   (`generator: staged`), and the grid is made only when asked for by name.
+  A settlement under `village.below` residents goes to the village
+  generator, `layout/village/` (the Villages section of `sim-6e.md`): no
+  mesh, wards or wall ring; the road leads, plots are placed one at a time
+  outward from the centre, and lanes are added until every building has one.
   `check: false` returns a layout unchecked, for measuring what a town
   breaks; the API's `?generator=` and the render command use it, to compare.
 - **Open ground.** An open-air building's lot is its whole house rectangle,
@@ -281,7 +287,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 11 and 6.
+  inputs would change. Today they are 6, 12 and 6.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

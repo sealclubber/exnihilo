@@ -27,6 +27,7 @@ export { measureDistrictGround, ringShare, riverOutline, riverWidthAt, type Dist
 export { generateGridLayout, LayoutGenerationError, GRID_GENERATOR, type LayoutOptions } from './layout/grid.ts';
 export { generateStagedLayout, STAGED_GENERATOR, type Pin, type StagedOptions } from './layout/staged/layout.ts';
 export { generateLayout } from './layout/generate.ts';
+export { generateVillageLayout, VILLAGE_GENERATOR, type VillageOptions } from './layout/village/layout.ts';
 export { renderLayoutSvg, type RenderOptions } from './layout/render.ts';
 export { createPathFinder, shortestPath, LayoutPathError, type PathFinder } from './layout/path.ts';
 export * from './life/records.ts';

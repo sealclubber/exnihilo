@@ -30,8 +30,9 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * Version 9 gives a wall several lines where water parts it, and keeps lots to a least width. Version 10 is the
  * staged generator's: wards, a lot's front, a sea route's exit at the quay, and gates that no building keeps.
  * Version 11 gives the staged generator's open-air buildings open ground on their lots, and its blocks courtyards.
+ * Version 12 lays a settlement under the pack's village size out with the village generator.
  */
-export const LAYOUT_VERSION = 11;
+export const LAYOUT_VERSION = 12;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);

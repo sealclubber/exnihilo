@@ -3,7 +3,7 @@
  * format, with its walking network, entrances, gates and district ground.
  */
 import { describe, expect, it } from 'vitest';
-import { type City, type Layout, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, measureDistrictGround, placeFlagsOf } from '../src/index.ts';
+import { type City, type Layout, VILLAGE_GENERATOR, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, measureDistrictGround, placeFlagsOf } from '../src/index.ts';
 import { groundOf, outsideGrounds } from '../src/life/wander.ts';
 import { STAGED_GENERATOR, generateStagedLayout } from '../src/layout/staged/layout.ts';
 import type { SettlementBrief } from '../src/schema.ts';
@@ -25,17 +25,20 @@ function staged(name: string) {
 const SAMPLE = lomiaWorld().settlements.filter((_, at) => at % 12 === 0).map((settlement) => settlement.name);
 
 describe('the staged generator as a layout', () => {
-  it('passes every invariant in Flupines and Vereceldo, by the name the pack or the caller gives it', () => {
+  it('passes every invariant in Flupines and Vereceldo, and hands them, as villages, to the village generator', () => {
     for (const name of ['Flupines', 'Vereceldo']) {
+      // Laid out by the staged pipeline when asked for directly, as the census does.
       const { brief, city, problems } = staged(name);
       expect(problems, name).toEqual([]);
+      // By the generator's name, a settlement under the pack's village size is a village.
       const layout = generateLayout(city, brief, pack, { generator: 'staged' });
-      expect(layout.summary.generator).toBe(STAGED_GENERATOR);
+      expect(layout.summary.generator).toBe(VILLAGE_GENERATOR);
       expect(layout.lots.length).toBe(city.buildings.length);
     }
-    // The pack names the staged generator; a pack that names none still gets the grid.
+    // The pack names the staged generator, which lays out a town itself; a pack that names none still gets the grid.
+    const town = staged('Badanos');
+    expect(generateLayout(town.city, town.brief, pack).summary.generator).toBe(STAGED_GENERATOR);
     const { brief, city } = staged('Flupines');
-    expect(generateLayout(city, brief, pack).summary.generator).toBe(STAGED_GENERATOR);
     const { generator: _named, ...unnamed } = pack.layout;
     expect(generateLayout(city, brief, { ...pack, layout: unnamed }).summary.generator).toBe('grid');
   });

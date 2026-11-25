@@ -47,8 +47,11 @@ export interface Coast {
 
 export interface WaterInput {
   brief: SettlementBrief;
-  settings: StagedSettings;
+  /** Only the river and the coast are read: the village generator passes its own. */
+  settings: Pick<StagedSettings, 'river' | 'coast'>;
   seed: number;
+  /** The first word of the streams' names: `staged`, unless another generator draws water this way. */
+  streams?: string;
   /** The town's radius, and how far out roads and water are drawn. */
   radius: number;
   reach: number;
@@ -57,7 +60,7 @@ export interface WaterInput {
 }
 
 /** The river of a brief, or nothing if it has none. */
-export function makeRiver({ brief, settings, seed, radius, reach, least }: WaterInput): River | undefined {
+export function makeRiver({ brief, settings, seed, radius, reach, least, streams = 'staged' }: WaterInput): River | undefined {
   if (!brief.river) return undefined;
   const { river } = settings;
   const arrives = brief.river.arrivesFrom?.bearing;
@@ -66,8 +69,8 @@ export function makeRiver({ brief, settings, seed, radius, reach, least }: Water
   if (leaves === undefined) return undefined;
   const riverPort = brief.flags.port && !brief.coast.isCoastal;
   // This one draw decides whether the town is beside its river or astride it, so it has a stream of its own.
-  const off = drawFrom(stepRng(seed, 'staged-river-distance'), riverPort ? river.portDistance : river.distance) * radius;
-  const rng = stepRng(seed, 'staged-river');
+  const off = drawFrom(stepRng(seed, `${streams}-river-distance`), riverPort ? river.portDistance : river.distance) * radius;
+  const rng = stepRng(seed, `${streams}-river`);
   const sign = rng.next() < 0.5 ? 1 : -1;
   const bends = [drawFrom(rng, river.bend), drawFrom(rng, river.bend)];
   const turned = (rng.next() < 0.5 ? 1 : -1) * drawFrom(rng, river.sourceTurn);
@@ -120,13 +123,13 @@ export function makeRiver({ brief, settings, seed, radius, reach, least }: Water
 }
 
 /** The coast of a brief, or nothing if it has none. */
-export function makeCoast({ brief, settings, seed, radius, reach }: WaterInput): Coast | undefined {
+export function makeCoast({ brief, settings, seed, radius, reach, streams = 'staged' }: WaterInput): Coast | undefined {
   if (brief.coast.waterBearing === undefined) return undefined;
   const { coast } = settings;
   const seaward = bearingVector(brief.coast.waterBearing);
   const alongShore = left(seaward);
-  const out = drawFrom(stepRng(seed, 'staged-coast-distance'), coast.distance) * radius;
-  const rng = stepRng(seed, 'staged-coast');
+  const out = drawFrom(stepRng(seed, `${streams}-coast-distance`), coast.distance) * radius;
+  const rng = stepRng(seed, `${streams}-coast`);
   const depth = Math.min(coast.depth, coast.depthShare * out);
   const half = 1.5 * reach;
   const raw = evened(Array.from({ length: coast.knots }, () => normal(rng) * depth), coast.smoothing);

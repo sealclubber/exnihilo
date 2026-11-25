@@ -133,7 +133,52 @@ Landmark footprints come from templates in the pack: a cross for a temple, a U r
 - Each house knows the block edge it was laid along. Its entrance is the middle of its front, projected onto that edge's segment. Every house therefore has an entrance on a way it borders, by construction.
 - Lanes that reach the wall away from a gate end there on both sides.
 
-**Small settlements.** Below about 300 buildings the mesh has only a handful of wards and no wall ring worth drawing. A walled village gets the ring anyway, sized as above. Below about 60 buildings, skip main streets.
+**Small settlements.** Settlements under 1,000 residents do not use this pipeline; see Villages below. The rest of this paragraph is superseded. A walled village gets the ring anyway, sized as above. Below about 60 buildings, skip main streets.
+
+## Villages
+
+A settlement under 1,000 residents is a village and does not use the pipeline above. It has no mesh, wards, districts in the layout, selection or wall ring. The road leads, and buildings are placed one at a time. In Lomia that is 136 of 682 settlements, the smallest with 253 residents and 65 buildings.
+
+The user approved this over five rounds of prototype. Reference files, to be added to `docs/prototypes/`: `proto_village5.py` and `village_sheet5.png` (four shapes at 110 and 180 buildings), and `village_sheet.png` for the 65-building look. Run as `python3 proto_village5.py <street|green|cross|shore> <buildings> out.png`.
+
+**Flags are shrunk, not ignored.** A village honours every flag the map gives it, at village scale.
+
+| The brief says | A town gets | A village gets |
+| --- | --- | --- |
+| `walls` | Stone ring, towers, gates | A palisade, with gaps where the through roads pass |
+| `citadel` | Castle ward | A manor in its own yard, with a barn |
+| `plaza` | Market square | A green. Without the flag, a seeded share of villages still get one (in the pack, from 0.4 and rising with size); the well stands on the green where there is one, otherwise on the road at the centre |
+| `temple`, or a chapel from the city | Temple on the plaza | One church in a churchyard, by the green or the centre |
+| `port` | Quay and piers | A landing: one jetty and a lane to it |
+| River | Bridges by size | One small bridge or ford, and a mill beside it |
+
+**Shape.** Chosen from the brief, first match wins: a coast or lake, or settlement type Lake or Naval, gives *shore*; three or more exits, or two through roads that cross, give *crossroads*; otherwise *street*. Two exits that are not opposite make a street with a bend. The green is not a shape but an anchor, and a river, palisade, green or manor can occur with any shape.
+
+**Order of construction.**
+
+1. **Environment.** Water as in the town pipeline, at village scale: a stream with broad bends, or a calm shore.
+2. **Road.** Each route in the brief, at 6 m. Opposite exits are one through road. Lanes are 3.6 m.
+3. **Anchors.** The green (an oval beside the road, with a pond and the well, and a lane round it), then church, manor, mill and landing, each on its own plot or site.
+4. **Central forks.** From 90 buildings, lanes fork off the road near the centre at 25 to 45 degrees; some loop back to it farther out. Two forks under 150 buildings, three above. Under 90 there are none. At a crossroads, curved links join neighbouring arms.
+5. **Plots, outward from the centre.** Walk along both sides of every road and lane from the point nearest the centre, laying plots side by side. A plot is 13 to 21 m wide and 30 to 58 m deep, with its house at the front, set back a little, and garden behind. About a third of wider plots are farmsteads with a barn and shed, which are drawing only. From 140 buildings, plots within 70 m of the centre are 7 to 9.5 m wide and their houses join into a terraced row.
+6. **Thicken, never lengthen.** The built stretch of the through road is capped at about 70 m plus 0.85 m per building each way. When frontage runs out, a new lane is added: try some 40 candidates, each starting on an existing lane or on the road inside the village, heading off at about a right angle or straight on from a lane's end. Reject any that enters water, crosses the green or runs alongside another way. A candidate that meets another way joins it. Keep the one with the most free plot frontage, favouring joins and ground nearer the centre. A palisaded village may not reach as far.
+7. **Palisade.** Fitted after all plots: a near-circle round them, never far from round, with a slight wobble.
+8. **Fields, last.** The village has an envelope: the palisade, or a smooth outline round its plots. Fields lie outside it and are cut only by the through roads. They carry furrows; some are woodland. Fields, trees, barns and boats are drawing: no one lives or works in them yet.
+
+**The city and exact counts.** Every building the city generator makes gets one plot; step 6 repeats until all are placed. The larger a building's pack lot, the nearer the centre and the wider its plot. Districts remain a property of each building and are not drawn. Which buildings a village has is setting content in the pack (for example, no guild hall or players' hall below a population), and is the user's to set.
+
+**Known faults in the prototype.** Do not port these.
+
+- Most added lanes end as closes. Build some loops on purpose by linking two lane ends that lie near each other.
+- At 180 buildings too many forks meet at one point. Start some a little way along the road.
+- The palisade is loose at 110 buildings: tighten the reach cap for palisaded villages.
+- Fields are too even. Near the village they should be long strips; farther out, larger closes and commons.
+- The through road is nearly straight; it should wander as highways do.
+- Lanes stop at a hard count in the prototype. The real version must always reach the exact building count.
+
+**At the boundary.** A town just over 1,000 residents looks cramped under the town pipeline. Treat 1,000 as the switch for now and report how the first few towns above it look; a blend, with village plots on a small town's outer lanes, is a likely later change.
+
+**Tests.** All 136 villages generate with exactly one plot per building; no plot overlaps another plot, a way, water or the green; every house has an entrance on the way its plot fronts; the walking network is one piece; the built length of the through road is within its cap; a palisade exists exactly when the brief is flagged `walls`, and no field touches it; the same village from the same seed is byte-identical. Life runs on a village: trips per resident reported.
 
 ## Pins and the future editor
 
