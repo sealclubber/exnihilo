@@ -721,14 +721,14 @@ the prototype.
 broken and how often the non-touching fallback is used.
 `PROBLEM-6E-districts.md` describes what is still open.
 
-**The village generator (phase 6E, Villages, being built).** A settlement
-under `village.below` residents (1,000; 136 of Lomia's 682) is to be laid out
-by `layout/village/`, after the approved prototype
+**The village generator (phase 6E, Villages).** A settlement under
+`village.below` residents (1,000; 136 of Lomia's 682) is laid out by
+`layout/village/`, which the staged generator hands it to, after the approved prototype
 `docs/prototypes/proto_village5.py` and the Villages section of `sim-6e.md`:
 no mesh, wards or wall ring; the road leads and buildings are placed one at a
 time. Its numbers, and which building types hold its anchors, are in the
 `village` block of `layout.yaml`, and it draws on streams named `village-…`.
-It does not make layouts yet. Built so far:
+The steps:
 
 1. **Environment** (`village/plan.ts`). A stream with broad bends or a calm
    shore, drawn by the staged generator's water stage with the village's
@@ -800,9 +800,30 @@ It does not make layouts yet. Built so far:
 `node scripts/render-village.ts <out> <suffix> [--as flag,flag] <name>...`
 draws a village's plan; `docs/renders/*-village-step3.svg`,
 `*-village-step5.svg` and `*-village-step8.svg` are Vereceldo (65
-buildings) and Monhas (180) after steps 3, 5 and 8. A village's plan is not
-yet written in the layout format: until it is, villages are still laid out
-by the staged generator.
+buildings) and Monhas (180) after steps 3, 5 and 8.
+
+**A village as a layout** (`village/layout.ts`, layout version 12). Every way
+is cut into segments where another meets or crosses it, at a bridge's ends
+and at the exits; roads are arterials, a bridge's length a bridge, the rest
+lanes. A sea route leaves from the end of the lane to the landing. Each
+building's lot is its plot or its anchor's site; the mill and the landing
+have lanes of their own. A green is a place: the plaza, the lot of its
+building, where the brief is flagged `plaza`, otherwise a green that
+belongs to no building; the well is a lot at its edge, cut out of it. A
+district's ground is its lots. A palisade is a wall of open lines with gaps
+where ways pass, and no gates; gatehouses stand on plots like any building.
+Fields, trees, barns and boats are not in the format. All 136 villages keep
+every invariant, and daily life runs on them (3.77 trips per resident in
+Vereceldo on day 1, 3.11 in Monhas). `docs/renders/*-village.svg` are
+Vereceldo, Flupines and Monhas drawn by `npm run render`.
+
+A village's plots have gardens, so it is less dense than a town: the
+pack's `village.density` (30 to 700 residents per hectare of lots) stands in
+for the town's 60 to 700 in the layout invariant. Lomia's villages come to
+50 to 110; a made-up village of 100 residents to about 38. The first towns over 1,000 residents (Kalduzunbe,
+Sudaber, Sernov, about 200 buildings) are compact blocks about 150 m across
+where a village of 180 buildings spreads about 300 m: the jump at the
+boundary is plain.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane

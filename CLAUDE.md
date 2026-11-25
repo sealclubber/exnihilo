@@ -39,7 +39,7 @@ with the grid laying every town out). Run a single test file with
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
 | `packages/core/test/staged-layout.test.ts` (staged layouts for a sample of 57 settlements, and life on them) | about 1 minute |
 | `packages/core/test/staged-town.test.ts` (blocks, houses, landmarks, districts, selection and fitting for all 682 settlements, planned once) | about 3 minutes |
-| `packages/core/test/village.test.ts` (the village generator's eight steps for all 136 villages, planned once) | about 90 seconds |
+| `packages/core/test/village.test.ts` (the village generator's eight steps and layouts for all 136 villages, and life on two) | about 3 minutes |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.
@@ -254,6 +254,10 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - **It makes the pack's layouts.** `staged/layout.ts` writes the plan
   (`staged/plan.ts`) in the layout format; the pack names it
   (`generator: staged`), and the grid is made only when asked for by name.
+  A settlement under `village.below` residents goes to the village
+  generator, `layout/village/` (the Villages section of `sim-6e.md`): no
+  mesh, wards or wall ring; the road leads, plots are placed one at a time
+  outward from the centre, and lanes are added until every building has one.
   `check: false` returns a layout unchecked, for measuring what a town
   breaks; the API's `?generator=` and the render command use it, to compare.
 - **Open ground.** An open-air building's lot is its whole house rectangle,
@@ -283,7 +287,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 11 and 6.
+  inputs would change. Today they are 6, 12 and 6.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

@@ -471,8 +471,11 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
   if (Math.abs(summary.residentsPerHectare - density) > EPSILON * Math.max(density, 1)) {
     problem(`the summary gives ${summary.residentsPerHectare} residents per hectare but the figure is ${density}`);
   }
-  if (density < pack.layout.density.min || density > pack.layout.density.max) {
-    problem(`there are ${density.toFixed(0)} residents per hectare of built area, outside the pack's limits of ${pack.layout.density.min} to ${pack.layout.density.max}`);
+  // A village, whose plots have gardens, may have limits of its own.
+  const village = pack.layout.village;
+  const limits = village?.density && brief.population < village.below ? village.density : pack.layout.density;
+  if (density < limits.min || density > limits.max) {
+    problem(`there are ${density.toFixed(0)} residents per hectare of built area, outside the pack's limits of ${limits.min} to ${limits.max}`);
   }
   for (const water of waters) {
     if (water.kind === 'river' && water.widths && water.widths.length !== water.centreLine.length) problem(`${water.id} has ${water.widths.length} widths for the ${water.centreLine.length} points of its line`);

@@ -178,7 +178,8 @@ describe('broken layouts', () => {
     ['a passage along a segment that does not exist', ({ layout }) => (withCourtyard(layout).courtyards![0]!.passage = 'segment-1-000009'), /courtyard-1-000001 has its passage along segment-1-000009, which does not exist/],
     ['district areas that overlap', ({ layout, city }) => { city.districts.push({ ...city.districts[0]!, id: 'district-1-002', buildingIds: [] }); layout.districtAreas.push({ districtId: 'district-1-002', polygons: [[[-10, 10], [40, 10], [40, 60], [-10, 60]]], labelPoint: [20, 40] }); }, /the areas of district-1-001 and district-1-002 overlap/],
     ['a label point outside the area', ({ layout }) => (layout.districtAreas[0]!.labelPoint = [200, 200]), /the label point of district-1-001 is outside its area/],
-    ['too few residents for the built area', ({ city }) => (city.people.length = 1), /residents per hectare of built area, outside the pack's limits of 60 to 700/],
+    // The fixture's brief has 10 residents, which makes it a village: the pack's village limits apply.
+    ['too few residents for the built area', ({ city }) => (city.people.length = 1), /residents per hectare of built area, outside the pack's limits of 30 to 700/],
     ['too many residents for the built area', ({ city }) => (city.people.length = 400), /residents per hectare of built area, outside the pack's limits/],
     ['records out of ID order', ({ layout }) => layout.lots.reverse(), /lot lot-1-000001 is out of ID order or repeated/],
     ['a repeated ID', ({ layout }) => (layout.junctions[1]!.id = 'junction-1-000001'), /junction junction-1-000001 is out of ID order or repeated/],
@@ -194,6 +195,18 @@ describe('broken layouts', () => {
     if (!name.includes('summary') && !name.includes('residents') && !name.includes('bounds')) summarise(parts.layout, parts.city);
     if (name.includes('residents')) parts.layout.summary.residentsPerHectare = parts.city.people.length / (parts.layout.summary.builtArea / 10_000);
     expect(checkLayout(parts.layout, parts.city, parts.brief, pack).join('\n')).toMatch(expected);
+  });
+
+  it('holds a town to the town\'s density limits and a village to the village\'s', () => {
+    // 2 residents on the fixture's two lots, about 0.04 ha: under 50 a hectare, enough for a village but not a town.
+    for (const [population, people, expected] of [[10, 2, []], [5000, 2, ["outside the pack's limits of 60 to 700"]]] as const) {
+      const { layout, city, brief } = fixture();
+      brief.population = population;
+      city.people.length = people;
+      summarise(layout, city);
+      const found = checkLayout(layout, city, brief, pack).filter((problem) => problem.includes('residents per hectare'));
+      expect(found.map((problem) => problem.replace(/.*(outside.*)/, '$1')), String(population)).toEqual(expected);
+    }
   });
 
   it('accepts a bridge where a plain street would be refused', () => {

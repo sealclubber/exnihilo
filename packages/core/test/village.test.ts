@@ -4,7 +4,7 @@
  * centre, and lanes added until every building has a plot. Steps 7 and 8: the palisade and the fields.
  */
 import { describe, expect, it } from 'vitest';
-import { type City, generateCity, geometry } from '../src/index.ts';
+import { type City, VILLAGE_GENERATOR, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, geometry } from '../src/index.ts';
 import { SpatialIndex, bearingDifference, boxOf, distancePolygonToPolyline, polygonWithin, polygonsOverlap, projectOnPolyline } from '../src/layout/geometry.ts';
 import { crossingsAlong } from '../src/layout/staged/lines.ts';
 import { armsOf } from '../src/layout/village/forks.ts';
@@ -45,7 +45,9 @@ describe('steps 1 to 3 in every village', () => {
       if (land === 2) expect(plan.ways.filter((way) => way.kind === 'road'), brief.name).toHaveLength(1);
       if (brief.flags.plaza) expect(plan.anchors.green, brief.name).toBeDefined();
       if (plan.anchors.green) greens++;
-      if (plan.anchors.green) expect(plan.anchors.sites.find((site) => site.role === 'well')?.way, brief.name).toBeUndefined();
+      // The well stands on the green, at its edge by the road.
+      const well = plan.anchors.sites.find((site) => site.role === 'well');
+      if (plan.anchors.green && well) expect(geometry.polygonWithin(well.outline, plan.anchors.green.outline), brief.name).toBe(true);
     }
     console.log(`Village shapes in Lomia: ${JSON.stringify(count)}; ${greens} have a green`);
     expect(count.shore).toBe(villages.filter(({ brief }) => brief.coast.isCoastal).length);
@@ -80,7 +82,7 @@ describe('steps 1 to 3 in every village', () => {
       if (brief.flags.port && !roles.includes('landing')) problems.push(`${brief.name}: no landing`);
       if (plan.river && !roles.includes('mill')) problems.push(`${brief.name}: no mill`);
       if (!roles.includes('well')) problems.push(`${brief.name}: no well`);
-      const plots = plan.anchors.sites.filter((site) => site.role !== 'landing' && site.role !== 'well' && site.role !== 'green');
+      const plots = plan.anchors.sites.filter((site) => site.role !== 'well' && site.role !== 'green');
       for (const site of plots) {
         for (const way of plan.ways) if (distancePolygonToPolyline(site.outline, way.points) < way.width / 2 - 0.05) problems.push(`${brief.name}: the ${site.role} is on a way`);
         for (const corner of site.outline) if ((plan.river && plan.river.gap(corner) < -0.01) || (plan.coast && plan.coast.gap(corner) < -0.01)) problems.push(`${brief.name}: the ${site.role} is in the water`);
@@ -234,5 +236,41 @@ describe('steps 7 and 8, and the village whole', () => {
     }
     console.log(`Fields about Lomia's villages: ${fields}, ${JSON.stringify(kinds)}`);
     expect(fields).toBeGreaterThan(plans.length * 10);
+  });
+});
+
+describe('village layouts', () => {
+  it('lays out all 136 villages in the layout format by the pack\'s generator, every one keeping every invariant', () => {
+    const problems: string[] = [];
+    let walled = 0;
+    for (const { brief, city } of villages) {
+      const layout = generateLayout(city, brief, pack, { check: false });
+      expect(layout.summary.generator, brief.name).toBe(VILLAGE_GENERATOR);
+      expect(layout.lots).toHaveLength(city.buildings.length);
+      problems.push(...checkLayout(layout, city, brief, pack).map((problem) => `${brief.name}: ${problem}`));
+      if (layout.walls.length > 0) walled++;
+    }
+    expect(problems.slice(0, 10)).toEqual([]);
+    expect(walled).toBe(villages.filter(({ brief }) => brief.flags.walls).length);
+  });
+
+  it('is byte-identical from the same seed', () => {
+    const { brief, city } = named('Vereceldo');
+    expect(JSON.stringify(generateLayout(city, brief, pack))).toBe(JSON.stringify(generateLayout(city, brief, pack)));
+  });
+
+  it('carries daily life: every plan keeps its rules, and trips per resident are reported', () => {
+    for (const name of ['Vereceldo', 'Monhas']) {
+      const { brief, city } = named(name);
+      const layout = generateLayout(city, brief, pack);
+      const life = createLife({ city, layout, pack });
+      const checker = createPlanChecker({ city, layout, pack });
+      const plans = life.plansForDay(1);
+      const problems = plans.flatMap((plan) => checker.check(plan).map((problem) => `${plan.personId}: ${problem}`));
+      expect(problems.slice(0, 5), name).toEqual([]);
+      const trips = plans.reduce((sum, plan) => sum + plan.activities.filter((activity) => activity.kind === 'travel').length, 0);
+      console.log(`${name}, a village of ${city.buildings.length} buildings: ${(trips / city.people.length).toFixed(2)} trips per resident on day 1`);
+      expect(trips).toBeGreaterThan(0);
+    }
   });
 });

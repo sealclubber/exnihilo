@@ -63,7 +63,8 @@ export function drawVillageSvg(plan: VillagePlan, brief: SettlementBrief): strin
   for (const site of sites) {
     if (site.role === 'green') continue;
     if (site.role === 'landing') {
-      lines.push(`<path d="${path(site.outline, true)}" fill="#8c7d68" stroke="${INK}" stroke-width="0.6"/>`);
+      lines.push(`<path d="${path(site.outline, true)}" fill="#cfc9b4" stroke="#5a5348" stroke-width="0.8"/>`);
+      for (const jetty of site.drawing) lines.push(`<path d="${path(jetty, true)}" fill="#8c7d68" stroke="${INK}" stroke-width="0.6"/>`);
       continue;
     }
     if (site.role === 'church' || site.role === 'manor') lines.push(`<path d="${path(site.outline, true)}" fill="${site.role === 'church' ? YARD : '#cfc9b4'}" stroke="#5a5348" stroke-width="1.2"/>`);

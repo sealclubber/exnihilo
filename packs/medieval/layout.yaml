@@ -137,7 +137,8 @@ footprints:
 riverWidth: 14
 
 # A sanity check on the result: residents per hectare of built area, which is
-# the total area of the lots. A layout outside these limits is rejected.
+# the total area of the lots. A layout outside these limits is rejected. A
+# village has limits of its own, in the `village` block below.
 density:
   min: 60
   max: 700
@@ -607,6 +608,9 @@ staged:
 # village is laid out as any other town. Every value is a placeholder, the
 # prototype's (docs/prototypes/proto_village5.py), to be tuned by eye.
 #
+#   density  residents per hectare of lots a village's layout must keep
+#            within, in place of `density` above: a village's plots have
+#            gardens, and a village of 100 residents comes to about 48
 #   widths   a road's and a lane's full width
 #   reach    how far out roads and water are drawn
 #   cap      the built stretch of the through road reaches about `base`
@@ -683,7 +687,8 @@ staged:
 #            out by `bulge`
 #   plots    laid outward from the centre along both sides of every way.
 #            A plot is `width` by `depth` (`largeDepth` from `largeFrom`
-#            buildings, as the prototype has them), wider the larger its building's
+#            buildings, as the prototype has them), wider the larger its
+#            building's
 #            lot (by `jitter` of the span at most); the next stands
 #            `spacing` along. Its house is at the front, `house.setBack`
 #            back. A plot wider than `farmstead.wider` is a farmstead by
@@ -709,18 +714,22 @@ staged:
 #              outline wobbling by `wobble`, beside the road at the centre,
 #              with a pond of radius `pond` a share `pondAlong` of its length
 #              from its middle, the well, and a lane round it
-#     well     without a green the well stands by the road at the centre, a
-#              site `side` metres square
+#     well     on the green, at its edge, or without a green by the road at
+#              the centre: a site `side` metres square with a footprint
+#              `footprint` square in its middle, the rest open ground
 #     church   a churchyard `width` by `depth`, by the green or at least
 #              `from` metres from the centre
 #     manor    a town flagged `citadel` has a manor in its own yard, `width`
 #              by `depth`, at least `from` metres from the centre
 #     mill     beside the river's crossing, `along` metres from it, `length`
 #              by `width` at the bank
-#     landing  a town flagged `port` has a landing: one jetty `length` by
-#              `width` metres, and a lane to it
+#     landing  a town flagged `port`, or with a sea route, has a landing: a
+#              lane to the shore, the landing's ground `site` at its end, and
+#              one jetty `length` by `width` metres over the water; each sea
+#              route leaves from a quay at the lane's end
 village:
   below: 1000
+  density: {min: 30, max: 700}
   widths: {road: 6, lane: 3.6}
   reach: 900
   cap: {base: 70, perBuilding: 0.85}
@@ -810,8 +819,8 @@ village:
       wobble: 0.08
       pond: 9
       pondAlong: 0.35
-    well: {types: [well], side: 3}
+    well: {types: [well], side: 6, footprint: 3}
     church: {types: [temple, chapel], width: 34, depth: 40, from: 20}
     manor: {types: [citadel], width: 58, depth: 62, from: 120}
     mill: {types: [mill], length: 12, width: 8, along: 22}
-    landing: {types: [docks], length: 30, width: 3.6}
+    landing: {types: [docks], length: 30, width: 3.6, site: {width: 14, depth: 10}}

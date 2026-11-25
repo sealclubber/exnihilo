@@ -13,6 +13,8 @@ import type { Way } from './roads.ts';
 export const DRY = 0.5;
 /** The points an outline is tested at for water: its corners and the points between, this many to a side. */
 const PER_SIDE = 4;
+/** How far a plot keeps clear of a roadway beyond its edge, in metres: a hair, so that rounding never puts it on it. */
+const CLEAR = 0.01;
 /** Ways and outlines are indexed in squares of this many metres. */
 const CELL = 40;
 
@@ -104,7 +106,7 @@ export class Ground {
     for (const way of this.ways) {
       const reach = this.boxOfWay(way);
       if (reach.minX > box.maxX || reach.maxX < box.minX || reach.minY > box.maxY || reach.maxY < box.minY) continue;
-      if (distancePolygonToPolyline(outline, way.points) < way.width / 2 - 0.05) return false;
+      if (distancePolygonToPolyline(outline, way.points) < way.width / 2 + CLEAR) return false;
     }
     for (const other of this.outlines.near(box)) if (polygonsOverlap(outline, other)) return false;
     return true;

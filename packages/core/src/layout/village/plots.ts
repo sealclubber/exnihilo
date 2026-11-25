@@ -182,7 +182,7 @@ export class PlotWalker {
     const inside = (shape: Point[]) => polygonWithin(shape, outline);
     // A small thing in the open, as a well: a square at the middle of the front.
     if (settings.anchors.well.types.includes(building.type)) {
-      const side = Math.min(settings.anchors.well.side, width, depth);
+      const side = Math.min(settings.anchors.well.footprint, width, depth);
       const square = rectAt(add(add(corner, u, (width - side) / 2), v, rules.margin), u, v, side, side);
       return inside(square) ? { footprints: [square], drawing: [] } : undefined;
     }

@@ -165,7 +165,7 @@ export function planVillage(brief: SettlementBrief, input: VillageInput, pack: S
   if (scale > 1) notes.push(`the lanes had to reach ${scale.toFixed(2)} times as far as the pack says to find room for every building`);
 
   // 7. Palisade.
-  const onLand = [...walker.plots.map((plot) => plot.outline), ...anchors.sites.filter((site) => site.role !== 'landing' && site.role !== 'mill').map((site) => site.outline)];
+  const onLand = [...walker.plots.map((plot) => plot.outline), ...anchors.sites.map((site) => site.outline)];
   let palisade: Palisade | undefined;
   if (brief.flags.walls) {
     const fitted = fitPalisade({ settings, rng: stepRng(seed, 'village-palisade'), outlines: onLand, ways: ground.ways, ...(river && { river }), ...(coast && { coast }) });
@@ -183,7 +183,7 @@ export function planVillage(brief: SettlementBrief, input: VillageInput, pack: S
     ways: ground.ways,
     ...(palisade && { palisade }),
     ...(anchors.green && { green: anchors.green.outline }),
-    ...(landing && { landing: { outline: landing.outline, out: unitOf(landing.outline[0] as Point, landing.outline[1] as Point) } }),
+    ...(landing && landing.drawing[0] && { landing: { outline: landing.drawing[0], out: unitOf(landing.drawing[0][0] as Point, landing.drawing[0][1] as Point) } }),
     ...(river && { river }),
     ...(coast && { coast }),
   });

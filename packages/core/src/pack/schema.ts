@@ -715,6 +715,8 @@ export type StagedSettings = z.infer<typeof StagedSettingsSchema>;
  */
 const VillageSettingsSchema = z.strictObject({
   below: z.int().positive(),
+  /** Residents per hectare of lots a village's layout must keep within, in place of the town's limits: a village's plots have gardens. Left out, the town's. */
+  density: z.strictObject({ min: z.number().nonnegative(), max: z.number().positive() }).optional(),
   /** A road's and a lane's full width. */
   widths: z.strictObject({ road: metres, lane: metres }),
   /** How far out roads and water are drawn. */
@@ -865,19 +867,19 @@ const VillageSettingsSchema = z.strictObject({
   }),
   /**
    * The anchors, placed before any plot, and the building types each holds: the first type the city has, the
-   * lowest ID of it. A village flagged `plaza` has a green, and others by chance: `share.least` at `share.from`
+   * lowest ID of it. A well's site is `side` metres square, its footprint `footprint` square in the middle. A village flagged `plaza` has a green, and others by chance: `share.least` at `share.from`
    * buildings, rising to `share.most` at `share.to`. A green is an oval `length` by `width` metres (`large` from `largeFrom` buildings), with a
    * pond and the well, beside the road at the centre; without one the well stands by the road there. A church's,
    * a manor's plot is `width` by `depth` and lies at least `from` metres from the centre. A mill is `length` by
-   * `width` at the bank, `along` metres from the crossing. A landing is a jetty `length` metres over the water.
+   * `width` at the bank, `along` metres from the crossing. A landing is ground `site.width` by `site.depth` at the shore, at the end of a lane, with a jetty `length` metres over the water.
    */
   anchors: z.strictObject({
     green: z.strictObject({ types: z.array(id).min(1), share: z.strictObject({ least: probability, most: probability, from: wholeNumber, to: wholeNumber }), small: z.strictObject({ length: metres, width: metres }), large: z.strictObject({ length: metres, width: metres }), largeFrom: wholeNumber, wobble: probability, pond: metres, pondAlong: probability }),
-    well: z.strictObject({ types: z.array(id).min(1), side: metres }),
+    well: z.strictObject({ types: z.array(id).min(1), side: metres, footprint: metres }),
     church: z.strictObject({ types: z.array(id).min(1), width: metres, depth: metres, from: z.number().nonnegative() }),
     manor: z.strictObject({ types: z.array(id).min(1), width: metres, depth: metres, from: z.number().nonnegative() }),
     mill: z.strictObject({ types: z.array(id).min(1), length: metres, width: metres, along: z.number().nonnegative() }),
-    landing: z.strictObject({ types: z.array(id).min(1), length: metres, width: metres }),
+    landing: z.strictObject({ types: z.array(id).min(1), length: metres, width: metres, site: z.strictObject({ width: metres, depth: metres }) }),
   }),
 });
 export type VillageSettings = z.infer<typeof VillageSettingsSchema>;
