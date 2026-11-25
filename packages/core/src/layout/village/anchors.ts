@@ -17,6 +17,7 @@ import { distancePolygonToPolyline, pointAlongPolyline, polygonsOverlap, polylin
 import { add, between, dot, left, tangentAt, unit } from '../staged/lines.ts';
 import type { Coast, River } from '../staged/water.ts';
 import type { VillageInput, VillageShape } from './plan.ts';
+import { DRY, plotAt, rectAt } from './ground.ts';
 import type { Bridge, Way } from './roads.ts';
 
 export type AnchorRole = 'green' | 'well' | 'church' | 'manor' | 'mill' | 'landing';
@@ -61,8 +62,6 @@ export interface AnchorInput {
 const CENTRE: Point = [0, 0];
 /** Ways are searched for a plot in steps of this many metres. */
 const STEP = 2;
-/** How far a plot or site keeps from the water's edge, in metres; a mill stands right at it. */
-const DRY = 0.5;
 /** The points an outline is tested at for water: its corners and the points between, this many to a side. */
 const PER_SIDE = 4;
 /** How many points an oval is drawn with. */
@@ -70,27 +69,6 @@ const OVAL = 40;
 /** How far a green is moved out from the road at a time when it does not fit, and how many times. */
 const GREEN_STEP = 6;
 const GREEN_TRIES = 4;
-
-/** A rectangle from a corner, `width` along `u` and `depth` along `v`. */
-export const rectAt = (corner: Point, u: Point, v: Point, width: number, depth: number): Point[] => [corner, add(corner, u, width), add(add(corner, u, width), v, depth), add(corner, v, depth)];
-
-/** A plot fronting a way: from `along` for `width` metres along it, on one side, `depth` deep, `gap` back from the way's edge. */
-export function plotAt(way: Way, length: number, along: number, side: 1 | -1, width: number, depth: number, gap: number): { outline: Point[]; front: [Point, Point]; u: Point; v: Point } | undefined {
-  const end = along + width;
-  if (along < 0 || end > length) return undefined;
-  const [a, b] = [pointAlongPolyline(way.points, along), pointAlongPolyline(way.points, end)];
-  const across = (at: number): Point => {
-    const normal = left(tangentAt(way.points, at, length));
-    return [normal[0] * side, normal[1] * side];
-  };
-  const [na, nb] = [across(along), across(end)];
-  const off = way.width / 2 + gap;
-  const front: [Point, Point] = [add(a, na, off), add(b, nb, off)];
-  const outline = [front[0], front[1], add(b, nb, off + depth), add(a, na, off + depth)];
-  const u = unit(front[0], front[1]);
-  const v = unit([0, 0], [na[0] + nb[0], na[1] + nb[1]]);
-  return { outline, front, u, v };
-}
 
 export function placeAnchors({ brief, settings, input, rng, ways, bridges, buildings, river, coast }: AnchorInput): Anchors {
   const notes: string[] = [];
@@ -141,7 +119,6 @@ export function placeAnchors({ brief, settings, input, rng, ways, bridges, build
     return undefined;
   };
   const indexOf = (way: Way) => allWays().indexOf(way);
-
 
   // ---- The green, with its pond, the well and a lane round it -------------------------------------------------------
   let greenLane: Way | undefined;

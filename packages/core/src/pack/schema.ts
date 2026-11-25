@@ -732,6 +732,53 @@ const VillageSettingsSchema = z.strictObject({
   /** A plot stands `gap` metres back from the edge of the way it fronts. */
   gap: z.number().nonnegative(),
   /**
+   * Lanes that fork off the road near the centre, from `from` buildings: as many as the first entry of `counts`
+   * whose `below` the village is under. Each leaves a road arm `start` metres from the centre (further, by
+   * `startGrowth` times, for each round of arms already forked), at `angle` degrees, `length` metres long, straying
+   * `stray` metres. A share `loop` come back to the road `loopReach` times their length farther out, bowed
+   * `loopOut` metres aside. A fork that cannot be laid clear of water and the anchors is tried `tries` times.
+   */
+  forks: z.strictObject({
+    from: wholeNumber,
+    counts: z.array(z.strictObject({ below: wholeNumber.optional(), forks: wholeNumber })).min(1),
+    start: span,
+    startGrowth: z.number().nonnegative(),
+    angle: span,
+    length: span,
+    stray: z.number().nonnegative(),
+    loop: probability,
+    loopOut: span,
+    loopReach: share,
+    tries: wholeNumber,
+  }),
+  /** At a crossroads, from the forks' `from`, a curved lane joins each two neighbouring arms no more than `widest` degrees apart, `radius` metres out on the one and that times `spread` on the other, bowed out by `bulge`. */
+  links: z.strictObject({ radius: span, spread: span, bulge: span, widest: z.number().min(0).max(180) }),
+  /**
+   * Plots, laid outward from the centre along both sides of every way. A plot is `width` by `depth` metres, wider
+   * the larger its building's lot, by `jitter` of the span at most; the next is `spacing` metres along. Its house
+   * stands at the front, `house.setBack` back, `house.width` by `house.depth` (a share `turned` gable-on), at least
+   * `house.margin` from the plot's sides. A plot wider than `farmstead.wider` is a farmstead by chance
+   * `farmstead.share`: a barn behind the house and perhaps a shed at the back, drawing only. From `row.from`
+   * buildings, plots within `row.within` metres of the centre are `row.width` wide and `row.plot` deep, their houses `row.depth` deep
+   * and joined into a terraced row; they go to buildings whose lot is at most `row.most` metres wide. The next
+   * plot goes to the way nearest the centre, the distance along a road weighted by `roadWeight` and a lane's raised
+   * by `lanePenalty`. A road is built no farther than the cap each way, a lane no farther than `laneReach` times
+   * the cap from the centre. Ways are walked in steps of `step` metres where a plot does not fit.
+   */
+  plots: z.strictObject({
+    width: span,
+    depth: span,
+    jitter: probability,
+    spacing: span,
+    house: z.strictObject({ width: span, depth: span, turned: probability, setBack: span, margin: z.number().nonnegative() }),
+    farmstead: z.strictObject({ wider: metres, share: probability, barn: z.strictObject({ width: span, depth: span, behind: span }), shed: z.strictObject({ width: metres, depth: metres, share: probability }) }),
+    row: z.strictObject({ from: wholeNumber, within: metres, width: span, depth: span, plot: span, most: metres }),
+    roadWeight: share,
+    lanePenalty: z.number().nonnegative(),
+    laneReach: share,
+    step: metres,
+  }),
+  /**
    * The anchors, placed before any plot, and the building types each holds: the first type the city has, the
    * lowest ID of it. A green is an oval `length` by `width` metres (`large` from `largeFrom` buildings), with a
    * pond and the well, beside the road at the centre; without one the well stands by the road there. A church's,

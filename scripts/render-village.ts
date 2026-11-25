@@ -26,5 +26,5 @@ for (const name of names) {
   const plan = planVillage(brief, villageInput(city), pack);
   const took = performance.now() - started;
   writeFileSync(join(out, `${name.toLowerCase()}-${suffix}.svg`), drawVillageSvg(plan, brief));
-  console.log(`${name}: ${plan.shape}, ${plan.buildings} buildings, ${plan.ways.length} ways, ${plan.bridges.length} bridges, anchors ${plan.anchors.sites.map((site) => `${site.role}${site.building ? '' : ' (empty)'}`).join(', ') || 'none'}, ${Math.round(took)} ms${plan.notes.length ? ` · ${plan.notes.join('; ')}` : ''}`);
+  console.log(`${name}: ${plan.shape}, ${plan.buildings} buildings, ${plan.ways.length} ways, ${plan.bridges.length} bridges, ${plan.plots.length} plots (${plan.plots.filter((plot) => plot.row).length} in rows), ${plan.unplaced.length} unplaced, anchors ${plan.anchors.sites.map((site) => `${site.role}${site.building ? '' : ' (empty)'}`).join(', ') || 'none'}, ${Math.round(took)} ms${plan.notes.length ? ` · ${plan.notes.join('; ')}` : ''}`);
 }

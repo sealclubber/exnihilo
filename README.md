@@ -749,10 +749,32 @@ It does not make layouts yet. Built so far:
    a mill beside the stream's crossing; a landing (flag `port`) with one
    jetty and a lane to it. Each holds the first building of its pack types
    the city has.
+4. **Central forks** (`village/forks.ts`). From 90 buildings, lanes fork off
+   the road arms near the centre at 25 to 45 degrees, two under 150
+   buildings and three above, each round of arms a little farther out so
+   that they do not meet at one point; about half loop back to the road
+   farther out. At a crossroads a curved link joins each two neighbouring
+   arms. A lane that meets the water is cut short there; one that meets an
+   anchor is drawn again.
+5. **Plots** (`village/plots.ts`). Every way is walked along both sides from
+   its point nearest the centre, and the next plot always goes to the walk
+   nearest the centre (a road's distance weighted, so that bigger villages
+   fill their lanes and do not string out). Buildings are taken largest lot
+   first, so the larger a building's lot the nearer the centre and the wider
+   its plot (13 to 21 m, 30 to 58 m deep), its house at the front and its
+   garden behind; about a third of the wider plots are farmsteads with a
+   barn and a shed, drawing only. An open-air place is built over only as
+   far as its `footprints` coverage. From 140 buildings, plots within 70 m of
+   the centre are 7 to 9.5 m wide with their houses joined in a terraced
+   row; these go to the buildings with small lots (`row.most`), the larger
+   ones standing just beyond. A road is built no farther than the cap each
+   way. What does not fit waits for step 6: after step 5, 7,476 of the
+   17,597 buildings of Lomia's villages have a plot.
 
 `node scripts/render-village.ts <out> <suffix> [--as flag,flag] <name>...`
-draws a village's plan so far; `docs/renders/*-village-step3.svg` are
-Vereceldo (65 buildings) and Monhas (180) after step 3.
+draws a village's plan so far; `docs/renders/*-village-step3.svg` and
+`*-village-step5.svg` are Vereceldo (65 buildings) and Monhas (180) after
+steps 3 and 5.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane

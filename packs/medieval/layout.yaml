@@ -622,6 +622,33 @@ staged:
 #            through road bends at the centre and does not turn a corner
 #   bridge   a bridge reaches `beyond` metres onto each bank
 #   gap      a plot stands this far back from the edge of its way
+#   forks    from `from` buildings, lanes fork off the road near the centre:
+#            as many as the first of `counts` the village is `below`. Each
+#            leaves a road arm `start` metres out (farther by `startGrowth`
+#            for each round of arms, so that they do not all meet at one
+#            point), at `angle` degrees, `length` long, straying `stray`; a
+#            share `loop` come back to the road `loopReach` times their
+#            length farther out, bowed `loopOut` aside. One that meets water
+#            or an anchor is drawn again, at most `tries` times.
+#   links    at a crossroads, from the same size, a curved lane joins each
+#            two neighbouring arms no more than `widest` degrees apart,
+#            `radius` out on one and that times `spread` on the other, bowed
+#            out by `bulge`
+#   plots    laid outward from the centre along both sides of every way.
+#            A plot is `width` by `depth`, wider the larger its building's
+#            lot (by `jitter` of the span at most); the next stands
+#            `spacing` along. Its house is at the front, `house.setBack`
+#            back. A plot wider than `farmstead.wider` is a farmstead by
+#            chance `farmstead.share`, with a barn and perhaps a shed:
+#            drawing only. From `row.from` buildings, plots within
+#            `row.within` of the centre are `row.width` wide and `row.plot`
+#            deep, with their houses joined in a terraced row; they go to
+#            buildings whose lot is at most `row.most` wide. The next plot
+#            goes to the way nearest the centre, a road's distance weighted
+#            by `roadWeight` and a lane's raised by `lanePenalty`; a road is
+#            built no farther than the cap, a lane no farther than
+#            `laneReach` times it. A way is walked in steps of `step` where a
+#            plot does not fit.
 #   anchors  placed before any plot, each holding the first of its `types`
 #            that the city has (the lowest ID of it). FOR REVIEW: which
 #            types are the green, well, church, manor, mill and landing is
@@ -651,6 +678,31 @@ village:
   road: {through: 140, wander: 0.05, step: 40}
   bridge: {beyond: 4}
   gap: 0.8
+  forks:
+    from: 90
+    counts: [{below: 150, forks: 2}, {forks: 3}]
+    start: {min: 15, max: 55}
+    startGrowth: 0.6
+    angle: {min: 25, max: 45}
+    length: {min: 170, max: 250}
+    stray: 14
+    loop: 0.55
+    loopOut: {min: 62, max: 88}
+    loopReach: 1.05
+    tries: 4
+  links: {radius: {min: 95, max: 135}, spread: {min: 0.85, max: 1.15}, bulge: {min: 1.05, max: 1.3}, widest: 150}
+  plots:
+    width: {min: 13, max: 21}
+    depth: {min: 30, max: 58}
+    jitter: 0.15
+    spacing: {min: 0, max: 5}
+    house: {width: {min: 7.5, max: 11.5}, depth: {min: 5.5, max: 7.5}, turned: 0.25, setBack: {min: 1.5, max: 6}, margin: 1}
+    farmstead: {wider: 15.5, share: 0.33, barn: {width: {min: 7, max: 10}, depth: {min: 4.5, max: 6}, behind: {min: 6, max: 12}}, shed: {width: 4, depth: 3.5, share: 0.5}}
+    row: {from: 140, within: 70, width: {min: 7, max: 9.5}, depth: {min: 7, max: 9}, plot: {min: 24, max: 32}, most: 10}
+    roadWeight: 1.9
+    lanePenalty: 18
+    laneReach: 2.2
+    step: 5
   anchors:
     green:
       types: [market-square]

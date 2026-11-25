@@ -8,8 +8,11 @@
  * 1. Environment: a stream with broad bends, or a calm shore.
  * 2. Road: each route of the brief; opposite exits are one through road.
  * 3. Anchors: the green, then church, manor, mill and landing.
+ * 4. Central forks: lanes off the road near the centre, and links between a
+ *    crossroads' arms.
+ * 5. Plots, outward from the centre along every way.
  *
- * Later steps (forks, plots, lanes, palisade, fields) are still to come.
+ * Later steps (lanes for frontage, palisade, fields) are still to come.
  */
 import type { City } from '../../city/records.ts';
 import { stepRng } from '../../city/random.ts';
@@ -17,6 +20,9 @@ import type { SettingPack, VillageSettings } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { type Coast, type River, makeCoast, makeRiver } from '../staged/water.ts';
 import { type Anchors, placeAnchors } from './anchors.ts';
+import { layForks } from './forks.ts';
+import { Ground } from './ground.ts';
+import { type Plot, PlotWalker } from './plots.ts';
 import { type Bridge, type Way, layRoads } from './roads.ts';
 
 export class VillageLayoutError extends Error {}
@@ -41,6 +47,10 @@ export interface VillagePlan {
   ways: Way[];
   bridges: Bridge[];
   anchors: Anchors;
+  /** One for each building no anchor holds, as far as the ways allow so far. */
+  plots: Plot[];
+  /** The buildings that have no plot yet. */
+  unplaced: string[];
   /** What could not be done as the brief asked, for the report. */
   notes: string[];
 }
@@ -92,8 +102,20 @@ export function planVillage(brief: SettlementBrief, input: VillageInput, pack: S
   // 3. Anchors.
   const anchors = placeAnchors({ brief, settings, input, shape, rng: stepRng(seed, 'village-anchors'), ways: roads.ways, bridges: roads.bridges, buildings, ...(river && { river }), ...(coast && { coast }) });
   notes.push(...anchors.notes);
+  const ground = new Ground([...roads.ways, ...anchors.lanes], river, coast);
+  if (anchors.green) ground.occupy(anchors.green.outline);
+  for (const site of anchors.sites) if (site.role !== 'green') ground.occupy(site.outline);
 
-  return { seed, buildings, cap, shape, ...(river && { river }), ...(coast && { coast }), ways: [...roads.ways, ...anchors.lanes], bridges: roads.bridges, anchors, notes };
+  // 4. Central forks.
+  const forks = layForks({ settings, rng: stepRng(seed, 'village-forks'), ground, buildings, crossroads: shape === 'crossroads', ...(anchors.green && { green: anchors.green.outline }), ...(coast && { coast }) });
+  notes.push(...forks.notes);
+
+  // 5. Plots, outward from the centre.
+  const held = new Set(anchors.sites.flatMap((site) => (site.building === undefined ? [] : [site.building])));
+  const walker = new PlotWalker({ settings, pack, rng: stepRng(seed, 'village-plots'), ground, cap, buildings, toPlace: input.buildings.filter((building) => !held.has(building.id)) });
+  walker.walk();
+
+  return { seed, buildings, cap, shape, ...(river && { river }), ...(coast && { coast }), ways: ground.ways, bridges: roads.bridges, anchors, plots: walker.plots, unplaced: walker.unplaced, notes };
 }
 
 /** The centre of every village: where its roads meet. */
