@@ -1,5 +1,9 @@
 /**
- * Fitting the city, first part: districts are groups of wards.
+ * The district forecast: before any house exists, which kind of district each
+ * ward is expected to be. It sets each ward's character (house scale, lane
+ * frequency); it is a forecast, not the districts. Which district each kept
+ * house belongs to is decided after selection, bank by bank (`banks.ts`).
+ * Until that replaces it (phase 6F, Part B), selection still reads it.
  *
  * Each of the city's districts starts from a seed ward chosen by its kind's
  * placement, and grows over neighbouring wards, nearest first. Crossing a
@@ -36,7 +40,8 @@ export interface Character {
   passage: number;
 }
 
-export interface DistrictPlan {
+/** For each ward, the kind of district it is forecast to be, by the district it was grown for. */
+export interface DistrictForecast {
   /** For each ward, its district by its place in the city's list; nothing for a ward in none. */
   of: Array<number | undefined>;
   /** For each district, the ward it started from; nothing if no ward was left for it. */
@@ -73,13 +78,13 @@ export function characterOf(settings: StagedSettings, kind: string | undefined):
 export const roomIn = (ward: { area: number }, settings: StagedSettings, scale: number) => ward.area / (settings.districts.perHouse * scale);
 
 /** Which wards lie beside which, and what passing between them costs. */
-export function wardsBeside({ settings, wards, mesh, roads, streets, river, wall }: Pick<DistrictInput, 'settings' | 'wards' | 'mesh' | 'roads' | 'streets' | 'river' | 'wall'>): DistrictPlan['beside'] {
+export function wardsBeside({ settings, wards, mesh, roads, streets, river, wall }: Pick<DistrictInput, 'settings' | 'wards' | 'mesh' | 'roads' | 'streets' | 'river' | 'wall'>): DistrictForecast['beside'] {
   const { barriers } = settings.districts;
   const middles = wards.map((ward) => polygonCentroid(ward.polygon));
   const walls = wall ? wall.parts.map((part) => (part.closed ? [...part.points, part.points[0] as Point] : part.points)) : [];
   // Two wards are beside each other if nothing wider than a road and its verges lies between them.
   const near = Math.max(settings.widths.highway + 2 * settings.wards.highwayVerge, 2 * settings.wards.fromWall) + settings.widths.wardBorder + 1;
-  const beside: DistrictPlan['beside'] = wards.map(() => []);
+  const beside: DistrictForecast['beside'] = wards.map(() => []);
   const joined = new Set<string>();
   const join = (a: number, b: number, extra = 0) => {
     const key = a < b ? `${a}:${b}` : `${b}:${a}`;
@@ -127,7 +132,7 @@ export function wardsBeside({ settings, wards, mesh, roads, streets, river, wall
   return beside;
 }
 
-export function growDistricts(input: DistrictInput): DistrictPlan {
+export function forecastDistricts(input: DistrictInput): DistrictForecast {
   const { settings, districts, placementOf, buildings, wards, variation, roads, river, coast } = input;
   const rules = settings.districts;
   const beside = wardsBeside(input);
