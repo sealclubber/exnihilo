@@ -31,7 +31,7 @@ describe('GET /api/settlements/:id/layout', () => {
     expect(status).toBe(200);
     expect(LayoutSchema.parse(body)).toEqual(JSON.parse(JSON.stringify(expected)));
     expect(body.lots).toHaveLength(1825);
-    expect(body.summary.generator).toBe('grid');
+    expect(body.summary.generator).toBe('staged');
   });
 
   it('serves the layout a named generator makes of the same town', async () => {

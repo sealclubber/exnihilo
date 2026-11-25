@@ -2,13 +2,14 @@
 # All lengths are in metres. Every value is a placeholder to be tuned by eye:
 # edit, then run the layout again or restart the server.
 #
-# The `grid` generator lays every town out today. It is deliberately regular:
-# a street grid trimmed to a compact outline, with lots along the streets.
 # The `staged` generator of phase 6E, whose numbers are in the `staged` block
-# at the end of this file, is being built and will take over when complete.
+# at the end of this file, lays every town out: wards, blocks of houses with
+# courtyards behind them, a plaza, a wall where the town has one. The `grid`
+# generator is still there, deliberately regular: a street grid trimmed to a
+# compact outline, with lots along the streets.
 
 # Which generator lays towns out. Left out, the grid.
-generator: grid
+generator: staged
 
 # The full width of the roadway, per kind of street segment. Arterials are the
 # streets that carry the brief's routes from the centre to the town's exits;

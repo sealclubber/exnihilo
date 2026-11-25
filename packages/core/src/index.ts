@@ -33,7 +33,7 @@ export * from './life/records.ts';
 export * from './life/calendar.ts';
 export { createLife, walkingSpeed, tripDuration, dutyCount, restDaysUpTo, LifeError, type LifeInputs, type SettlementLife } from './life/life.ts';
 export { createWorkingHours, type WorkingHours } from './life/hours.ts';
-export { positionOnWander, clipWander, groundOf, makeWander, type Ground, type WanderHabit } from './life/wander.ts';
+export { positionOnWander, clipWander, groundOf, makeWander, outsideGrounds, type Ground, type OutsideGround, type WanderHabit } from './life/wander.ts';
 export { createPlanChecker, type PlanChecker } from './life/invariants.ts';
 export { describeDay } from './life/report.ts';
 export { drawOf, arrivalRate, expectedTravellers, type Draw, type DrawTerm } from './outsiders/draw.ts';

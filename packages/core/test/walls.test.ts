@@ -74,7 +74,7 @@ describe('walls, gates and places in the format', () => {
     const { layout, city, brief } = fixture();
     expect(LayoutSchema.safeParse(layout).success).toBe(true);
     expect(checkLayout(layout, city, brief, pack)).toEqual([]);
-    expect(LAYOUT_VERSION).toBe(10);
+    expect(LAYOUT_VERSION).toBe(11);
   });
 
   type Parts = ReturnType<typeof fixture>;

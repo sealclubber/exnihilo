@@ -92,9 +92,9 @@ enforce them. Do not weaken that test to make a change pass.
     `layout/records.ts` guarantees. A segment is a polyline and a lot is a
     polygon: nothing that reads a layout may assume straight streets, right
     angles, rectangles or a grid. `layout/grid.ts`, deliberately regular,
-    makes it today; `layout/staged/` is the generator of phase 6E, being
-    built stage by stage (`sim-6e.md`). A generator may be replaced; the
-    format will not.
+    is still there by name; `layout/staged/`, the generator of phases 6E
+    and 6F (`sim-6e.md`, `sim-6f.md`), makes every town. A generator may be
+    replaced; the format will not.
 
 13. **Nothing is stepped.** A resident's whereabouts are a pure function of
     game time: a day plan is derived from the person, the day number, the
@@ -134,7 +134,9 @@ enforce them. Do not weaken that test to make a change pass.
     Hovering changes nothing at all.
 23. **A wander is derived, not stepped.** Someone outside moves about the
     lot's open ground along a wander drawn from the person, the building and
-    the stay. The server sends the wander; the client interpolates.
+    the stay; a building whose lot has none uses its courtyard, then the
+    plaza or the street in front (`outsideGrounds`). A wander stays on the
+    ground it starts on. The server sends the wander; the client interpolates.
 24. **Footprints are format, not decoration.** They go through the layout
     format and its invariants, so that a later generator can supply better
     ones. Whatever reads them may not assume one rectangle per lot.
@@ -195,6 +197,9 @@ centre, x east and y south; bearings are degrees clockwise from north.
   each end.
 - **Footprints** are the outlines of a lot's buildings: they lie inside the
   lot and do not overlap each other, and the rest of the lot is open ground.
+- **Courtyards** are open ground inside a block that belongs to no lot,
+  each with the lots that back onto it (a lot onto one at most), clear of
+  every lot and roadway.
 - **Walls and places.** A town has at most one wall: one closed line, or open
   lines that end at the banks where water parts it, with gates on them, each a junction
   kept by a gatehouse; no segment crosses a wall but at a gate. A plaza is a
@@ -210,7 +215,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
 - Every length, width and density limit comes from `packs/medieval/layout.yaml`;
   the staged generator's numbers are in its `staged` block.
 
-## The staged generator (phase 6E, in progress)
+## The staged generator (phases 6E and 6F)
 
 - **Stages, each final.** Water, then highways and bridges, the harbour, the
   wall, special wards, the mesh, and so on. A later stage never moves what an
@@ -244,12 +249,14 @@ centre, x east and y south; bearings are degrees clockwise from north.
   a thin district is passed through by being made thicker first.
 - **No loops.** The only loop allowed anywhere is "take more ground", at most
   three times.
-- **It makes layouts, and the grid is still the default.** `staged/layout.ts`
-  writes the plan (`staged/plan.ts`) in the layout format when asked for by
-  name (`generator: 'staged'`). The pack names the grid until the staged
-  generator keeps every invariant in every settlement. `check: false`
-  returns a layout unchecked, for measuring what a town breaks; the API's
-  `?generator=staged` and the render command use it, to compare.
+- **It makes the pack's layouts.** `staged/layout.ts` writes the plan
+  (`staged/plan.ts`) in the layout format; the pack names it
+  (`generator: staged`), and the grid is made only when asked for by name.
+  `check: false` returns a layout unchecked, for measuring what a town
+  breaks; the API's `?generator=` and the render command use it, to compare.
+- **Open ground.** An open-air building's lot is its whole house rectangle,
+  built over only as far as the pack's `footprints` coverage for its type.
+  Other houses fill their lots; their open ground is the block's courtyard.
 - **Its own checks run on every town** (`staged/checks.ts`): overlap,
   houses outside their block or in a passage, clipped landmarks, wards
   without blocks. A count above zero fails the layout.
@@ -274,7 +281,7 @@ centre, x east and y south; bearings are degrees clockwise from north.
   `packages/core/src/layout/records.ts`, raised whenever a layout for the same
   inputs would change. Daily life has its own `LIFE_VERSION` in
   `packages/core/src/life/records.ts`, raised whenever the plans for the same
-  inputs would change. Today they are 6, 10 and 5.
+  inputs would change. Today they are 6, 11 and 6.
 - **New pack fields are optional.** A pack without a field behaves as it did
   before the field existed; `packages/core/test/baselines` holds the
   fingerprints that prove it. A whole pack file may be optional too

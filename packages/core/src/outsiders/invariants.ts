@@ -3,9 +3,10 @@
  * satisfies, for the time the outsider is in town, and those of their own.
  * Returns one line per broken rule; an empty list means the plan is sound.
  */
+import { outsideGrounds } from '../life/wander.ts';
 import type { City } from '../city/records.ts';
 import { distance, distanceToPolyline, piecesCross, pointInPolygon, strictlyInside } from '../layout/geometry.ts';
-import type { Layout, Lot, StreetPosition } from '../layout/records.ts';
+import type { Layout, StreetPosition } from '../layout/records.ts';
 import { SECONDS_PER_DAY, startOfDay } from '../life/calendar.ts';
 import { type WorkingHours, createWorkingHours } from '../life/hours.ts';
 import type { Activity, DayPlan, Wander } from '../life/records.ts';
@@ -49,6 +50,7 @@ export function createOutsiderChecker(inputs: { city: City; layout: Layout; pack
   const buildings = new Map(city.buildings.map((building) => [building.id, building]));
   const dwellings = new Set(pack.dwellings.map((type) => type.id));
   const lots = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
+  const groundAt = outsideGrounds(layout);
   const segments = new Map(layout.segments.map((segment) => [segment.id, segment]));
   const junctions = new Map(layout.junctions.map((junction) => [junction.id, junction]));
   const exits = new Map(layout.exits.map((exit) => [exit.id, exit]));
@@ -134,11 +136,11 @@ export function createOutsiderChecker(inputs: { city: City; layout: Layout; pack
         const on = (point: Point) => distanceToPolyline(point, segment.points) <= CLOSE && distance(point, origin) <= within + CLOSE;
         checkWander(at, activity, wander, `${segmentId}, within ${within} m`, on, (a, b) => !on([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]));
       };
-      const checkGroundWander = (at: number, activity: Activity, wander: Wander, lot: Lot) => {
-        const onGround = (point: Point) => pointInPolygon(point, lot.polygon) && !lot.footprints.some((footprint) => strictlyInside(point, footprint));
+      const checkGroundWander = (at: number, activity: Activity, wander: Wander, ground: { polygon: readonly Point[]; footprints: readonly Point[][]; name: string }) => {
+        const onGround = (point: Point) => pointInPolygon(point, ground.polygon) && !ground.footprints.some((footprint) => strictlyInside(point, footprint));
         const through = (a: Point, b: Point) =>
-          !onGround([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) || [lot.polygon, ...lot.footprints].some((outline) => outline.some((corner, index) => piecesCross(a, b, corner, outline[(index + 1) % outline.length] as Point)));
-        checkWander(at, activity, wander, `the open ground of ${lot.buildingId}'s lot`, onGround, through);
+          !onGround([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) || [ground.polygon, ...ground.footprints].some((outline) => outline.some((corner, index) => piecesCross(a, b, corner, outline[(index + 1) % outline.length] as Point)));
+        checkWander(at, activity, wander, ground.name, onGround, through);
       };
 
       activities.forEach((activity, at) => {
@@ -224,13 +226,14 @@ export function createOutsiderChecker(inputs: { city: City; layout: Layout; pack
         }
         const shouldBeOutside = openAir.has(activity.buildingId) || visit.outside === true;
         if ((activity.outside === true) !== shouldBeOutside) problem(`activity ${at + 1} is ${activity.outside ? 'outside' : 'inside'} at ${activity.buildingId}, but should be ${shouldBeOutside ? 'outside' : 'inside'}`);
-        const shouldBeInFront = shouldBeOutside && visit.where === 'street';
+        const lot = lots.get(activity.buildingId);
+        const ground = shouldBeOutside && lot ? groundAt(lot) : undefined;
+        const shouldBeInFront = shouldBeOutside && (visit.where === 'street' || ground?.kind === 'street');
         if ((activity.onStreet === true) !== shouldBeInFront) problem(`activity ${at + 1} is ${activity.onStreet ? 'out on the street' : 'on the lot'} at ${activity.buildingId}, but should be ${shouldBeInFront ? 'out on the street' : 'on the lot'}`);
         if ((activity.wander !== undefined) !== (activity.outside === true)) problem(`activity ${at + 1} must have a wander exactly when it is outside`);
-        const lot = lots.get(activity.buildingId);
         if (activity.wander && lot) {
           if (activity.onStreet) checkStreetWander(at, activity, activity.wander, lot.entrance.segmentId, lot.entrance.point);
-          else checkGroundWander(at, activity, activity.wander, lot);
+          else if (ground && ground.kind !== 'street') checkGroundWander(at, activity, activity.wander, ground);
         }
         // Someone with no dwelling is never indoors, and never at a dwelling at all.
         if (outsider.group === 'vagrant' && (!activity.onStreet || dwellings.has(building.type))) problem(`activity ${at + 1} has a vagrant ${activity.onStreet ? 'at' : 'inside'} ${activity.buildingId}, a ${building.type}`);

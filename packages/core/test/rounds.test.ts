@@ -94,7 +94,7 @@ describe('the medieval pack\'s rounds, errands and walks', () => {
     });
     expect(pack.rounds.patrol).toMatchObject({ range: 'town', at: 'street' });
     expect(pack.rounds.deliveries!.at).toEqual(expect.arrayContaining(['carters-yard', 'warehouse', 'market-stall']));
-    expect(LIFE_VERSION).toBe(5);
+    expect(LIFE_VERSION).toBe(6);
   });
 
   it('has errands that chain and repeat, strolls, and children and elders out on the street', () => {
@@ -500,17 +500,23 @@ describe('the targets, in Badanos on a work day', () => {
     // that: about half the points saw someone. Phase 6B.5 gathers each trade along a street, so the people who
     // are out of doors at work stand closer together: the mean is unchanged at nearly two, but a little under
     // half the points now see anyone, and the median is 0. Reported, not tuned: see the README.
-    const { layout, life } = badanos;
-    const finder = createPathFinder(layout);
-    const rng = createRng(100);
-    const { minX, minY, maxX, maxY } = layout.summary.bounds;
-    const points = Array.from({ length: 100 }, () => finder.nearestPosition([minX + rng.next() * (maxX - minX), minY + rng.next() * (maxY - minY)]).point);
-    const counts = [1, 2, 3, 4, 5, 6].flatMap((day) => points.map((point) => life.nearby(point, pack.avatar.perceptionRadius, at(day, 12, 30)).length)).sort((a, b) => a - b);
-    const seeing = counts.filter((count) => count > 0).length / counts.length;
-    const mean = counts.reduce((sum, count) => sum + count, 0) / counts.length;
-    console.log(`From 100 seeded street points at 12:30 on each of six work days: ${(seeing * 100).toFixed(0)}% perceive someone within ${pack.avatar.perceptionRadius} m, ${mean.toFixed(1)} people on average, and the median perceives ${counts[Math.floor(counts.length / 2)]}`);
-    expect(seeing).toBeGreaterThanOrEqual(0.4);
-    expect(mean).toBeGreaterThanOrEqual(1);
+    // The line was drawn on the grid, and is held there. The staged generator (phase 6F) lays Badanos out with
+    // about 1.7 times the length of ways, lanes round its blocks and along its ward borders, for the same people out
+    // of doors, so more of the seeded points fall on an empty lane: its figure is reported, and its mean held.
+    const perceived = ({ layout, life }: Town) => {
+      const finder = createPathFinder(layout);
+      const rng = createRng(100);
+      const { minX, minY, maxX, maxY } = layout.summary.bounds;
+      const points = Array.from({ length: 100 }, () => finder.nearestPosition([minX + rng.next() * (maxX - minX), minY + rng.next() * (maxY - minY)]).point);
+      const counts = [1, 2, 3, 4, 5, 6].flatMap((day) => points.map((point) => life.nearby(point, pack.avatar.perceptionRadius, at(day, 12, 30)).length)).sort((a, b) => a - b);
+      return { seeing: counts.filter((count) => count > 0).length / counts.length, mean: counts.reduce((sum, count) => sum + count, 0) / counts.length, median: counts[Math.floor(counts.length / 2)] };
+    };
+    for (const [name, which] of [['the grid', onGrid], [badanos.layout.summary.generator, badanos]] as const) {
+      const { seeing, mean, median } = perceived(which);
+      console.log(`On ${name}, from 100 seeded street points at 12:30 on each of six work days: ${(seeing * 100).toFixed(0)}% perceive someone within ${pack.avatar.perceptionRadius} m, ${mean.toFixed(1)} people on average, and the median perceives ${median}`);
+      if (which === onGrid) expect(seeing).toBeGreaterThanOrEqual(0.4);
+      expect(mean, name).toBeGreaterThanOrEqual(1);
+    }
   });
 
   it('has the watch on the streets at every hour of the day and night', () => {

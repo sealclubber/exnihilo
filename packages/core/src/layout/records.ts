@@ -29,8 +29,9 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * generator's roads first. Version 8 cuts its ground into wards along the roads, and each ward into its buildings.
  * Version 9 gives a wall several lines where water parts it, and keeps lots to a least width. Version 10 is the
  * staged generator's: wards, a lot's front, a sea route's exit at the quay, and gates that no building keeps.
+ * Version 11 gives the staged generator's open-air buildings open ground on their lots, and its blocks courtyards.
  */
-export const LAYOUT_VERSION = 10;
+export const LAYOUT_VERSION = 11;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);
@@ -44,6 +45,7 @@ export const WallIdSchema = recordId('wall', 3);
 export const PlaceIdSchema = recordId('place', 3);
 export const BlockIdSchema = recordId('block', 6);
 export const WardIdSchema = recordId('ward', 4);
+export const CourtyardIdSchema = recordId('courtyard', 6);
 
 const text = z.string().min(1);
 const count = z.int().nonnegative();
@@ -197,6 +199,21 @@ export const WardSchema = z.strictObject({
 });
 export type Ward = z.infer<typeof WardSchema>;
 
+/**
+ * A courtyard: the open ground inside a block, behind its houses, that belongs to no one lot. `lotIds` are the
+ * lots that back onto it; each lot backs onto at most one courtyard. Someone outside at a building whose own lot
+ * has no open ground moves about its courtyard instead. A courtyard with a `passage` is reached from the street
+ * along that segment; one without only through its own houses.
+ */
+export const CourtyardSchema = z.strictObject({
+  id: CourtyardIdSchema,
+  blockId: BlockIdSchema,
+  polygon,
+  lotIds: z.array(LotIdSchema).min(1),
+  passage: SegmentIdSchema.optional(),
+});
+export type Courtyard = z.infer<typeof CourtyardSchema>;
+
 export const LayoutSummarySchema = z.strictObject({
   settlementId: SettlementIdSchema,
   counts: z.strictObject({
@@ -261,6 +278,8 @@ export const LayoutSchema = z.strictObject({
   wards: z.array(WardSchema).optional(),
   /** Where a bridge joins ground on one bank to ground on the other: the grid has none. */
   bridgeLinks: z.array(BridgeLinkSchema).optional(),
+  /** The courtyards of a generator whose blocks have them; the grid has none. */
+  courtyards: z.array(CourtyardSchema).optional(),
   summary: LayoutSummarySchema,
 });
 export type Layout = z.infer<typeof LayoutSchema>;

@@ -30,7 +30,7 @@ import { deriveSeed } from '../seed.ts';
 import { SECONDS_PER_DAY, dayOf, isRestDay, startOfDay, weekdayOf } from './calendar.ts';
 import { createWorkingHours } from './hours.ts';
 import { tripDuration, walkingSpeed } from './walking.ts';
-import { type Ground, type WanderHabit, clipWander, groundOf, makeWander, positionOnWander, streetGround } from './wander.ts';
+import { type WanderHabit, clipWander, makeWander, outsideGrounds, positionOnWander, streetGround } from './wander.ts';
 import { type Activity, type DayPlan, type DaySummary, type Nearby, type Occupant, type OpenSpan, type OutsideStay, type Region, type Stay, type StreetStop, type Travel, type Trip, type TripPath, type Wander, type Whereabouts, isOutsiderId } from './records.ts';
 
 export { dutyCount, restDaysUpTo } from './hours.ts';
@@ -251,8 +251,8 @@ export function createLife(inputs: LifeInputs): SettlementLife {
     activities: Activity[];
   }
 
-  /** Each lot's open ground, worked out the first time someone is outside on it. */
-  const grounds = new Map<string, Ground>();
+  /** Where someone outside at each lot moves about, worked out the first time someone is. */
+  const groundAt = outsideGrounds(layout);
   const habits = new Map<string, WanderHabit | undefined>(
     Object.entries(pack.species).map(([speciesId, species]) => {
       const outside = species.life.outside;
@@ -264,14 +264,18 @@ export function createLife(inputs: LifeInputs): SettlementLife {
    * when the stay begins, by a stream of its own.
    */
   const wanderFor = (person: Person, buildingId: string, start: number, end: number): Wander => {
-    let ground = grounds.get(buildingId);
-    if (!ground) {
-      const lot = lotOf.get(buildingId);
-      if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
-      grounds.set(buildingId, (ground = groundOf(lot)));
-    }
+    const lot = lotOf.get(buildingId);
+    if (!lot) throw new LifeError(`${buildingId} has no lot in the layout`);
+    const found = groundAt(lot);
+    if (found.kind === 'street') throw new LifeError(`${buildingId} has no open ground of its own, nor a courtyard or plaza near`);
     const rng = createRng(deriveSeed(String(seed), 'life-outside', `${person.id}:${buildingId}:${start}`));
-    return makeWander(ground, rng, start, end, habits.get(person.species));
+    return makeWander(found.ground, rng, start, end, habits.get(person.species));
+  };
+  /** Whether someone outside at a building is out on the street in front: where the visit says so, or the building has no ground nearer. */
+  const outFront = (buildingId: string, visit?: Visit): boolean => {
+    if (visit?.where === 'street') return true;
+    const lot = lotOf.get(buildingId);
+    return lot !== undefined && groundAt(lot).kind === 'street';
   };
 
   // ---- Streets, and walks that begin or end on one ---------------------------------------------
@@ -387,7 +391,7 @@ export function createLife(inputs: LifeInputs): SettlementLife {
      */
     const spend = (kind: 'work' | 'visit', start: number, end: number, buildingId: string, visit?: Visit, round = false): Stay => {
       const outside = (openAir.has(buildingId) || visit?.outside === true) && end > start;
-      const inFront = outside && visit?.where === 'street';
+      const inFront = outside && outFront(buildingId, visit);
       const lot = inFront ? lotOf.get(buildingId) : undefined;
       return {
         kind,
