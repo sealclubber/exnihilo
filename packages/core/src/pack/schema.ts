@@ -710,7 +710,7 @@ const StagedSettingsSchema = z.strictObject({
 export type StagedSettings = z.infer<typeof StagedSettingsSchema>;
 
 const LayoutSettingsSchema = z.strictObject({
-  /** Which generator lays towns out. Today the plain `grid` alone; left out, the grid. */
+  /** Which generator lays towns out: the `staged` generator or the plain `grid`; left out, the grid. */
   generator: LayoutGeneratorSchema.optional(),
   /** The numbers of the `staged` generator, which is being built stage by stage. */
   staged: StagedSettingsSchema.optional(),

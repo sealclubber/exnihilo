@@ -4,18 +4,18 @@
  * against its invariants.
  */
 import type { City } from '../../city/records.ts';
-import type { SettingPack } from '../../pack/schema.ts';
+import { type SettingPack, footprintCoverageOf, placeFlagsOf } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { interiorPoint } from '../cutting.ts';
-import { boxOf, distance, distancePolygonToPolyline, pointInPolygon, polylineLength, slicePolyline, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
+import { boxOf, distance, distancePolygonToPolyline, distanceToPolygonEdge, piecesCross, pointInPolygon, strictlyInside, polylineLength, slicePolyline, polygonArea, polygonCentroid, projectOnPolyline, SpatialIndex } from '../geometry.ts';
 import { checkLayout } from '../invariants.ts';
 import { ringShare } from '../measure.ts';
-import { type BridgeLink, type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
+import { type BridgeLink, type Courtyard, type DistrictArea, type Exit, type Gate, type Junction, LAYOUT_VERSION, type Layout, type Lot, type Segment, type Wall as WallRecord } from '../records.ts';
 import { builtInChecks } from './checks.ts';
 import { type NetEdge, type NetNode, buildNetwork } from './network.ts';
 import { StagedLayoutError, type TownPlan, planTown, stagedSettings, townInput } from './plan.ts';
 import { cornersOf } from './rects.ts';
-import { grown, without } from './shapes.ts';
+import { grown, widened, without } from './shapes.ts';
 import { plainly } from './tiles.ts';
 
 export const STAGED_GENERATOR = 'staged';
@@ -217,17 +217,26 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
   }
   const drafts = new Map<string, Draft>();
   const slotOpen = (type: string) => settings.landmarks.types[type]?.open;
+  /** The block each kept house stands in, by the building it holds. */
+  const blockOfBuilding = new Map<string, number>();
   plan.houses.forEach((house, at) => {
     const held = fitting.holder[at];
     if (held === undefined) return;
+    blockOfBuilding.set(held, house.block);
     const middle: Point = [(house.front[0][0] + house.front[1][0]) / 2, (house.front[0][1] + house.front[1][1]) / 2];
-    const open = slotOpen((buildingById.get(held) as City['buildings'][number]).type);
+    const type = (buildingById.get(held) as City['buildings'][number]).type;
+    const open = slotOpen(type);
     let footprints = [house.outline];
+    const body = house.parts[0] as TownPlan['houses'][number]['parts'][number];
     if (open !== undefined) {
       // A small footprint in the middle of the front, the rest of the place open ground: a well by the street.
-      const body = house.parts[0] as TownPlan['houses'][number]['parts'][number];
       const side = Math.min(open, body.width, body.depth);
       footprints = [cornersOf({ corner: [body.corner[0] + (body.along[0] * (body.width - side)) / 2 + body.inward[0] * 0.5, body.corner[1] + (body.along[1] * (body.width - side)) / 2 + body.inward[1] * 0.5], along: body.along, inward: body.inward, width: side, depth: Math.min(side, body.depth - 0.5) })];
+    } else if (placeFlagsOf(type, pack).openAir) {
+      // An open-air place keeps the whole house as its lot, and is built over only as far back from the street as
+      // the pack's coverage for its type says: a shed or a stable at the front, the rest a yard. None, by default.
+      const coverage = footprintCoverageOf(type, pack);
+      footprints = coverage > 0 ? [cornersOf({ ...body, depth: body.depth * Math.min(coverage, 1) })] : [];
     }
     // By its front; but a house whose front faces open ground with no way across it opens onto the way nearest
     // any of its sides.
@@ -403,6 +412,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
   }
   const square = plan.landmarks.find((landmark) => landmark.reservation === 'ward' && plan.wards[landmark.ward]?.kind === 'plaza');
   const places: Layout['places'] = plan.plaza && square ? [{ id: `place-${number}-001`, kind: 'plaza', polygon: plan.plaza.polygon, buildingId: square.building }] : [];
+  const courtyards = courtyardsOf(plan, settings.rows, lots, blockOfBuilding, segments, builtBlocks, number);
 
   // ---- Districts: the ground about each one's blocks ----------------------------------------------------------------------
   const { areas: districtAreas, joins } = districtGround(plan, city, lots);
@@ -442,6 +452,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     lots,
     districtAreas,
     ...(bridgeLinks.length > 0 && { bridgeLinks }),
+    ...(courtyards.length > 0 && { courtyards }),
     walls,
     places,
     blocks: plan.blocks.flatMap((block, at) => (builtBlocks.has(at) ? [{ id: `block-${number}-${pad(at + 1, 6)}`, polygon: block.polygon, ...(districtIdOf(plan.selection.blockDistrict[at]) !== undefined && { districtId: districtIdOf(plan.selection.blockDistrict[at]) as string }), growthRank: Math.min((plan.wards[block.ward] as TownPlan['wards'][number]).growthRank / most, 1) }] : [])),
@@ -465,6 +476,114 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
   const broken = checkLayout(layout, city, brief, pack);
   if (broken.length > 0) fail(`the layout breaks ${broken.length === 1 ? 'an invariant' : 'invariants'}:\n  ${broken.join('\n  ')}`);
   return layout;
+}
+
+/**
+ * Each block's courtyards: the ground inside it that no lot, way or gap between houses takes, in as many pieces as
+ * it falls into, each written with the lots that back onto it. A piece no lot backs onto is not a courtyard.
+ */
+function courtyardsOf(
+  plan: TownPlan,
+  rows: { inset: number; gap: number },
+  lots: readonly Lot[],
+  blockOfBuilding: ReadonlyMap<string, number>,
+  segments: readonly Segment[],
+  builtBlocks: ReadonlySet<number>,
+  number: string,
+): Courtyard[] {
+  // Houses closer than this to a courtyard back onto it: the gap between two houses, closed from both sides.
+  const closing = rows.gap / 2 + 0.05;
+  const lotsOfBlock = new Map<number, Lot[]>();
+  for (const lot of lots) {
+    const block = blockOfBuilding.get(lot.buildingId);
+    if (block !== undefined) lotsOfBlock.set(block, [...(lotsOfBlock.get(block) ?? []), lot]);
+  }
+  const lotIndex = new SpatialIndex<Lot>(40);
+  for (const lot of lots) lotIndex.add(boxOf(lot.polygon, closing), lot);
+  const wayIndex = new SpatialIndex<Segment>(40);
+  for (const segment of segments) wayIndex.add(boxOf(segment.points, segment.width), segment);
+  const courtyards: Courtyard[] = [];
+  plan.blocks.forEach((block, at) => {
+    const own = lotsOfBlock.get(at);
+    if (!own || !builtBlocks.has(at)) return;
+    const box = boxOf(block.polygon, 1);
+    // Off the block's edge by the houses' inset, so that the gaps between houses do not lead the ground out to the street.
+    const inner = grown([block.polygon], -(rows.inset + 0.05));
+    // The lots made one and grown, with the holes the union leaves inside a ring of houses: those wind the other
+    // way round, so taking the holes with the rings leaves the ground they enclose.
+    const near = [...lotIndex.near(box)];
+    const houses = grown(near.map((lot) => lot.polygon), closing);
+    const taken = [...houses.rings, ...houses.holes];
+    const ways = [...wayIndex.near(box)];
+    taken.push(...ways.flatMap((way) => widened([way.points], way.width + 2 * closing)));
+    const cut = without(inner.rings, taken);
+    // A lot standing free in a courtyard leaves a hole in it, joined to the ground round it by a slit that crosses no
+    // outline. A courtyard whose hole cannot be so joined is left out, as it would otherwise cover the lot.
+    const pieces = cut.rings.flatMap((ring) => {
+      const inside = cut.holes.filter((hole) => hole.some((corner) => pointInPolygon(corner, ring) && distanceToPolygonEdge(corner, ring) > 0.01));
+      const joined = joinHoles(ring, inside);
+      return joined && polygonArea(joined) > 1 ? [joined] : [];
+    });
+    if (pieces.length === 0) return;
+    // Each lot backs onto the largest piece it is beside.
+    const backing = pieces.map((): string[] => []);
+    for (const lot of own) {
+      let best = -1;
+      pieces.forEach((piece, index) => {
+        if (distancePolygonToPolyline(lot.polygon, [...piece, piece[0] as Point]) > closing + 0.1) return;
+        if (best < 0 || polygonArea(piece) > polygonArea(pieces[best] as Point[])) best = index;
+      });
+      if (best >= 0) (backing[best] as string[]).push(lot.id);
+    }
+    // A passage's lane ends at its courtyard.
+    const passages = plan.passages.filter((passage) => passage.block === at);
+    pieces.forEach((piece, index) => {
+      const lotIds = (backing[index] as string[]).sort();
+      if (lotIds.length === 0) return;
+      const ring = [...piece, piece[0] as Point];
+      let passage: string | undefined;
+      for (const { axis, rect } of passages) {
+        const reach = rect.width + closing + 0.1;
+        for (const way of ways) {
+          if (way.kind !== 'lane') continue;
+          const ends = [way.points[0] as Point, way.points[way.points.length - 1] as Point];
+          if (ends.some((end) => distance(end, axis[1]) <= reach && distancePolygonToPolyline(ring, [end, end]) <= reach) && (passage === undefined || way.id < passage)) passage = way.id;
+        }
+      }
+      courtyards.push({ id: `courtyard-${number}-${String(courtyards.length + 1).padStart(6, '0')}`, blockId: `block-${number}-${String(at + 1).padStart(6, '0')}`, polygon: piece, lotIds, ...(passage !== undefined && { passage }) });
+    });
+  });
+  return courtyards;
+}
+
+/**
+ * A ring with holes in it as one outline: each hole joined to the outline round it by the shortest slit, from a
+ * corner of the hole to a corner of the outline, that crosses no edge of the outline or of any hole and runs over
+ * the ground between them. Undefined if some hole cannot be joined.
+ */
+function joinHoles(ring: readonly Point[], holes: readonly Point[][]): Point[] | undefined {
+  let out = [...ring];
+  const edgesOf = (outline: readonly Point[]) => outline.map((corner, at): [Point, Point] => [outline[(at + outline.length - 1) % outline.length] as Point, corner]);
+  for (let at = 0; at < holes.length; at++) {
+    const hole = holes[at] as Point[];
+    const blockers = [...edgesOf(out), ...holes.slice(at).flatMap(edgesOf)];
+    const others = holes.slice(at);
+    let best: { h: number; o: number; length: number } | undefined;
+    hole.forEach((from, h) =>
+      out.forEach((to, o) => {
+        const length = distance(from, to);
+        if (best && length >= best.length) return;
+        if (blockers.some(([c, d]) => piecesCross(from, to, c, d))) return;
+        const middle: Point = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2];
+        if (!pointInPolygon(middle, out) || others.some((other) => strictlyInside(middle, other))) return;
+        best = { h, o, length };
+      }),
+    );
+    if (!best) return undefined;
+    const { h, o } = best as { h: number; o: number; length: number };
+    out = [...out.slice(0, o + 1), ...hole.slice(h), ...hole.slice(0, h + 1), ...out.slice(o)];
+  }
+  return out;
 }
 
 const boxesMeet = (a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>) => a.minX <= b.maxX + 1 && b.minX <= a.maxX + 1 && a.minY <= b.maxY + 1 && b.minY <= a.maxY + 1;

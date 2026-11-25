@@ -95,12 +95,25 @@ function summarise(layout: Layout, city: City): Layout {
   return layout;
 }
 
+/** A block behind the street holding both lots, with a courtyard behind them that both back onto. */
+const withCourtyard = (layout: Layout): Layout => {
+  layout.blocks = [{ id: 'block-1-000001', polygon: [[-45, 3], [-15, 3], [-15, 40], [-45, 40]], districtId: 'district-1-001', growthRank: 0 }];
+  layout.courtyards = [{ id: 'courtyard-1-000001', blockId: 'block-1-000001', polygon: [[-40, 30], [-20, 30], [-20, 38], [-40, 38]], lotIds: ['lot-1-000001', 'lot-1-000002'] }];
+  return layout;
+};
 const river = (x: number) => ({ id: 'water-1-001', kind: 'river' as const, centreLine: [[x, -300], [x, 300]] as Point[], width: 12 });
 const sea = (shore: number) => ({ id: 'water-1-001', kind: 'sea' as const, polygon: [[shore, -500], [shore, 500], [shore - 500, 500], [shore - 500, -500]] as Point[] });
 
 describe('a sound layout built by hand', () => {
   it('fits the format and breaks no rule', () => {
     const { layout, city, brief } = fixture();
+    expect(LayoutSchema.safeParse(layout).success).toBe(true);
+    expect(checkLayout(layout, city, brief, pack)).toEqual([]);
+  });
+
+  it('may have a courtyard behind its lots', () => {
+    const { layout, city, brief } = fixture();
+    withCourtyard(layout);
     expect(LayoutSchema.safeParse(layout).success).toBe(true);
     expect(checkLayout(layout, city, brief, pack)).toEqual([]);
   });
@@ -156,6 +169,13 @@ describe('broken layouts', () => {
     ['a lot in the sea', ({ layout, brief }) => { layout.waters.push(sea(-35)); brief.coast = { isCoastal: true, waterBearing: 270 }; }, /lot-1-000001 overlaps water-1-001, the sea/],
     ['a district with lots but no area', ({ layout }) => layout.districtAreas.pop(), /district-1-001 has lots but no district area/],
     ['a bridge link over a segment that is no bridge', ({ layout }) => (layout.bridgeLinks = [{ segmentId: layout.segments[0]!.id, from: 'district-1-001', to: 'district-1-001' }]), /a bridge link names segment-1-000001, which is not a bridge/],
+    ['a courtyard over a lot', ({ layout }) => (withCourtyard(layout).courtyards![0]!.polygon = [[-40, 20], [-20, 20], [-20, 38], [-40, 38]]), /courtyard-1-000001 overlaps lot-1-000001/],
+    ['a courtyard on the roadway', ({ layout }) => { withCourtyard(layout).blocks![0]!.polygon = [[-50, -5], [-15, -5], [-15, 40], [-50, 40]]; layout.courtyards![0]!.polygon = [[-48, -2], [-42, -2], [-42, 4], [-48, 4]]; }, /courtyard-1-000001 overlaps the roadway of segment-1-000001/],
+    ['a courtyard outside its block', ({ layout }) => (withCourtyard(layout).courtyards![0]!.polygon = [[-40, 30], [-20, 30], [-20, 45], [-40, 45]]), /courtyard-1-000001 does not lie inside block-1-000001/],
+    ['a courtyard in a block the layout does not have', ({ layout }) => (withCourtyard(layout).courtyards![0]!.blockId = 'block-1-000009'), /courtyard-1-000001 is in block-1-000009, which the layout does not have/],
+    ['a courtyard backed by a lot that does not exist', ({ layout }) => withCourtyard(layout).courtyards![0]!.lotIds.push('lot-1-000009'), /courtyard-1-000001 names lot-1-000009, which does not exist/],
+    ['a lot backing onto two courtyards', ({ layout }) => withCourtyard(layout).courtyards!.push({ id: 'courtyard-1-000002', blockId: 'block-1-000001', polygon: [[-44, 30], [-42, 30], [-42, 38], [-44, 38]], lotIds: ['lot-1-000001'] }), /lot-1-000001 backs onto both courtyard-1-000001 and courtyard-1-000002/],
+    ['a passage along a segment that does not exist', ({ layout }) => (withCourtyard(layout).courtyards![0]!.passage = 'segment-1-000009'), /courtyard-1-000001 has its passage along segment-1-000009, which does not exist/],
     ['district areas that overlap', ({ layout, city }) => { city.districts.push({ ...city.districts[0]!, id: 'district-1-002', buildingIds: [] }); layout.districtAreas.push({ districtId: 'district-1-002', polygons: [[[-10, 10], [40, 10], [40, 60], [-10, 60]]], labelPoint: [20, 40] }); }, /the areas of district-1-001 and district-1-002 overlap/],
     ['a label point outside the area', ({ layout }) => (layout.districtAreas[0]!.labelPoint = [200, 200]), /the label point of district-1-001 is outside its area/],
     ['too few residents for the built area', ({ city }) => (city.people.length = 1), /residents per hectare of built area, outside the pack's limits of 60 to 700/],

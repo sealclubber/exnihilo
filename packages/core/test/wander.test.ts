@@ -27,6 +27,7 @@ import {
   geometry,
   groundOf,
   makeWander,
+  outsideGrounds,
   parsePack,
   positionOnWander,
   startOfDay,
@@ -140,6 +141,28 @@ describe('open ground', () => {
     expect(full.place(createRng(3))).toEqual([5, 0]);
     const wander = makeWander(full, createRng(3), 1000, 5000, { pace: 0.5, pause: { min: 60, max: 120 } });
     expect(wander).toEqual({ times: [1000, 5000], points: [[5, 0], [5, 0]] });
+  });
+
+  it('is, for a building that fills its lot, the courtyard it backs onto; failing that the plaza if nearer, or the street in front', () => {
+    // A house filling its lot on the street at y = 0, a courtyard behind it, and a plaza beside it.
+    const house = lot(square(0, 2, 10, 10), [square(0, 2, 10, 10)], [5, 0]);
+    const courtyard = { id: 'courtyard-1-000001', blockId: 'block-1-000001', polygon: square(0, 12.5, 30, 10), lotIds: [house.id] };
+    const market = { ...lot(square(10.2, 2, 20, 10), [], [20, 0]), id: 'lot-1-000002', buildingId: 'building-1-000002' };
+    const plaza = { id: 'place-1-001', kind: 'plaza' as const, polygon: market.polygon, buildingId: market.buildingId };
+    const inYard = outsideGrounds({ lots: [house, market], places: [plaza], courtyards: [courtyard] })(house);
+    expect(inYard).toMatchObject({ kind: 'courtyard', polygon: courtyard.polygon, footprints: [] });
+    // A lot with ground of its own keeps it, courtyard or none.
+    expect(outsideGrounds({ lots: [house, market], places: [plaza], courtyards: [{ ...courtyard, lotIds: [market.id] }] })(market).kind).toBe('lot');
+    // With no courtyard, the plaza beside it is nearer than its entrance; away from the plaza, the street.
+    expect(outsideGrounds({ lots: [house, market], places: [plaza] })(house)).toMatchObject({ kind: 'plaza', polygon: market.polygon });
+    expect(outsideGrounds({ lots: [house, market], places: [{ ...plaza, polygon: square(200, 200, 20, 20) }] })(house).kind).toBe('street');
+    expect(outsideGrounds({ lots: [house], places: [] })(house).kind).toBe('street');
+    // A wander in the courtyard stays in it.
+    if (inYard.kind === 'street') throw new Error('expected the courtyard');
+    const ground = inYard.ground;
+    const wander = makeWander(ground, createRng(4), 1000, 9000, { pace: 0.5, pause: { min: 60, max: 120 } });
+    expect(new Set(wander.points.map(String)).size).toBeGreaterThan(2);
+    for (const point of wander.points) expect(geometry.pointInPolygon(point, courtyard.polygon)).toBe(true);
   });
 
   it('knows a straight line that would pass through a building from one that would not', () => {
@@ -364,7 +387,7 @@ describe('unchanged behaviour', () => {
       const plans = before.life.plansForDay(Number(day)).map((plan) => ({ ...plan, activities: plan.activities.map(({ wander: _wander, ...rest }: any) => rest) }));
       expect(createHash('sha256').update(JSON.stringify(plans)).digest('hex'), `day ${day}`).toBe(hash);
     }
-    expect(LIFE_VERSION).toBe(5);
+    expect(LIFE_VERSION).toBe(6);
     expect(GENERATOR_VERSION).toBe(6);
   });
 });

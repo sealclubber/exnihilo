@@ -261,6 +261,30 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     }
   }
 
+  // Courtyards: each in a block of the layout, overlapping no lot and no roadway, and backed by lots that exist,
+  // each lot by one courtyard at most.
+  const blockById = new Map((layout.blocks ?? []).map((block) => [block.id, block]));
+  const lotById = new Map(lots.map((lot) => [lot.id, lot]));
+  const backedBy = new Map<string, string>();
+  for (const courtyard of layout.courtyards ?? []) {
+    const block = blockById.get(courtyard.blockId);
+    if (!block) problem(`${courtyard.id} is in ${courtyard.blockId}, which the layout does not have`);
+    else if (!polygonWithin(courtyard.polygon, block.polygon)) problem(`${courtyard.id} does not lie inside ${block.id}`);
+    if (polygonArea(courtyard.polygon) <= EPSILON) problem(`${courtyard.id} has no area`);
+    for (const lotId of courtyard.lotIds) {
+      if (!lotById.has(lotId)) problem(`${courtyard.id} names ${lotId}, which does not exist`);
+      const earlier = backedBy.get(lotId);
+      if (earlier !== undefined) problem(`${lotId} backs onto both ${earlier} and ${courtyard.id}`);
+      backedBy.set(lotId, courtyard.id);
+    }
+    if (courtyard.passage !== undefined && !segments.some((segment) => segment.id === courtyard.passage)) problem(`${courtyard.id} has its passage along ${courtyard.passage}, which does not exist`);
+    const box = boxOf(courtyard.polygon);
+    for (const lot of lotIndex.near(box)) if (polygonsOverlap(courtyard.polygon, lot.polygon)) problem(`${courtyard.id} overlaps ${lot.id}`);
+    for (const segment of segmentIndex.near(box)) {
+      if (distancePolygonToPolyline(courtyard.polygon, segment.points) < segment.width / 2 - EPSILON) problem(`${courtyard.id} overlaps the roadway of ${segment.id}`);
+    }
+  }
+
   // Walls and places. A lot overlaps neither, but for the lot of a place's own building, which is the place; and a
   // gatehouse may stand apart from its district, at its gate.
   index('wall', walls, (record) => record.id);

@@ -384,6 +384,7 @@ centre, x east and y south.
 | Wall | One per walled town: its lines, one closed line or open lines ending at the banks where water parts it, with a width, and its gates: each a junction on a line and the gatehouse that keeps it |
 | Place | Open ground: a `plaza`, the lot of its building, or a `green`, ground inside the town that belongs to no building |
 | Block | The ground between streets that lots are cut from, its district, and its `growthRank`: 0 for the first ground built on, 1 for the last |
+| Courtyard | Open ground inside a block that belongs to no one lot: its block, a polygon, the lots that back onto it, and the passage segment that reaches it from the street, if any |
 | Summary | Counts, the bounding box, the outline's area, built area, residents per hectare, `ringShare`, the roads out of the centre, the layout version, the generator's name, the pack and the seed |
 
 Its rules are checked by `layout/invariants.ts` on every layout: one lot per
@@ -393,7 +394,8 @@ degrees of each of the brief's route bearings; the river and the sea where the
 brief puts them; only bridges crossing water; a port's waterside district at
 the water; each district in one piece; a plausible density; and footprints
 that lie inside their lot without overlapping each other, everything else in
-the lot being open ground. Shapes are
+the lot being open ground; and courtyards inside their block, clear of every
+lot and roadway, each lot backing onto one at most. Shapes are
 general: nothing that reads a layout may assume straight streets or
 rectangular lots, and the tests bend streets and use five-sided lots to hold
 the viewer, the invariants and the path function to that.
@@ -441,9 +443,9 @@ except at a gate, every gate has a gatehouse within 30 m, and the city
 generator makes at least one gatehouse for each of the brief's route exits.
 A plaza is the open lot of its building, with a street all the way round.
 
-**One generator** makes layouts in this format today, and a layout's summary
-names the one that made it. The pack's `layout.yaml` chooses with
-`generator`; a pack that says nothing gets the grid.
+**Two generators** make layouts in this format, and a layout's summary names
+the one that made it. The pack's `layout.yaml` chooses with `generator`: the
+medieval pack names `staged`, and a pack that says nothing gets the grid.
 
 - **`grid`** (`layout/grid.ts`) is deliberately regular: a street grid around
   the centre, a river bending beside it, districts grown block by block from
@@ -454,13 +456,13 @@ names the one that made it. The pack's `layout.yaml` chooses with
 The `grown` generator of phase 6D has been removed. Its renders are kept in
 `docs/renders/` as `-grown-6d3` and `-grown-6d4`, for comparison.
 
-**The staged generator (phase 6E, being built).** `layout/staged/` holds the
-generator that will replace it, built stage by stage after the approved
+**The staged generator (phases 6E and 6F).** `layout/staged/` holds the
+generator that lays every town out, built stage by stage after the approved
 prototype in `docs/prototypes/proto_wards9.py` (pictures `w9_*.png`); the
 gameplan is `sim-6e.md`. The town is made in a fixed order on one shared
-mesh, and a later stage never moves what an earlier one placed. It makes
-layouts when asked for by name; the grid still lays every town out by
-default. Its numbers are in the `staged` block of `layout.yaml`,
+mesh, and a later stage never moves what an earlier one placed. The pack
+names it (phase 6F), so it lays every town out; the grid is still there by
+name. Its numbers are in the `staged` block of `layout.yaml`,
 and each stage draws on streams named `staged-…`. The stages:
 
 1. **Water** (`staged/water.ts`). A river enters and leaves on the brief's
@@ -628,7 +630,17 @@ and each stage draws on streams named `staged-…`. The stages:
       entrance near its lot; it narrows beside the plaza and near the water.
     - *Lots.* A house's lot is its footprint, with its front; a well is a
       small footprint in an open lot; a block landmark's lot is its block; a
-      lot opens onto the nearest way.
+      lot opens onto the nearest way. An open-air building (`openAir` in the
+      pack) keeps the whole house rectangle as its lot and is built over only
+      as far back from the street as `footprints` in `layout.yaml` gives its
+      type, none by default: the rest is its yard.
+    - *Courtyards.* What is left of a block once its lots, its ways and the
+      gaps between houses are taken out is its courtyard, in as many pieces
+      as it falls into; each piece is written with the lots that back onto
+      it, and with its passage where a passage's lane reaches it. A lot
+      standing free in a courtyard is joined to the ground round it by a slit
+      that crosses no other outline. In Badanos 1,812 of 1,825 lots back onto
+      one of 311 courtyards.
     - *Gates.* Every way through the wall is a gate. Gatehouses keep the
       highways' gates first, then the gates at bridges into a bank the river
       closes, then as many ward borders as are let through the wall for
@@ -653,6 +665,8 @@ and each stage draws on streams named `staged-…`. The stages:
     How many lots stand outside their own district's ground, and how many
     districts are in more than one piece, is measured, not required
     (`measureDistrictGround`, reported by `node scripts/staged-census.ts`).
+    Version 11 (phase 6F) gives open-air buildings their yards and adds
+    `courtyards`.
 
     Measured on 2026-11-24, the staged generator keeps every invariant in
     all 682 of Lomia's settlements. Of their 540,856 lots, 3,049 (0.56%)
@@ -721,7 +735,9 @@ they lead. `npm run render` wraps it:
 npm run render -- settlement-641 [--generator grid|staged] [--seed <number>] [--out <file.svg>]
 ```
 
-`docs/renders/` holds five towns as the grid lays them out (`-grid`), as the
+`docs/renders/*-6f.svg` are the seven test towns as the pack lays them out
+with `npm run render`, by the staged generator.
+`docs/renders/` also holds five towns as the grid lays them out (`-grid`), as the
 removed generator did at phases 6D.3 and 6D.4 (`-grown-6d3`, `-grown-6d4`),
 and the staged generator's plans step by step (`-6e-step1` to `-6e-step7`)
 and its layouts (`-6e-step8`, `-6e-step10`).
@@ -793,9 +809,13 @@ midnight-to-midnight slice across the personal days that overlap it.
   slow pace; where two times share a point they pause. Position at a time is
   interpolation, so it is still a pure function of game time. A wander is
   drawn from the person, the building and when the stay begins, by a stream
-  of its own, never passes through a footprint or off the lot, and on a lot
-  with no open ground is one fixed point at the frontage. A pace of zero means
-  standing still. Sleep and time at home are always indoors.
+  of its own, and never passes through a footprint or off its ground. A
+  building whose lot has no open ground, as a staged house's has not, uses the
+  courtyard its lot backs onto; failing that, the plaza if the lot is nearer
+  to it than to its entrance; failing that, the street in front, as a visit
+  marked `where: street` does (`outsideGrounds` in `life/wander.ts`, life
+  version 6). A pace of zero means standing still. Sleep and time at home are
+  always indoors.
 - **Sleep** is at home, at the species' usual hours, moved but not shortened
   to fit the shift: the night watch sleeps by day.
 - **Trips** follow the path function between two lots' entrances and take the
@@ -836,7 +856,12 @@ opening hours are in `life/hours.ts`.
   of the building (`where: street`) instead of on its lot. Children playing
   and elders sitting out are in front of their homes, where they can be seen.
 
-Daily life has its own `LIFE_VERSION`, now 5, in `life/records.ts`. Version 5
+Daily life has its own `LIFE_VERSION`, now 6, in `life/records.ts`. Version 6
+sends someone outside at a building with no open ground of its own to its
+courtyard, the plaza or the street in front, where it had them stand at the
+lot's frontage. On the grid that touches only stays at the few lots its
+footprints fill (66 of 104,481 in every sixth settlement), which now go out
+on the street in front. Version 5
 added outsiders to every answer and changed no resident's plan. Version 4
 added rounds, chains, repeats, strolls and stops on a street; a pack with none
 of those fields gives exactly the plans of version 3, which a fingerprint of

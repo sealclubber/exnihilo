@@ -88,10 +88,10 @@ const working = (life: SettlementLife, personId: string, time: number) => {
 const atWork = (life: SettlementLife, people: City['people'], time: number) => people.filter((person) => working(life, person.id, time));
 
 describe('versions', () => {
-  it('raises the life version and leaves the other two alone', () => {
-    expect(LIFE_VERSION).toBe(5);
+  it('raises the layout and life versions for open ground and courtyards, and leaves the city generator alone', () => {
+    expect(LIFE_VERSION).toBe(6);
     expect(GENERATOR_VERSION).toBe(6);
-    expect(LAYOUT_VERSION).toBe(10);
+    expect(LAYOUT_VERSION).toBe(11);
   });
 });
 

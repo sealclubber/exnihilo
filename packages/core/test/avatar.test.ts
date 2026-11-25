@@ -543,9 +543,9 @@ describe('unchanged', () => {
     expect(JSON.stringify(createLife({ city, layout, pack }).plansForDay(3))).toBe(before);
   });
 
-  it('keeps every version where it was', () => {
-    expect(LIFE_VERSION).toBe(5);
-    expect(LAYOUT_VERSION).toBe(10);
+  it('keeps the city generator version, and the layout and life versions phase 6F raised', () => {
+    expect(LIFE_VERSION).toBe(6);
+    expect(LAYOUT_VERSION).toBe(11);
     expect(GENERATOR_VERSION).toBe(6);
   });
 });

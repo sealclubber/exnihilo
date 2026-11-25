@@ -354,7 +354,7 @@ describe('determinism and isolation', () => {
   it('leaves the city generator at version 2', () => {
     expect(GENERATOR_VERSION).toBe(6);
     expect(badanos.city.summary.generatorVersion).toBe(6);
-    expect(LAYOUT_VERSION).toBe(10);
+    expect(LAYOUT_VERSION).toBe(11);
   });
 
   it('gives a different layout for a different seed, which still passes every invariant', () => {
@@ -425,7 +425,7 @@ describe('footprints', () => {
     const { summary, walls: _walls, places: _places, ...rest } = without.layout;
     const text = JSON.stringify({ ...rest, lots: rest.lots.map(({ footprints: _footprints, ...lot }) => lot) });
     expect(createHash('sha256').update(text).digest('hex')).toBe(baseline.badanos);
-    expect(summary.layoutVersion).toBe(10);
+    expect(summary.layoutVersion).toBe(11);
     expect(without.layout.lots).toHaveLength(1772);
   });
 

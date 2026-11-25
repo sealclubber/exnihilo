@@ -2,9 +2,10 @@
  * The rules every day plan must satisfy. Returns one line per broken rule; an
  * empty list means the plan is sound.
  */
+import { outsideGrounds } from './wander.ts';
 import type { City } from '../city/records.ts';
 import { distance, distanceToPolyline, piecesCross, pointInPolygon, strictlyInside } from '../layout/geometry.ts';
-import type { Layout, Lot, StreetPosition } from '../layout/records.ts';
+import type { Layout, StreetPosition } from '../layout/records.ts';
 import { type Round, type SettingPack, type Species, HOME, allOccupations, placeFlagsOf, shiftLength, stopsOf } from '../pack/schema.ts';
 import type { Point } from '../schema.ts';
 import { SECONDS_PER_DAY, startOfDay } from './calendar.ts';
@@ -52,6 +53,7 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
   const buildings = new Map(city.buildings.map((building) => [building.id, building]));
   const homes = new Map(city.households.map((household) => [household.id, household.dwellingId]));
   const lots = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
+  const groundAt = outsideGrounds(layout);
   const segments = new Map(layout.segments.map((segment) => [segment.id, segment]));
   const visits = new Map(pack.visits.visits.map((visit) => [visit.id, visit]));
   const rounds = new Map(allOccupations(pack).flatMap((occupation) => (occupation.round === undefined ? [] : [[occupation.id, pack.rounds[occupation.round] as Round] as const])));
@@ -119,11 +121,11 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
         const middle = (a: Point, b: Point): Point => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
         checkWander(at, activity, wander, centre ? `${segmentId}, within ${streetReach} m of the entrance` : `${segmentId}, within one stretch of ${2 * streetReach} m`, on, (a, b) => !on(middle(a, b)));
       };
-      const checkGroundWander = (at: number, activity: Activity, wander: Wander, lot: Lot) => {
-        const onGround = (point: Point) => pointInPolygon(point, lot.polygon) && !lot.footprints.some((footprint) => strictlyInside(point, footprint));
+      const checkGroundWander = (at: number, activity: Activity, wander: Wander, ground: { polygon: readonly Point[]; footprints: readonly Point[][]; name: string }) => {
+        const onGround = (point: Point) => pointInPolygon(point, ground.polygon) && !ground.footprints.some((footprint) => strictlyInside(point, footprint));
         const through = (a: Point, b: Point) =>
-          !onGround([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) || [lot.polygon, ...lot.footprints].some((outline) => outline.some((corner, index) => piecesCross(a, b, corner, outline[(index + 1) % outline.length] as Point)));
-        checkWander(at, activity, wander, `the open ground of ${lot.buildingId}'s lot`, onGround, through);
+          !onGround([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) || [ground.polygon, ...ground.footprints].some((outline) => outline.some((corner, index) => piecesCross(a, b, corner, outline[(index + 1) % outline.length] as Point)));
+        checkWander(at, activity, wander, ground.name, onGround, through);
       };
       /** A round leg or stop lies between two spells of work at the worker's own workplace, as far as this day's plan shows. */
       const checkOnRound = (at: number, activity: Activity) => {
@@ -278,16 +280,17 @@ export function createPlanChecker(inputs: { city: City; layout: Layout; pack: Se
           problem(`activity ${at + 1} is ${activity.outside ? 'outside' : 'inside'} at ${activity.buildingId}, but should be ${shouldBeOutside ? 'outside' : 'inside'}`);
         }
         // Out on the street in front of the building exactly when the visit says so.
-        const shouldBeInFront = shouldBeOutside && visit?.where === 'street';
+        const lot = lots.get(activity.buildingId);
+        const ground = shouldBeOutside && lot ? groundAt(lot) : undefined;
+        const shouldBeInFront = shouldBeOutside && (visit?.where === 'street' || ground?.kind === 'street');
         if ((activity.onStreet === true) !== shouldBeInFront) {
           problem(`activity ${at + 1} is ${activity.onStreet ? 'out on the street' : 'on the lot'} at ${activity.buildingId}, but should be ${shouldBeInFront ? 'out on the street' : 'on the lot'}`);
         }
         // An outside stay has a wander, on the lot's open ground or on the street by its entrance.
         if ((activity.wander !== undefined) !== (activity.outside === true)) problem(`activity ${at + 1} must have a wander exactly when it is outside`);
-        const lot = lots.get(activity.buildingId);
         if (activity.wander && lot) {
           if (activity.onStreet) checkStreetWander(at, activity, activity.wander, lot.entrance.segmentId, lot.entrance.point);
-          else checkGroundWander(at, activity, activity.wander, lot);
+          else if (ground && ground.kind !== 'street') checkGroundWander(at, activity, activity.wander, ground);
         }
         if (activity.end === activity.start) problem(`activity ${at + 1} is a stay of no length`);
       });

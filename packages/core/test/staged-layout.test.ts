@@ -3,7 +3,8 @@
  * format, with its walking network, entrances, gates and district ground.
  */
 import { describe, expect, it } from 'vitest';
-import { type City, type Layout, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, measureDistrictGround } from '../src/index.ts';
+import { type City, type Layout, checkLayout, createLife, createPlanChecker, generateCity, generateLayout, measureDistrictGround, placeFlagsOf } from '../src/index.ts';
+import { groundOf, outsideGrounds } from '../src/life/wander.ts';
 import { STAGED_GENERATOR, generateStagedLayout } from '../src/layout/staged/layout.ts';
 import type { SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
@@ -32,9 +33,11 @@ describe('the staged generator as a layout', () => {
       expect(layout.summary.generator).toBe(STAGED_GENERATOR);
       expect(layout.lots.length).toBe(city.buildings.length);
     }
-    // The grid is still what a pack gets that names no generator.
+    // The pack names the staged generator; a pack that names none still gets the grid.
     const { brief, city } = staged('Flupines');
-    expect(generateLayout(city, brief, pack).summary.generator).toBe('grid');
+    expect(generateLayout(city, brief, pack).summary.generator).toBe(STAGED_GENERATOR);
+    const { generator: _named, ...unnamed } = pack.layout;
+    expect(generateLayout(city, brief, { ...pack, layout: unnamed }).summary.generator).toBe('grid');
   });
 
   it('keeps every invariant across a sample of Lomia, and measures how district ground falls', () => {
@@ -50,6 +53,36 @@ describe('the staged generator as a layout', () => {
     // neighbour holds most of stands in the neighbour's ground. Measured: 268 of 52,381 in the sample.
     console.log(`Lots outside their own district's ground, ${SAMPLE.length} settlements: ${lots.outside} of ${lots.all}`);
     expect(lots.outside / lots.all).toBeLessThan(0.02);
+  });
+
+  it('gives open-air places open ground, and has people outside on it in Badanos on a work day, with courtyards behind the houses', () => {
+    const { city, layout } = staged('Badanos');
+    const lotOf = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
+    // Every open-air workplace has ground of its own to work on.
+    const openAir = city.buildings.filter((building) => placeFlagsOf(building.type, pack).openAir);
+    expect(openAir.length).toBeGreaterThan(10);
+    for (const building of openAir) expect(groundOf(lotOf.get(building.id)!).open, `${building.id}, a ${building.type}`).toBe(true);
+    // Most houses are built right over their lots and back onto a courtyard.
+    const backed = new Set((layout.courtyards ?? []).flatMap((courtyard) => courtyard.lotIds));
+    expect(backed.size / layout.lots.length).toBeGreaterThan(0.9);
+    // Outside stays on the first work day, by where they are spent, and how many of their wanders move.
+    const groundAt = outsideGrounds(layout);
+    const life = createLife({ city, layout, pack });
+    const where = { lot: 0, courtyard: 0, plaza: 0, street: 0 };
+    let moving = 0;
+    for (const plan of life.plansForDay(1)) {
+      for (const activity of plan.activities) {
+        if ((activity.kind !== 'work' && activity.kind !== 'visit') || !activity.outside) continue;
+        where[activity.onStreet ? 'street' : groundAt(lotOf.get(activity.buildingId)!).kind]++;
+        if (new Set(activity.wander!.points.map(String)).size > 1) moving++;
+      }
+    }
+    const out = where.lot + where.courtyard + where.plaza + where.street;
+    console.log(`Badanos, day 1: ${out} stays outside, ${where.lot} on their own lot's ground, ${where.courtyard} in a courtyard, ${where.plaza} on the plaza and ${where.street} on the street in front; ${moving} wanders move`);
+    // The pack sends no one outside at a building without ground of its own but on the street in front, where
+    // the visit says so: the courtyards are there for when it does.
+    expect(where.lot).toBeGreaterThan(1000);
+    expect(moving / out).toBeGreaterThan(0.5);
   });
 
   it('gives every building one lot, a house its front, and each lot an entrance on a way of the one network', () => {

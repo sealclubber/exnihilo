@@ -10,11 +10,13 @@
  * was worked out first.
  *
  * This reads the layout format only: a lot is a polygon, its footprints are
- * polygons, and the open ground is what is left.
+ * polygons, and the open ground is what is left. A building whose lot has no
+ * open ground has its block's courtyard, where the layout has one, and
+ * otherwise the nearest public ground: the plaza, or the street in front.
  */
 import type { Rng } from '../city/random.ts';
-import { boxOf, distance, piecesMeet, pointInPolygon, projectOnPolyline, strictlyInside } from '../layout/geometry.ts';
-import type { Lot } from '../layout/records.ts';
+import { boxOf, distance, distancePolygonToPolyline, piecesMeet, pointInPolygon, projectOnPolyline, strictlyInside } from '../layout/geometry.ts';
+import type { Layout, Lot } from '../layout/records.ts';
 import type { Point } from '../schema.ts';
 import type { Wander } from './records.ts';
 
@@ -86,7 +88,59 @@ export function clipWander(wander: Wander, from: number, to: number): Wander {
 
 /** Works out a lot's open ground. */
 export function groundOf(lot: Lot): Ground {
-  const { polygon, footprints } = lot;
+  return groundWithin(lot.polygon, lot.footprints, lot.entrance.point);
+}
+
+/**
+ * Where someone outside at a building moves about: the open ground of its own lot; failing that, the courtyard its
+ * lot backs onto; failing that, the nearer of the plaza's open ground and the street in front of its entrance.
+ */
+export type OutsideGround =
+  | { kind: 'lot' | 'courtyard' | 'plaza'; polygon: readonly Point[]; footprints: readonly Point[][]; ground: Ground; name: string }
+  | { kind: 'street' };
+
+/** For each lot of a layout, where someone outside at its building moves about; each worked out once, when first asked. */
+export function outsideGrounds(layout: Pick<Layout, 'lots' | 'places' | 'courtyards'>): (lot: Lot) => OutsideGround {
+  const courtyardOf = new Map<string, NonNullable<Layout['courtyards']>[number]>();
+  for (const courtyard of layout.courtyards ?? []) for (const lotId of courtyard.lotIds) courtyardOf.set(lotId, courtyard);
+  const lotOf = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
+  const found = new Map<string, OutsideGround>();
+  /** The plazas whose lots have open ground, with it. */
+  let plazas: Array<{ polygon: Point[]; lot: Lot; ground: Ground }> | undefined;
+  const resolve = (lot: Lot): OutsideGround => {
+    const own = groundOf(lot);
+    if (own.open) return { kind: 'lot', polygon: lot.polygon, footprints: lot.footprints, ground: own, name: `the open ground of ${lot.buildingId}'s lot` };
+    const courtyard = courtyardOf.get(lot.id);
+    if (courtyard) {
+      const ground = groundWithin(courtyard.polygon, [], lot.entrance.point);
+      if (ground.open) return { kind: 'courtyard', polygon: courtyard.polygon, footprints: [], ground, name: `${courtyard.id}, behind ${lot.buildingId}` };
+    }
+    plazas ??= layout.places.flatMap((place) => {
+      const square = place.kind === 'plaza' ? lotOf.get(place.buildingId) : undefined;
+      const ground = square && groundOf(square);
+      return square && ground?.open ? [{ polygon: place.polygon, lot: square, ground }] : [];
+    });
+    // The street in front is as far as the entrance; a plaza only if the lot is nearer to it than that.
+    let best: OutsideGround = { kind: 'street' };
+    let least = distancePolygonToPolyline(lot.polygon, [lot.entrance.point, lot.entrance.point]);
+    for (const plaza of plazas) {
+      const away = distancePolygonToPolyline(lot.polygon, [...plaza.polygon, plaza.polygon[0] as Point]);
+      if (away < least) {
+        least = away;
+        best = { kind: 'plaza', polygon: plaza.lot.polygon, footprints: plaza.lot.footprints, ground: plaza.ground, name: `the open ground of ${plaza.lot.buildingId}'s lot, the plaza` };
+      }
+    }
+    return best;
+  };
+  return (lot) => {
+    let ground = found.get(lot.id);
+    if (!ground) found.set(lot.id, (ground = resolve(lot)));
+    return ground;
+  };
+}
+
+/** The open ground of a polygon less its footprints, with the point of its outline nearest `towards` for when there is none. */
+function groundWithin(polygon: readonly Point[], footprints: readonly (readonly Point[])[], towards: Point): Ground {
   const holds = (point: Point): boolean => strictlyInside(point, polygon) && !footprints.some((footprint) => pointInPolygon(point, footprint));
   const outlines = [polygon, ...footprints];
   const clear = (a: Point, b: Point): boolean => {
@@ -114,7 +168,7 @@ export function groundOf(lot: Lot): Ground {
   let cells = cellsOf(GROUND_GRID);
   if (cells.centres.length === 0) cells = cellsOf(FINER_GRID);
   // With no open ground, a person outside is at the lot's frontage: the point of its outline nearest its entrance.
-  const frontage = projectOnPolyline([...polygon, polygon[0] as Point], lot.entrance.point).point;
+  const frontage = projectOnPolyline([...polygon, polygon[0] as Point], towards).point;
   return {
     holds,
     clear,

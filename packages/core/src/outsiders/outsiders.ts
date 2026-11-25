@@ -32,7 +32,7 @@ import { SECONDS_PER_DAY, startOfDay, weekdayOf } from '../life/calendar.ts';
 import { type WorkingHours, createWorkingHours } from '../life/hours.ts';
 import type { Activity, DayPlan, Stay, StreetPurpose, StreetStop, Travel, TripPath, Wander } from '../life/records.ts';
 import { tripDuration, walkingSpeed } from '../life/walking.ts';
-import { type Ground, type WanderHabit, clipWander, groundOf, makeWander, streetGround } from '../life/wander.ts';
+import { type WanderHabit, clipWander, makeWander, outsideGrounds, streetGround } from '../life/wander.ts';
 import { type OutsiderVisit, type SettingPack, type SleepingPlace, type Species, type TravellerKind, type VisitStop, outsiderStopsOf, placeFlagsOf, sleepLength } from '../pack/schema.ts';
 import type { Point, SettlementBrief } from '../schema.ts';
 import { deriveSeed } from '../seed.ts';
@@ -282,11 +282,11 @@ export function createOutsiders(inputs: OutsidersInputs): Outsiders {
       path,
     };
   };
-  const grounds = new Map<string, Ground>();
+  const groundAt = outsideGrounds(layout);
   const groundWander = (who: Who, buildingId: string, start: number, end: number): Wander => {
-    let ground = grounds.get(buildingId);
-    if (!ground) grounds.set(buildingId, (ground = groundOf(lotOf.get(buildingId) as Layout['lots'][number])));
-    return makeWander(ground, stream('outside', `${who.key}:${buildingId}:${start}`), start, end, habits.get(who.species));
+    const found = groundAt(lotOf.get(buildingId) as Layout['lots'][number]);
+    if (found.kind === 'street') throw new OutsidersError(`${buildingId} has no open ground of its own, nor a courtyard or plaza near`);
+    return makeWander(found.ground, stream('outside', `${who.key}:${buildingId}:${start}`), start, end, habits.get(who.species));
   };
   const streetWander = (who: Who, segmentId: string, centre: Point, start: number, end: number, from?: Point): Wander => {
     const segment = segmentById.get(segmentId);
@@ -296,7 +296,8 @@ export function createOutsiders(inputs: OutsidersInputs): Outsiders {
   /** Time spent at a building on a visit: outside where the building is open-air or the visit says so, as for a resident. */
   const spend = (who: Who, start: number, end: number, buildingId: string, visit: OutsiderVisit): Stay => {
     const outside = (openAir.has(buildingId) || visit.outside === true) && end > start;
-    const lot = outside && visit.where === 'street' ? lotOf.get(buildingId) : undefined;
+    const here = lotOf.get(buildingId);
+    const lot = outside && here && (visit.where === 'street' || groundAt(here).kind === 'street') ? here : undefined;
     return {
       kind: 'visit',
       start,

@@ -20,9 +20,11 @@ const count = z.int().nonnegative();
  * across shifts, and stays out of doors; version 3 has people who are outside
  * move about the lot's open ground; version 4 added errands that chain and
  * repeat, strolls, work done on rounds, and stops on the street; version 5
- * added outsiders, who are in every answer beside the residents and marked.
+ * added outsiders, who are in every answer beside the residents and marked;
+ * version 6 has someone outside at a building with no open ground of its own
+ * move about its block's courtyard, or the plaza or the street in front.
  */
-export const LIFE_VERSION = 5;
+export const LIFE_VERSION = 6;
 
 /**
  * Outsiders: people in town who do not live there. A traveller's ID carries the settlement's number, the day the
