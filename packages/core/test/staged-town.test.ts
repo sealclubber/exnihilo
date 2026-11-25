@@ -428,7 +428,7 @@ describe('exact counts', () => {
       borrowed += strangers;
       moved += plan.selection.moved;
       blocks += plan.blocks.length;
-      expect(plan.blocks.filter((block, index) => plan.selection.blockDistrict[index] !== plan.districtPlan.of[block.ward]).length, brief.name).toBe(plan.selection.moved);
+      expect(plan.blocks.filter((block, index) => plan.selection.blockDistrict[index] !== plan.forecast.of[block.ward]).length, brief.name).toBe(plan.selection.moved);
     }
     // Measured: about 1% of houses stand in a neighbour's block at a shared border. A third of all blocks are in
     // another district than their ward's: most of them unbuilt ground at the town's edge, which a district that is
@@ -445,7 +445,7 @@ describe('districts', () => {
     for (const { brief, plan } of everyPlan()) {
       plan.districts.forEach((district, index) => {
         districts++;
-        const wards = plan.districtPlan.of.flatMap((of, ward) => (of === index ? [ward] : []));
+        const wards = plan.forecast.of.flatMap((of, ward) => (of === index ? [ward] : []));
         if (wards.length === 0) {
           landless++;
           return;
@@ -453,19 +453,19 @@ describe('districts', () => {
         const reached = new Set([wards[0] as number]);
         const queue = [wards[0] as number];
         for (let head = 0; head < queue.length; head++) {
-          for (const beside of plan.districtPlan.beside[queue[head] as number] ?? []) {
-            if (plan.districtPlan.of[beside.ward] !== index || reached.has(beside.ward)) continue;
+          for (const beside of plan.forecast.beside[queue[head] as number] ?? []) {
+            if (plan.forecast.of[beside.ward] !== index || reached.has(beside.ward)) continue;
             reached.add(beside.ward);
             queue.push(beside.ward);
           }
         }
         expect(reached.size, `${brief.name}: ${district.id} is in ${wards.length - reached.size + 1} pieces`).toBe(wards.length);
-        expect(wards, brief.name).toContain(plan.districtPlan.seeds[index]);
+        expect(wards, brief.name).toContain(plan.forecast.seeds[index]);
       });
       // A ward beside a ward of some district belongs to a district itself.
-      plan.districtPlan.of.forEach((of, ward) => {
+      plan.forecast.of.forEach((of, ward) => {
         if (of !== undefined || plan.wards[ward]?.kind !== 'ordinary') return;
-        for (const beside of plan.districtPlan.beside[ward] ?? []) expect(plan.districtPlan.of[beside.ward], brief.name).toBeUndefined();
+        for (const beside of plan.forecast.beside[ward] ?? []) expect(plan.forecast.of[beside.ward], brief.name).toBeUndefined();
       });
     }
     // A hamlet may have more districts than wards: such a district borrows all its houses.
@@ -477,12 +477,12 @@ describe('districts', () => {
       const { plan } = named(name);
       // The district that owns the plaza starts beside it; where there is no plaza, the first district at the heart.
       const square = plan.landmarks.find((landmark) => landmark.reservation === 'ward' && plan.wards[landmark.ward]?.kind === 'plaza');
-      const first = plan.wards[plan.districtPlan.seeds[square?.district ?? 0] as number] as TownPlan['wards'][number];
+      const first = plan.wards[plan.forecast.seeds[square?.district ?? 0] as number] as TownPlan['wards'][number];
       expect(first.growthRank, name).toBeLessThan(quantile(plan.wards.map((ward) => ward.growthRank), 0.2));
     }
     const { plan } = named('Cevilefon');
     const harbour = plan.districts.findIndex((district) => district.kind === 'harbour');
-    const seed = plan.wards[plan.districtPlan.seeds[harbour] as number] as TownPlan['wards'][number];
+    const seed = plan.wards[plan.forecast.seeds[harbour] as number] as TownPlan['wards'][number];
     const coast = plan.coast as NonNullable<TownPlan['coast']>;
     const gaps = plan.wards.filter((ward) => ward.kind === 'ordinary').map((ward) => Math.min(...ward.polygon.map((corner) => coast.gap(corner))));
     expect(Math.min(...seed.polygon.map((corner) => coast.gap(corner)))).toBeLessThan(quantile(gaps, 0.25));
@@ -492,14 +492,14 @@ describe('districts', () => {
     const areas = new Map<string, number[]>();
     for (const { plan } of everyPlan()) {
       plan.houses.forEach((house, index) => {
-        const of = plan.districtPlan.of[house.ward];
+        const of = plan.forecast.of[house.ward];
         if (plan.selection.district[index] === undefined || of === undefined) return;
         const kind = (plan.districts[of] as TownPlan['districts'][number]).kind;
         if (!areas.has(kind)) areas.set(kind, []);
         areas.get(kind)?.push(house.area);
       });
       plan.characters.forEach((character, ward) => {
-        const of = plan.districtPlan.of[ward];
+        const of = plan.forecast.of[ward];
         const kind = of === undefined ? undefined : plan.districts[of]?.kind;
         expect(character).toEqual({ ...settings.character.default, ...(kind === undefined ? {} : settings.character.kinds[kind]) });
       });
@@ -508,6 +508,38 @@ describe('districts', () => {
     expect(median('upper')).toBeGreaterThan(1.5 * median('centre'));
     expect(median('centre')).toBeGreaterThan(1.2 * median('lower'));
     expect(median('lower')).toBeGreaterThan(median('shanty'));
+  });
+});
+
+describe('banks, and districts shared among them (phase 6F, Part B)', () => {
+  it('groups the kept houses into banks that never cross water, and shares every district\'s houses among them exactly', () => {
+    const counts = new Map<number, number>();
+    let spanning = 0;
+    let unjoined = 0;
+    let over = 0;
+    for (const { brief, plan } of everyPlan()) {
+      const { banks, shares } = plan.banks;
+      counts.set(banks.length, (counts.get(banks.length) ?? 0) + 1);
+      // A town with no river is one bank; every kept house stands on exactly one.
+      if (!plan.river) expect(banks.length, brief.name).toBe(1);
+      const kept = plan.selection.district.filter((district) => district !== undefined).length;
+      expect(banks.reduce((sum, bank) => sum + bank.houses, 0), brief.name).toBe(kept);
+      expect(new Set(banks.flatMap((bank) => bank.blocks)).size, brief.name).toBe(banks.reduce((sum, bank) => sum + bank.blocks.length, 0));
+      if (plan.river) for (const bank of banks) expect(new Set(bank.blocks.map((block) => plan.river!.side(polygonCentroid(plan.blocks[block]!.polygon)))).size, brief.name).toBe(1);
+      // Every district gets all its houses, and no bank more than it holds.
+      shares.forEach((parts, district) => expect(parts.reduce((sum, part) => sum + part.houses, 0), `${brief.name} ${district}`).toBe(plan.selection.kept[district]));
+      banks.forEach((bank, index) => expect(shares.flat().filter((part) => part.bank === index).reduce((sum, part) => sum + part.houses, 0), brief.name).toBe(bank.houses));
+      spanning += plan.banks.spanning.length;
+      unjoined += plan.banks.unjoined.length;
+      if (plan.banks.spanning.length > Math.max(banks.length - 1, 0)) over++;
+    }
+    console.log(`Banks in Lomia: ${JSON.stringify(Object.fromEntries([...counts].sort((a, b) => a[0] - b[0])))} (banks: settlements); ${spanning} districts span banks, ${unjoined} of them without a bridge between; ${over} settlements have more spanning districts than banks less one`);
+  });
+
+  it('pulls a landmark\'s owner to the landmark\'s bank', () => {
+    for (const { brief, plan } of everyPlan()) {
+      for (const [district, bank] of plan.banks.pulled) expect(plan.banks.shares[district]?.[0]?.bank, `${brief.name} ${district}`).toBe(bank);
+    }
   });
 });
 
@@ -560,7 +592,7 @@ describe('selection', () => {
 describe('determinism, the one loop, and pack edits', () => {
   it('the same city, pack and seed give the same choice, and another seed a different one', () => {
     const { brief, input, plan } = named('Flupines');
-    const chosen = (other: TownPlan) => JSON.stringify([other.districtPlan.of, other.selection]);
+    const chosen = (other: TownPlan) => JSON.stringify([other.forecast.of, other.selection]);
     expect(chosen(planTown(brief, input, pack))).toBe(chosen(plan));
     expect(chosen(planTown(brief, input, pack, brief.seed + 1))).not.toBe(chosen(plan));
   });

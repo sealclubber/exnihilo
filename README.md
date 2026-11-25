@@ -554,8 +554,12 @@ and each stage draws on streams named `staged-…`. The stages:
     passage; one that does not fit is made a little narrower or shallower,
     and failing that is not built and the ground is left as yard. About two
     and a half times as many houses are made as the town has buildings.
-11. **Districts** (`staged/districts.ts`), which in the order of work come
-    before blocks. The city's districts are grown over the wards: each
+11. **The district forecast** (`staged/districts.ts`, `forecastDistricts`),
+    which in the order of work comes before blocks. It forecasts which kind
+    of district each ward will be, and sets the wards' character from it;
+    phase 6F (Part B) is replacing its other use, the districts of the kept
+    houses, with districts grown after selection, bank by bank. The city's
+    districts are grown over the wards: each
     starts at a seed ward chosen by its kind's placement (first the
     district that owns the plaza, at the ward nearest it, so that the plaza
     stands in its own district; then a waterside one, at the ward whose
@@ -571,6 +575,17 @@ and each stage draws on streams named `staged-…`. The stages:
     sets its wards' character from the pack: how large houses and blocks
     are, how many lanes, how often a rear wing or a passage. A landmark
     stands in its own district, among its inner blocks.
+    **Banks** (`staged/banks.ts`, phase 6F, measured and not yet used).
+    After selection the blocks that hold kept houses are grouped into
+    banks: the land they stand on, joined through the ground about the
+    blocks and never across water, so a town with no river is one bank.
+    Districts are shared among the banks: one that owns the plaza, the
+    castle or a block landmark first gets a foothold on that landmark's
+    bank; the rest, centre first, fill the banks nearest the plaza first,
+    the district that overflows going on to a bank a bridge joins. In
+    Lomia 488 settlements are one bank, 192 two and 2 three; 204 districts
+    span two banks, 6 of them banks no bridge joins, and in 12 settlements
+    the landmarks' pulls leave more spanning districts than banks less one.
     **Selection** (`staged/selection.ts`). The town keeps exactly as many
     houses as it has buildings, chosen as one town: the innermost 62%
     always, everything inside the wall first, and beyond that by a score

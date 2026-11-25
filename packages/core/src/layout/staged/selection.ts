@@ -13,7 +13,7 @@
 import type { StagedSettings } from '../../pack/schema.ts';
 import { type Block, wardRng } from './blocks.ts';
 import { distanceToPolygonEdge, polygonCentroid } from '../geometry.ts';
-import type { DistrictPlan } from './districts.ts';
+import type { DistrictForecast } from './districts.ts';
 import type { Ground } from './ground.ts';
 import type { House } from './rows.ts';
 import type { Wall } from './wall.ts';
@@ -41,7 +41,7 @@ export interface SelectionInput {
   houses: readonly House[];
   blocks: readonly Block[];
   wards: readonly Ward[];
-  plan: DistrictPlan;
+  plan: DistrictForecast;
   /** How many houses each district is to keep. */
   wanted: readonly number[];
   ground: Ground;

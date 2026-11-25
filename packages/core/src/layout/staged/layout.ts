@@ -456,7 +456,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     walls,
     places,
     blocks: plan.blocks.flatMap((block, at) => (builtBlocks.has(at) ? [{ id: `block-${number}-${pad(at + 1, 6)}`, polygon: block.polygon, ...(districtIdOf(plan.selection.blockDistrict[at]) !== undefined && { districtId: districtIdOf(plan.selection.blockDistrict[at]) as string }), growthRank: Math.min((plan.wards[block.ward] as TownPlan['wards'][number]).growthRank / most, 1) }] : [])),
-    wards: plan.wards.map((ward, at) => ({ id: `ward-${number}-${pad(at + 1, 4)}`, polygon: ward.polygon, kind: ward.kind, ...(districtIdOf(plan.districtPlan.of[at]) !== undefined && { districtId: districtIdOf(plan.districtPlan.of[at]) as string }), growthRank: Math.min(ward.growthRank / most, 1) })),
+    wards: plan.wards.map((ward, at) => ({ id: `ward-${number}-${pad(at + 1, 4)}`, polygon: ward.polygon, kind: ward.kind, ...(districtIdOf(plan.forecast.of[at]) !== undefined && { districtId: districtIdOf(plan.forecast.of[at]) as string }), growthRank: Math.min(ward.growthRank / most, 1) })),
     summary: {
       settlementId: brief.id,
       counts: { junctions: junctions.length, segments: segments.length, exits: exits.length, waters: waters.length, lots: lots.length, districtAreas: districtAreas.length, walls: walls.length, gates: walls.reduce((sum, wall) => sum + wall.gates.length, 0), places: places.length },
