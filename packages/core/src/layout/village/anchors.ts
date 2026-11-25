@@ -4,7 +4,7 @@
  *
  * A village honours every flag of its brief, shrunk: `plaza` gives a green
  * (an oval beside the road at the centre, with a pond, the well and a lane
- * round it), `temple` or a chapel in the city a church in its churchyard,
+ * round it), which a share of other villages have too, `temple` or a chapel in the city a church in its churchyard,
  * `citadel` a manor in its own yard with a barn, a stream a mill beside its
  * crossing, `port` a landing with one jetty and a lane to it. Without a green
  * the well stands by the road at the centre. Which building types are which
@@ -16,7 +16,7 @@ import type { Point, SettlementBrief } from '../../schema.ts';
 import { distancePolygonToPolyline, pointAlongPolyline, polygonsOverlap, polylineLength, projectOnPolyline } from '../geometry.ts';
 import { add, between, dot, left, tangentAt, unit } from '../staged/lines.ts';
 import type { Coast, River } from '../staged/water.ts';
-import type { VillageInput, VillageShape } from './plan.ts';
+import type { VillageInput } from './plan.ts';
 import { DRY, plotAt, rectAt } from './ground.ts';
 import type { Bridge, Way } from './roads.ts';
 
@@ -49,7 +49,8 @@ export interface AnchorInput {
   brief: SettlementBrief;
   settings: VillageSettings;
   input: VillageInput;
-  shape: VillageShape;
+  /** Whether the village has a green: where the brief is flagged `plaza`, or by chance. */
+  green: boolean;
   rng: Rng;
   /** The roads, which are the plan's first ways. */
   ways: readonly Way[];
@@ -69,8 +70,12 @@ const OVAL = 40;
 /** How far a green is moved out from the road at a time when it does not fit, and how many times. */
 const GREEN_STEP = 6;
 const GREEN_TRIES = 4;
+/** Where along a road from the centre a green is tried, in half-lengths of the green. */
+const GREEN_SHIFTS = [0, 0.5, -0.5, 1, -1];
+/** The landing is looked for along the shore from the point nearest the centre, in steps of ten metres either way, this many times. */
+const LANDING_TRIES = 60;
 
-export function placeAnchors({ brief, settings, input, rng, ways, bridges, buildings, river, coast }: AnchorInput): Anchors {
+export function placeAnchors({ brief, settings, input, green: wantsGreen, rng, ways, bridges, buildings, river, coast }: AnchorInput): Anchors {
   const notes: string[] = [];
   const { anchors: rules, gap } = settings;
   const sites: Site[] = [];
@@ -123,16 +128,20 @@ export function placeAnchors({ brief, settings, input, rng, ways, bridges, build
   // ---- The green, with its pond, the well and a lane round it -------------------------------------------------------
   let greenLane: Way | undefined;
   let green: Anchors['green'];
-  if (brief.flags.plaza) {
+  if (wantsGreen) {
     const { length, width } = buildings >= rules.green.largeFrom ? rules.green.large : rules.green.small;
     const [half, halfWidth] = [length / 2, width / 2];
     const phase = rng.next() * 2 * Math.PI;
     // Away from the water, where there is water; otherwise either side by chance.
     const first: 1 | -1 = rng.next() < 0.5 ? 1 : -1;
     const off = settings.widths.lane / 2 + gap;
-    search: for (const road of ways) {
+    // Beside a road at the centre, or a little way along it either side where a bend leaves no room.
+    const places = ways.flatMap((road) => GREEN_SHIFTS.map((shift) => ({ road, along: projectOnPolyline(road.points, CENTRE).along + shift * half })));
+    search: for (const { road, along } of places) {
       const roadLength = lengthOf(road);
-      const t0 = tangentAt(road.points, projectOnPolyline(road.points, CENTRE).along, roadLength);
+      if (along < 0 || along > roadLength) continue;
+      const base = pointAlongPolyline(road.points, along);
+      const t0 = tangentAt(road.points, along, roadLength);
       const n = left(t0);
       let preferred: 1 | -1 = first;
       if (river) preferred = dot(n, unit(river.nearest(CENTRE).point, CENTRE)) >= 0 ? 1 : -1;
@@ -140,7 +149,7 @@ export function placeAnchors({ brief, settings, input, rng, ways, bridges, build
       for (let push = 0; push < GREEN_TRIES; push++) {
         for (const side of [preferred, -preferred as 1 | -1]) {
           const across: Point = [n[0] * side, n[1] * side];
-          const middle = add(CENTRE, across, halfWidth + road.width / 2 + gap + push * GREEN_STEP);
+          const middle = add(base, across, halfWidth + road.width / 2 + gap + push * GREEN_STEP);
           const at = (x: number, y: number): Point => add(add(middle, t0, x), across, y);
           const outline = Array.from({ length: OVAL }, (_, k) => {
             const angle = (2 * Math.PI * k) / OVAL;
@@ -161,7 +170,8 @@ export function placeAnchors({ brief, settings, input, rng, ways, bridges, build
           lanes.push(lane);
           greenLane = lane;
           const holds = holder(rules.green.types);
-          if (holds === undefined) notes.push(`the brief is flagged plaza, but the city has no ${rules.green.types.join(' or ')} to hold the green`);
+          // A green the brief did not ask for is open ground that belongs to no building.
+          if (holds === undefined && brief.flags.plaza) notes.push(`the brief is flagged plaza, but the city has no ${rules.green.types.join(' or ')} to hold the green`);
           sites.push({ role: 'green', ...(holds !== undefined && { building: holds }), outline, footprints: [], drawing: [], way: indexOf(lane) });
           // The well, in the green's middle.
           const well = holder(rules.well.types);
@@ -171,7 +181,7 @@ export function placeAnchors({ brief, settings, input, rng, ways, bridges, build
         }
       }
     }
-    if (!green) notes.push('the brief is flagged plaza, but there is no room for a green beside a road at the centre');
+    if (!green) notes.push('there is no room for a green beside a road at the centre');
   }
 
   // ---- Without a green, the well by the road at the centre ----------------------------------------------------------
@@ -260,7 +270,7 @@ export function placeAnchors({ brief, settings, input, rng, ways, bridges, build
       const nearest = projectOnPolyline(shore, CENTRE).along;
       const { length, width } = rules.landing;
       let done = false;
-      for (let k = 0; k < 20 && !done; k++) {
+      for (let k = 0; k < LANDING_TRIES && !done; k++) {
         const at = nearest + (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * 10;
         if (at < 0 || at > shoreLength) continue;
         const onShore = pointAlongPolyline(shore, at);

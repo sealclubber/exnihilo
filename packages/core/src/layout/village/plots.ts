@@ -62,9 +62,12 @@ export interface PlotInput {
 /** Lays plots outward from the centre. `walk` places as many as the ways allow; `addWay` lets it walk a new one. */
 export class PlotWalker {
   readonly plots: Plot[] = [];
+  /** How much farther than the pack's reach a lane's plots may go, once step 6 has had to reach farther. */
+  reachScale = 1;
   private readonly remaining: Array<{ id: string; type: string; area: number; small: boolean }>;
   private readonly widthShare = new Map<string, number>();
   private readonly cursors: Cursor[] = [];
+  private readonly types = new Map<string, string>();
   private readonly centreAlong = new Map<number, number>();
 
   private readonly input: PlotInput;
@@ -72,6 +75,7 @@ export class PlotWalker {
   constructor(input: PlotInput) {
     this.input = input;
     const { pack, settings, toPlace } = input;
+    for (const building of toPlace) this.types.set(building.id, building.type);
     const sized = toPlace.map((building) => {
       const lot = lotSizeOf(building.type, pack);
       return { ...building, area: lot.frontage * lot.depth, small: lot.frontage <= settings.plots.row.most };
@@ -82,6 +86,22 @@ export class PlotWalker {
     // A building's place in that order is how wide its plot is, as a share of the span of widths.
     sized.forEach((building, at) => this.widthShare.set(building.id, sized.length > 1 ? 1 - at / (sized.length - 1) : 0.5));
     input.ground.ways.forEach((_, index) => this.addWay(index));
+  }
+
+  /** Takes plots away, their buildings to be placed again. */
+  release(outlines: ReadonlySet<Point[]>): void {
+    const freed = this.plots.filter((plot) => outlines.has(plot.outline));
+    if (freed.length === 0) return;
+    const kept = this.plots.filter((plot) => !outlines.has(plot.outline));
+    this.plots.length = 0;
+    this.plots.push(...kept);
+    const { pack, settings } = this.input;
+    for (const plot of freed) {
+      const type = this.types.get(plot.building) as string;
+      const lot = lotSizeOf(type, pack);
+      this.remaining.push({ id: plot.building, type, area: lot.frontage * lot.depth, small: lot.frontage <= settings.plots.row.most });
+    }
+    this.remaining.sort((a, b) => b.area - a.area || (a.id < b.id ? -1 : 1));
   }
 
   get unplaced(): string[] {
@@ -101,7 +121,7 @@ export class PlotWalker {
     const way = ground.ways[cursor.way] as Way;
     if (cursor.along < 0 || cursor.along > ground.lengthOf(way)) return false;
     if (way.kind === 'road') return Math.abs(cursor.along - (this.centreAlong.get(cursor.way) as number)) <= cap;
-    return Math.hypot(...pointAlongPolyline(way.points, cursor.along)) <= settings.plots.laneReach * cap;
+    return Math.hypot(...pointAlongPolyline(way.points, cursor.along)) <= settings.plots.laneReach * cap * this.reachScale;
   }
 
   /** How near the centre a walk is, a road's weighted in a village large enough to fork. */
@@ -138,7 +158,7 @@ export class PlotWalker {
       const building = this.remaining[pick] as (typeof this.remaining)[number];
       const share = Math.min(Math.max((this.widthShare.get(building.id) as number) + (rng.next() * 2 - 1) * rules.jitter, 0), 1);
       const width = inRow ? drawFrom(rng, rules.row.width) : rules.width.min + (rules.width.max - rules.width.min) * share;
-      const depth = drawFrom(rng, inRow ? rules.row.plot : rules.depth);
+      const depth = drawFrom(rng, inRow ? rules.row.plot : buildings >= rules.largeFrom ? rules.largeDepth : rules.depth);
       const start = best.direction > 0 ? best.along : best.along - width;
       const plot = plotAt(way, length, start, best.side, width, depth, settings.gap);
       const built = plot && polygonArea(plot.outline) >= LEAST_AREA * width * depth && ground.free(plot.outline) ? this.build(plot, building, width, depth, inRow) : undefined;
@@ -146,7 +166,7 @@ export class PlotWalker {
         best.along += best.direction * rules.step;
         continue;
       }
-      ground.occupy(plot.outline);
+      ground.occupy(plot.outline, true);
       this.plots.push({ building: building.id, way: best.way, outline: plot.outline, front: plot.front, ...built, row: inRow });
       this.remaining.splice(pick, 1);
       best.along += best.direction * (width + (inRow ? 0 : drawFrom(rng, rules.spacing)));

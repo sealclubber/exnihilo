@@ -630,12 +630,60 @@ staged:
 #            share `loop` come back to the road `loopReach` times their
 #            length farther out, bowed `loopOut` aside. One that meets water
 #            or an anchor is drawn again, at most `tries` times.
+#   thicken  thickening, never lengthening: when frontage runs out a lane
+#            is added, the best of `candidates` tried. Each leaves a lane, or
+#            the road within the cap, square to it (turned by about `turn`
+#            radians) or straight on from a lane's end (`endTurn`), `length`
+#            long, straying `stray`; or joins two lane ends within
+#            `loopWithin` of each other, so that not every lane is a close.
+#            None reaches farther than `reach` times the cap from the centre
+#            (`crossroadsReach` at a crossroads, at most `walledReach` with a
+#            palisade), nor ends beyond `beyond` times that. One that meets
+#            a way after `joinAfter` metres joins it there; one that ends
+#            within `joinWithin` of a way is carried on to it. Refused if
+#            shorter than `shortest`, within `alongside` of another way along
+#            its body, nearer than `baseClear` to the way it leaves beyond
+#            its first stretch, across water or an anchor, or within
+#            `greenClear` of the green. In its first `displaceWithin` metres
+#            it may cut through the plots lining the way it leaves: they are
+#            taken away and their buildings placed again, each costing
+#            `displaceCost` of its score; beyond, it crosses no plot. Frontage is counted as free plots
+#            `box.width` by `box.depth` every `box.step` along both sides;
+#            the lane kept has the most, times `joinBonus` for a join, less
+#            `nearness` a metre of its middle from the centre, plus up to
+#            `luck`, and at least `least`. Where none will do, any lane at
+#            all is tried once more, and then the reach grows by `grow`, at
+#            most `relax` times running.
+#   palisade a village flagged `walls` has one, fitted after all plots: a
+#            near-circle round every plot and anchor at least `clear` inside
+#            it, its shorter axis no less than `round` of its longer,
+#            wobbling by `wobble` (two waves round it), grown by `grow` at a
+#            time until it fits, at most to `most` times its first size,
+#            drawn with `points` points, `width` thick. A gap where a road
+#            passes, `gate` either side of the roadway; a lane's tail beyond
+#            it is cut off.
+#   fields   last, outside the envelope: the palisade grown by
+#            `envelope.palisade`, or the plots grown by `envelope.grow` and
+#            shrunk by `envelope.shrink`. They reach `band` (`largeBand` from
+#            `largeFrom` buildings) beyond the farthest plot, keep
+#            `waterClear` from water and `greenClear` from the green, and are
+#            cut only by the roads, `roadClear` beyond the roadway. Within
+#            `strips.within` of the envelope they are long strips,
+#            `strips.width` wide and at most `strips.length` long; farther
+#            out closes of about `closes.area` square metres; beyond
+#            `commons.beyond`, commons of about `commons.area`. Parted by
+#            `gap`, none under `least` square metres. A share `wood.share`
+#            of those beyond `wood.beyond` are woodland, a tree to every
+#            `wood.perTree` square metres, `wood.radius` across; furrows run
+#            `furrow` apart. A share `trees.share` of plots have a tree at a
+#            back corner; a landing has `boats.count` boats. All drawing.
 #   links    at a crossroads, from the same size, a curved lane joins each
 #            two neighbouring arms no more than `widest` degrees apart,
 #            `radius` out on one and that times `spread` on the other, bowed
 #            out by `bulge`
 #   plots    laid outward from the centre along both sides of every way.
-#            A plot is `width` by `depth`, wider the larger its building's
+#            A plot is `width` by `depth` (`largeDepth` from `largeFrom`
+#            buildings, as the prototype has them), wider the larger its building's
 #            lot (by `jitter` of the span at most); the next stands
 #            `spacing` along. Its house is at the front, `house.setBack`
 #            back. A plot wider than `farmstead.wider` is a farmstead by
@@ -653,7 +701,10 @@ staged:
 #            that the city has (the lowest ID of it). FOR REVIEW: which
 #            types are the green, well, church, manor, mill and landing is
 #            setting content and a first proposal.
-#     green    a town flagged `plaza` has a green: an oval `length` by
+#     green    a village flagged `plaza` has a green, and others by chance:
+#              `share.least` at `share.from` buildings, rising to
+#              `share.most` at `share.to`; one the brief did not ask for
+#              holds no building. A green is an oval `length` by
 #              `width` metres (`large` from `largeFrom` buildings), its
 #              outline wobbling by `wobble`, beside the road at the centre,
 #              with a pond of radius `pond` a share `pondAlong` of its length
@@ -690,10 +741,56 @@ village:
     loopOut: {min: 62, max: 88}
     loopReach: 1.05
     tries: 4
+  thicken:
+    candidates: 40
+    reach: 1.5
+    crossroadsReach: 1.05
+    walledReach: 1.2
+    beyond: 1.15
+    length: {min: 75, max: 150}
+    stray: 9
+    turn: 0.35
+    endTurn: 0.5
+    loopWithin: 120
+    joinAfter: 25
+    joinWithin: 55
+    shortest: 45
+    alongside: 26
+    baseClear: 22
+    greenClear: 6
+    displaceWithin: 70
+    displaceCost: 1.5
+    box: {width: 14, depth: 30, step: 16}
+    joinBonus: 1.45
+    nearness: 0.012
+    luck: 1.5
+    least: 3
+    grow: 1.15
+    relax: 8
+  palisade: {clear: 9, round: 0.8, wobble: [0.025, 0.015], grow: 0.03, most: 1.8, points: 120, width: 1.2, gate: 3}
+  fields:
+    envelope: {palisade: 7, grow: 26, shrink: 16}
+    band: 230
+    largeBand: 290
+    largeFrom: 110
+    waterClear: 6
+    greenClear: 8
+    roadClear: 1.5
+    strips: {within: 110, width: {min: 16, max: 30}, length: 240}
+    closes: {area: {min: 5000, max: 11000}}
+    commons: {beyond: 200, area: {min: 18000, max: 32000}}
+    gap: 2.2
+    least: 300
+    wood: {share: 0.13, beyond: 140, perTree: 55, radius: {min: 2.6, max: 4.4}}
+    furrow: 6.5
+    trees: {share: 0.35, radius: {min: 2.4, max: 3.6}}
+    boats: {count: 6, length: 6.4, width: 2.4, out: {min: 6, max: 22}, along: 26}
   links: {radius: {min: 95, max: 135}, spread: {min: 0.85, max: 1.15}, bulge: {min: 1.05, max: 1.3}, widest: 150}
   plots:
     width: {min: 13, max: 21}
-    depth: {min: 30, max: 58}
+    depth: {min: 34, max: 58}
+    largeDepth: {min: 30, max: 39}
+    largeFrom: 105
     jitter: 0.15
     spacing: {min: 0, max: 5}
     house: {width: {min: 7.5, max: 11.5}, depth: {min: 5.5, max: 7.5}, turned: 0.25, setBack: {min: 1.5, max: 6}, margin: 1}
@@ -706,6 +803,7 @@ village:
   anchors:
     green:
       types: [market-square]
+      share: {least: 0.4, most: 0.7, from: 50, to: 200}
       small: {length: 124, width: 60}
       large: {length: 184, width: 84}
       largeFrom: 110

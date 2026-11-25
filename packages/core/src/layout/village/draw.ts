@@ -19,14 +19,24 @@ const SHED = '#8e8a80';
 const round = (value: number) => String(Math.round(value * 10) / 10);
 const path = (points: readonly Point[], closed: boolean) => `${points.map(([x, y], at) => `${at === 0 ? 'M' : 'L'}${round(x)} ${round(y)}`).join('')}${closed ? 'Z' : ''}`;
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const SHAPES = { street: 'along a road', green: 'round a green', crossroads: 'at a crossroads', shore: 'on a shore' };
+const SHAPES = { street: 'along a road', crossroads: 'at a crossroads', shore: 'on a shore' };
 
 export function drawVillageSvg(plan: VillagePlan, brief: SettlementBrief): string {
-  const extent = Math.max(plan.cap * 1.6, 230);
+  // Wide enough for the whole village and a margin of its fields.
+  const extent = Math.max(plan.cap * 1.6, 230, ...plan.countryside.envelope.map((point) => Math.max(Math.abs(point[0]), Math.abs(point[1])) + 60));
   const lines: string[] = [];
   const letter = extent / 55;
   lines.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${round(-extent)} ${round(-extent)} ${round(2 * extent)} ${round(2 * extent)}" width="1100" font-family="system-ui, sans-serif">`);
   lines.push(`<rect x="${round(-extent)}" y="${round(-extent)}" width="${round(2 * extent)}" height="${round(2 * extent)}" fill="${LAND}"/>`);
+  if (plan.coast) lines.push(`<path d="${path(plan.coast.polygon, true)}" fill="${WATER}" stroke="${INK}" stroke-width="0.6"/>`);
+  if (plan.river) lines.push(`<path d="${path(stripOutline(plan.river.line, plan.river.width), true)}" fill="${WATER}" stroke="${INK}" stroke-width="0.6"/>`);
+  // Fields, woods and the village's own ground, under everything else.
+  const FIELD_TINTS = ['#c9c79f', '#bfc59d', '#d3cba1', '#b7bf98', '#cdc6a8', '#c2c8a6'];
+  const { fields, envelope, trees, boats } = plan.countryside;
+  fields.forEach((field, at) => lines.push(`<path d="${path(field.outline, true)}" fill="${field.kind === 'wood' ? '#a9b592' : field.kind === 'common' ? '#bcc39c' : FIELD_TINTS[at % FIELD_TINTS.length]}" stroke="#a7a88c" stroke-width="0.5"/>`));
+  const furrows = fields.flatMap((field) => field.furrows);
+  if (furrows.length > 0) lines.push(`<path d="${furrows.map((furrow) => path(furrow, false)).join('')}" fill="none" stroke="#a9aa8a" stroke-width="0.35"/>`);
+  lines.push(`<path d="${path(envelope, true)}" fill="#bcc3a0"/>`);
   if (plan.coast) lines.push(`<path d="${path(plan.coast.polygon, true)}" fill="${WATER}" stroke="${INK}" stroke-width="0.6"/>`);
   if (plan.river) lines.push(`<path d="${path(stripOutline(plan.river.line, plan.river.width), true)}" fill="${WATER}" stroke="${INK}" stroke-width="0.6"/>`);
   // The cap on the through road's built stretch, faintly.
@@ -64,8 +74,15 @@ export function drawVillageSvg(plan: VillagePlan, brief: SettlementBrief): strin
       lines.push(`<circle cx="${round(x)}" cy="${round(y)}" r="2.6" fill="none" stroke="#e1dbd5" stroke-width="0.8"/>`);
     }
   }
+  if (trees.length > 0) lines.push(`<g fill="#8fa07a" stroke="#667255" stroke-width="0.35">${trees.map((tree) => `<circle cx="${round(tree.point[0])}" cy="${round(tree.point[1])}" r="${round(tree.radius)}"/>`).join('')}</g>`);
+  for (const boat of boats) lines.push(`<path d="${path(boat, true)}" fill="${ROAD}" stroke="${INK}" stroke-width="0.5"/>`);
+  if (plan.palisade) {
+    const pieces = plan.palisade.lines.map((line) => path(line, false)).join('');
+    lines.push(`<path d="${pieces}" fill="none" stroke="#5c4a34" stroke-width="${round(plan.palisade.width * 1.8)}" stroke-linejoin="round"/>`);
+    lines.push(`<path d="${pieces}" fill="none" stroke="#5c4a34" stroke-width="${round(plan.palisade.width * 3)}" stroke-dasharray="0.6 2.2"/>`);
+  }
   const flags = Object.entries(brief.flags).filter(([, on]) => on).map(([flag]) => flag);
-  lines.push(`<text x="${round(-extent * 0.96)}" y="${round(-extent * 0.92)}" font-size="${round(letter * 1.3)}" font-weight="bold" fill="${INK}">${escape(brief.name)}, ${SHAPES[plan.shape]} · ${plan.buildings} buildings, ${plan.buildings - plan.unplaced.length} placed</text>`);
+  lines.push(`<text x="${round(-extent * 0.96)}" y="${round(-extent * 0.92)}" font-size="${round(letter * 1.3)}" font-weight="bold" fill="${INK}">${escape(brief.name)}, ${SHAPES[plan.shape]}${plan.anchors.green ? ', with a green' : ''} · ${plan.buildings} buildings, ${plan.buildings - plan.unplaced.length} placed</text>`);
   lines.push(`<text x="${round(-extent * 0.96)}" y="${round(-extent * 0.92 + letter * 1.6)}" font-size="${round(letter * 0.85)}" fill="${INK}">${escape([`${brief.population} residents`, ...flags, ...(plan.river ? ['stream'] : []), ...(plan.coast ? ['coast'] : [])].join(' · '))}</text>`);
   plan.notes.forEach((note, at) => lines.push(`<text x="${round(-extent * 0.96)}" y="${round(extent * 0.9 - at * letter * 1.1)}" font-size="${round(letter * 0.75)}" fill="${INK}">${escape(note)}</text>`));
   lines.push(`<path d="M${round(-extent * 0.93)} ${round(extent * 0.96)}h100" stroke="${INK}" stroke-width="2"/><text x="${round(-extent * 0.93 + 104)}" y="${round(extent * 0.965)}" font-size="${round(letter * 0.8)}" fill="${INK}">100 m</text>`);

@@ -737,13 +737,18 @@ It does not make layouts yet. Built so far:
    the centre; two exits more than 140 degrees apart are one through road,
    evened so that it bends at the centre. A small bridge wherever a road
    crosses the stream; a road that would run into the sea stops at the shore.
-   The shape follows: a coast gives *shore*; two or more roads, *crossroads*;
-   the `plaza` flag, *green*; otherwise *street*. The brief carries no
-   settlement type, so a Lake or Naval settlement is a shore village only
-   where it is coastal.
-3. **Anchors** (`village/anchors.ts`). The green (flag `plaza`): an oval
-   beside a road at the centre, with a pond, the well and a lane round its
-   far side. Without it, the well by the road at the centre. A church
+   Two exits that are not opposite are one road bending at the centre. The
+   shape follows: a coast gives *shore*; three or more land exits, or two
+   through roads, *crossroads*; otherwise *street* (40, 44 and 52 of Lomia's
+   villages). The brief carries no settlement type, so a Lake or Naval
+   settlement is a shore village only where it is coastal.
+3. **Anchors** (`village/anchors.ts`). The green, an anchor in any shape:
+   always where the brief is flagged `plaza`, otherwise by a seeded share
+   from the pack that rises with size (0.4 at 50 buildings to 0.7 at 200;
+   81 of Lomia's 136 villages). An oval beside a road at the centre, with a
+   pond, the well and a lane round its far side; one the brief did not ask
+   for belongs to no building. Without a green, the well by the road at the
+   centre. A church
    (flag `temple`, or a chapel in the city) in its churchyard by the green
    or near the centre; a manor (flag `citadel`) in its own yard with a barn;
    a mill beside the stream's crossing; a landing (flag `port`) with one
@@ -768,13 +773,36 @@ It does not make layouts yet. Built so far:
    the centre are 7 to 9.5 m wide with their houses joined in a terraced
    row; these go to the buildings with small lots (`row.most`), the larger
    ones standing just beyond. A road is built no farther than the cap each
-   way. What does not fit waits for step 6: after step 5, 7,476 of the
-   17,597 buildings of Lomia's villages have a plot.
+   way. What does not fit waits for step 6.
+6. **Thicken, never lengthen** (`village/lanes.ts`). While a building has no
+   plot, a lane is added: the best of 40 candidates leaving a lane or the
+   road inside the village, square to it or straight on from a lane's end,
+   and of lanes joining two lane ends near each other, so that some lanes
+   loop. A candidate that meets another way joins it; one that crosses water
+   or an anchor, comes near the green or runs alongside another way is
+   refused. Near its start a lane may cut through the plots lining the way
+   it leaves: their buildings are placed again, at a cost to its score. The
+   lane with the most free frontage is kept, favouring joins and ground near
+   the centre. Where none will do it tries once more, and then reaches a
+   little farther. Every building of all 136 villages has a plot; 86 needed
+   lanes beyond the pack's reach, by 1.15 times at the median and 2 at most.
+7. **Palisade** (`village/palisade.ts`). For a village flagged `walls`,
+   fitted after all plots: a near-circle along the spread of the plots, its
+   shorter axis no less than 0.8 of its longer, with a slight wobble, every
+   plot 9 m inside. A gap where a road or lane passes; none across water. A
+   lane's tail beyond it is cut off.
+8. **Fields** (`village/fields.ts`). The envelope is the palisade, or a
+   smooth outline round the plots. Fields lie outside it, cut only by the
+   roads and kept off water and the green: long strips near the village,
+   closes farther out, commons beyond, some woodland, with furrows; trees at
+   some plots' backs and boats by a landing. All of it is drawing.
 
 `node scripts/render-village.ts <out> <suffix> [--as flag,flag] <name>...`
-draws a village's plan so far; `docs/renders/*-village-step3.svg` and
-`*-village-step5.svg` are Vereceldo (65 buildings) and Monhas (180) after
-steps 3 and 5.
+draws a village's plan; `docs/renders/*-village-step3.svg`,
+`*-village-step5.svg` and `*-village-step8.svg` are Vereceldo (65
+buildings) and Monhas (180) after steps 3, 5 and 8. A village's plan is not
+yet written in the layout format: until it is, villages are still laid out
+by the staged generator.
 
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane

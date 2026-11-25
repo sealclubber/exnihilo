@@ -4,13 +4,14 @@
  * Each land route of the brief is a road from the centre to its exit, a road's
  * width wide, straying aside as a highway does. Two exits more than `through`
  * degrees apart, the farthest apart first, are one through road; any other is
- * an arm from the centre. Where a road crosses the stream it has a small
+ * an arm from the centre. A village of two exits that are not opposite has
+ * one road all the same, bending at the centre. Where a road crosses the stream it has a small
  * bridge; where it would run into the sea it stops at the shore.
  */
 import type { Rng } from '../../city/random.ts';
 import type { VillageSettings } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
-import { bearingDifference, bearingVector, pointAlongPolyline, polylineLength } from '../geometry.ts';
+import { bearingDifference, bearingVector, pointAlongPolyline, polylineLength, projectOnPolyline } from '../geometry.ts';
 import { add, crossingsAlong, dot, resmooth, stray, tangentAt, unit } from '../staged/lines.ts';
 import type { Coast, River } from '../staged/water.ts';
 
@@ -47,7 +48,7 @@ const SHORE_STEP = 4;
 /** The most a bridge reaches either way from the stream's centre line, in metres. */
 const BRIDGE_MOST = 200;
 
-export function layRoads({ brief, settings, rng, river, coast }: RoadInput): { ways: Way[]; bridges: Bridge[]; through: number; arms: number; notes: string[] } {
+export function layRoads({ brief, settings, rng, river, coast }: RoadInput): { ways: Way[]; bridges: Bridge[]; through: number; landExits: number; notes: string[] } {
   const notes: string[] = [];
   const width = settings.widths.road;
   const amplitude = settings.road.wander * settings.reach;
@@ -63,6 +64,12 @@ export function layRoads({ brief, settings, rng, river, coast }: RoadInput): { w
     pairs.push([a, b]);
     paired.add(a);
     paired.add(b);
+  }
+  const through = pairs.length;
+  // Two exits that are not opposite are still one road: a street with a bend at the centre.
+  if (land.length === 2 && pairs.length === 0) {
+    pairs.push([(land[0] as { at: number }).at, (land[1] as { at: number }).at]);
+    for (const exit of land) paired.add(exit.at);
   }
   const arms = land.filter((exit) => !paired.has(exit.at)).map((exit) => exit.at);
 
@@ -87,7 +94,13 @@ export function layRoads({ brief, settings, rng, river, coast }: RoadInput): { w
     const to = half((brief.routes[b] as { bearing: number }).bearing, b);
     ways.push({ kind: 'road', points: resmooth([...from, ...to.slice(1)], settings.road.step), width, routes: [a, b] });
   }
-  for (const at of arms) ways.push({ kind: 'road', points: half((brief.routes[at] as { bearing: number }).bearing, at), width, routes: [at] });
+  // An arm leaves the first through road where it passes the centre: evened, that road may miss the centre by a little.
+  const through0 = ways[0];
+  for (const at of arms) {
+    const points = half((brief.routes[at] as { bearing: number }).bearing, at);
+    const meet = through0 ? projectOnPolyline(through0.points, CENTRE).point : undefined;
+    ways.push({ kind: 'road', points: meet && Math.hypot(...meet) > 1e-6 ? [meet, ...points] : points, width, routes: [at] });
+  }
   if (ways.length === 0) {
     // No land route: the village has a road of its own through the centre, along the shore where there is one.
     const bearing = brief.coast.waterBearing === undefined ? 0 : (brief.coast.waterBearing + 90) % 360;
@@ -129,7 +142,7 @@ export function layRoads({ brief, settings, rng, river, coast }: RoadInput): { w
     });
     if (bridges.length > 1) notes.push(`the roads cross the stream ${bridges.length} times, each with a bridge`);
   }
-  return { ways, bridges, through: pairs.length, arms: arms.length, notes };
+  return { ways, bridges, through, landExits: land.length, notes };
 }
 
 /** A line cut short at a distance along it. */

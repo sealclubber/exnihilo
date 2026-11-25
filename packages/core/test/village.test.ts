@@ -1,11 +1,12 @@
 /**
  * Phase 6E, Villages: the village generator for settlements under the pack's `village.below` residents, step by
- * step. Steps 1 to 3: water, the road, and the anchors. Steps 4 and 5: central forks, and plots outward from the
- * centre.
+ * step. Steps 1 to 3: water, the road, and the anchors. Steps 4 to 6: central forks, plots outward from the
+ * centre, and lanes added until every building has a plot. Steps 7 and 8: the palisade and the fields.
  */
 import { describe, expect, it } from 'vitest';
-import { type City, generateCity } from '../src/index.ts';
+import { type City, generateCity, geometry } from '../src/index.ts';
 import { SpatialIndex, bearingDifference, boxOf, distancePolygonToPolyline, polygonWithin, polygonsOverlap, projectOnPolyline } from '../src/layout/geometry.ts';
+import { crossingsAlong } from '../src/layout/staged/lines.ts';
 import { armsOf } from '../src/layout/village/forks.ts';
 import { isVillage, planVillage, villageInput } from '../src/layout/village/plan.ts';
 import type { SettlementBrief } from '../src/schema.ts';
@@ -17,6 +18,9 @@ const villages: Array<{ brief: SettlementBrief; city: City }> = lomiaWorld()
   .settlements.filter((brief) => isVillage(brief, pack))
   .map((brief) => ({ brief, city: generateCity(brief, pack) }));
 const named = (name: string) => villages.find(({ brief }) => brief.name === name)!;
+/** Every village planned once, for all the tests that read the plans. */
+let planned: Array<{ brief: SettlementBrief; city: City; plan: ReturnType<typeof planVillage> }> | undefined;
+const allPlans = () => (planned ??= villages.map(({ brief, city }) => ({ brief, city, plan: planVillage(brief, villageInput(city), pack) })));
 
 describe('which settlements are villages', () => {
   it('is every settlement under 1,000 residents: 136 in Lomia, the smallest with 50 buildings', () => {
@@ -27,17 +31,25 @@ describe('which settlements are villages', () => {
 });
 
 describe('steps 1 to 3 in every village', () => {
-  const plans = villages.map(({ brief, city }) => ({ brief, plan: planVillage(brief, villageInput(city), pack) }));
+  const plans = allPlans();
 
-  it('picks a shape from the brief, first match wins', () => {
-    const count = { shore: 0, crossroads: 0, green: 0, street: 0 };
+  it('picks a shape from the brief, first match wins, and gives a share of villages a green', () => {
+    const count = { shore: 0, crossroads: 0, street: 0 };
+    let greens = 0;
     for (const { brief, plan } of plans) {
       count[plan.shape]++;
-      if (brief.coast.isCoastal) expect(plan.shape).toBe('shore');
-      else if (plan.ways.filter((way) => way.kind === 'road').length >= 2) expect(plan.shape).toBe('crossroads');
+      const land = brief.routes.filter((route) => route.kind !== 'sea-route').length;
+      const through = plan.ways.filter((way) => way.kind === 'road' && way.routes.length === 2 && bearingDifference(brief.routes[way.routes[0]!]!.bearing, brief.routes[way.routes[1]!]!.bearing) > settings.road.through).length;
+      expect(plan.shape, brief.name).toBe(brief.coast.isCoastal ? 'shore' : land >= 3 || through >= 2 ? 'crossroads' : 'street');
+      // Two exits that are not opposite are one road with a bend.
+      if (land === 2) expect(plan.ways.filter((way) => way.kind === 'road'), brief.name).toHaveLength(1);
+      if (brief.flags.plaza) expect(plan.anchors.green, brief.name).toBeDefined();
+      if (plan.anchors.green) greens++;
+      if (plan.anchors.green) expect(plan.anchors.sites.find((site) => site.role === 'well')?.way, brief.name).toBeUndefined();
     }
-    console.log(`Village shapes in Lomia: ${JSON.stringify(count)}`);
+    console.log(`Village shapes in Lomia: ${JSON.stringify(count)}; ${greens} have a green`);
     expect(count.shore).toBe(villages.filter(({ brief }) => brief.coast.isCoastal).length);
+    expect(greens / plans.length).toBeGreaterThan(0.3);
   });
 
   it('lays every land route as a road from the centre, opposite exits as one through road', () => {
@@ -47,7 +59,7 @@ describe('steps 1 to 3 in every village', () => {
       expect(carried, brief.name).toEqual(land);
       for (const way of plan.ways.filter((one) => one.kind === 'road')) {
         expect(way.width).toBe(settings.widths.road);
-        if (way.routes.length === 2) expect(bearingDifference(brief.routes[way.routes[0]!]!.bearing, brief.routes[way.routes[1]!]!.bearing)).toBeGreaterThan(settings.road.through);
+        if (way.routes.length === 2 && land.length > 2) expect(bearingDifference(brief.routes[way.routes[0]!]!.bearing, brief.routes[way.routes[1]!]!.bearing)).toBeGreaterThan(settings.road.through);
       }
     }
   });
@@ -96,13 +108,13 @@ describe('steps 1 to 3 in every village', () => {
   });
 });
 
-describe('steps 4 and 5 in every village', () => {
-  const plans = villages.map(({ brief, city }) => ({ brief, city, plan: planVillage(brief, villageInput(city), pack) }));
+describe('steps 4 to 6 in every village', () => {
+  const plans = allPlans();
 
   it('forks lanes off the road near the centre from 90 buildings, two under 150 and three above', () => {
     const lanes = { small: 0, middle: 0, large: 0 };
     for (const { brief, plan } of plans) {
-      const extra = plan.ways.filter((way) => way.kind === 'lane').length - plan.anchors.lanes.length;
+      const extra = plan.lanes.forks;
       if (plan.buildings < settings.forks.from) expect(extra, brief.name).toBe(0);
       else if (plan.shape !== 'crossroads') expect(extra, brief.name).toBeLessThanOrEqual(plan.buildings < 150 ? 2 : 3);
       lanes[plan.buildings < settings.forks.from ? 'small' : plan.buildings < 150 ? 'middle' : 'large'] += extra;
@@ -110,7 +122,7 @@ describe('steps 4 and 5 in every village', () => {
     console.log(`Forks and links laid: ${JSON.stringify(lanes)}`);
   });
 
-  it('places every building at most once, on a plot clear of every other, of the ways, the water and the anchors', () => {
+  it('places every building exactly once, on a plot clear of every other, of the ways, the water and the anchors', () => {
     const problems: string[] = [];
     let placed = 0;
     let all = 0;
@@ -131,7 +143,10 @@ describe('steps 4 and 5 in every village', () => {
         for (const footprint of [...plot.footprints, ...plot.drawing]) if (!polygonWithin(footprint, plot.outline)) problems.push(`${brief.name}: a house or barn reaches out of its plot`);
       });
     }
-    console.log(`After step 5, ${placed} of ${all} buildings in Lomia's villages have a plot or an anchor`);
+    const scales = plans.map(({ plan }) => plan.lanes.reachScale).sort((a, b) => a - b);
+    console.log(`After step 6, ${placed} of ${all} buildings in Lomia's villages have a plot or an anchor; ${plans.reduce((sum, { plan }) => sum + plan.lanes.thickened, 0)} lanes added, ${plans.reduce((sum, { plan }) => sum + plan.lanes.displaced, 0)} plots laid again; the lanes reached past the pack's reach in ${scales.filter((scale) => scale > 1).length} villages, by ${scales[scales.length >> 1]!.toFixed(2)} at the median and ${scales[scales.length - 1]!.toFixed(2)} at most`);
+    expect(placed).toBe(all);
+    for (const { brief, plan } of plans) expect(plan.unplaced, brief.name).toEqual([]);
     expect(problems.slice(0, 10)).toEqual([]);
   });
 
@@ -160,5 +175,64 @@ describe('steps 4 and 5 in every village', () => {
       expect(mean(sized.slice(0, Math.floor(sized.length / 3))), brief.name).toBeGreaterThan(mean(sized.slice(-Math.floor(sized.length / 3))));
     }
     expect(armsOf(plans.find(({ brief }) => brief.name === 'Monhas')!.plan.ways).length).toBe(2);
+  });
+});
+
+describe('steps 7 and 8, and the village whole', () => {
+  const plans = allPlans();
+
+  it('fronts every plot onto its way, and makes the ways one network', () => {
+    for (const { brief, plan } of plans) {
+      for (const plot of plan.plots) {
+        const way = plan.ways[plot.way]!;
+        // Its front's corners stand the gap back from the way's edge; on a bend the middle of the front may not.
+        expect(Math.min(...plot.front.map((corner) => projectOnPolyline(way.points, corner).distance)), brief.name).toBeLessThan(way.width / 2 + settings.gap + 0.1);
+      }
+      // Ways that meet or touch are joined; every way is reached from the first.
+      const reached = new Set([0]);
+      const queue = [0];
+      while (queue.length > 0) {
+        const at = queue.pop()!;
+        plan.ways.forEach((other, index) => {
+          if (reached.has(index)) return;
+          const ends = [other.points[0]!, other.points[other.points.length - 1]!];
+          const mine = plan.ways[at]!;
+          const touches = crossingsAlong(mine.points, other.points).length > 0 || ends.some((end) => projectOnPolyline(mine.points, end).distance < 0.5) || [mine.points[0]!, mine.points[mine.points.length - 1]!].some((end) => projectOnPolyline(other.points, end).distance < 0.5);
+          if (touches) {
+            reached.add(index);
+            queue.push(index);
+          }
+        });
+      }
+      expect(reached.size, brief.name).toBe(plan.ways.length);
+    }
+  });
+
+  it('has a palisade exactly where the brief is flagged walls, with every plot inside it and no field touching it', () => {
+    for (const { brief, plan } of plans) {
+      expect(plan.palisade !== undefined, brief.name).toBe(brief.flags.walls);
+      if (!plan.palisade) continue;
+      for (const plot of plan.plots) for (const corner of plot.outline) expect(geometry.pointInPolygon(corner, plan.palisade.ring), brief.name).toBe(true);
+      for (const field of plan.countryside.fields) for (const line of plan.palisade.lines) expect(distancePolygonToPolyline(field.outline, line), brief.name).toBeGreaterThan(0);
+    }
+  });
+
+  it('lays fields outside the village, clear of plots, roads and water', () => {
+    let fields = 0;
+    const kinds: Record<string, number> = {};
+    for (const { brief, plan } of plans) {
+      for (const field of plan.countryside.fields) {
+        fields++;
+        kinds[field.kind] = (kinds[field.kind] ?? 0) + 1;
+        for (const corner of field.outline) {
+          expect(geometry.pointInPolygon(corner, plan.countryside.envelope) && geometry.distanceToPolygonEdge(corner, plan.countryside.envelope) > 0.01, brief.name).toBe(false);
+          if (plan.river) expect(plan.river.gap(corner), brief.name).toBeGreaterThan(0);
+          if (plan.coast) expect(plan.coast.gap(corner), brief.name).toBeGreaterThan(0);
+        }
+        for (const way of plan.ways) if (way.kind === 'road') expect(distancePolygonToPolyline(field.outline, way.points), brief.name).toBeGreaterThan(way.width / 2);
+      }
+    }
+    console.log(`Fields about Lomia's villages: ${fields}, ${JSON.stringify(kinds)}`);
+    expect(fields).toBeGreaterThan(plans.length * 10);
   });
 });

@@ -39,6 +39,7 @@ with the grid laying every town out). Run a single test file with
 | `packages/core/test/staged-mesh.test.ts` (stages 6 to 9 for all 682 settlements) | about 30 seconds |
 | `packages/core/test/staged-layout.test.ts` (staged layouts for a sample of 57 settlements, and life on them) | about 1 minute |
 | `packages/core/test/staged-town.test.ts` (blocks, houses, landmarks, districts, selection and fitting for all 682 settlements, planned once) | about 3 minutes |
+| `packages/core/test/village.test.ts` (the village generator's eight steps for all 136 villages, planned once) | about 90 seconds |
 
 Node.js 24 or newer runs the TypeScript directly; there is no build step for
 the server. Run `npm run check` before calling any task done.

@@ -31,7 +31,10 @@ export class Ground {
   readonly ways: Way[];
   private readonly lengths = new Map<Way, number>();
   private readonly wayBoxes = new Map<Way, Box>();
-  private readonly outlines = new SpatialIndex<Point[]>(CELL);
+  private outlines = new SpatialIndex<Point[]>(CELL);
+  /** Which outlines are plots, which a lane may take away to be laid again; the rest are anchors. */
+  private readonly plots = new Set<Point[]>();
+  private readonly all: Point[][] = [];
   private readonly river: River | undefined;
   private readonly coast: Coast | undefined;
 
@@ -58,8 +61,35 @@ export class Ground {
     return this.ways.length - 1;
   }
 
-  occupy(outline: Point[]): void {
+  occupy(outline: Point[], plot = false): void {
     this.outlines.add(boxOf(outline), outline);
+    this.all.push(outline);
+    if (plot) this.plots.add(outline);
+  }
+
+  /** Takes plots away, so that their ground is free again. */
+  release(outlines: ReadonlySet<Point[]>): void {
+    if (outlines.size === 0) return;
+    this.outlines = new SpatialIndex<Point[]>(CELL);
+    const kept = this.all.filter((outline) => !outlines.has(outline));
+    this.all.length = 0;
+    for (const outline of kept) {
+      this.outlines.add(boxOf(outline), outline);
+      this.all.push(outline);
+    }
+    for (const outline of outlines) this.plots.delete(outline);
+  }
+
+  /** What a way of a width keeping `gap` from things would run into: plots, and whether it meets an anchor. */
+  blockers(points: readonly Point[], width: number, gap: number): { plots: Point[][]; anchor: boolean } {
+    const plots: Point[][] = [];
+    let anchor = false;
+    for (const other of this.outlines.near(boxOf(points, width / 2 + gap))) {
+      if (distancePolygonToPolyline(other, points) >= width / 2 + gap) continue;
+      if (this.plots.has(other)) plots.push(other);
+      else anchor = true;
+    }
+    return { plots, anchor };
   }
 
   /** Whether points are all more than `margin` from the water. */

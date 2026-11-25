@@ -147,12 +147,12 @@ The user approved this over five rounds of prototype. Reference files, to be add
 | --- | --- | --- |
 | `walls` | Stone ring, towers, gates | A palisade, with gaps where the through roads pass |
 | `citadel` | Castle ward | A manor in its own yard, with a barn |
-| `plaza` | Market square | A green; without the flag, the well stands on the road at the centre |
+| `plaza` | Market square | A green. Without the flag, a seeded share of villages still get one (in the pack, from 0.4 and rising with size); the well stands on the green where there is one, otherwise on the road at the centre |
 | `temple`, or a chapel from the city | Temple on the plaza | One church in a churchyard, by the green or the centre |
 | `port` | Quay and piers | A landing: one jetty and a lane to it |
 | River | Bridges by size | One small bridge or ford, and a mill beside it |
 
-**Shape.** Chosen from the brief, first match wins: a coast or lake, or settlement type Lake or Naval, gives *shore*; two or more routes that are not one through road give *crossroads*; the `plaza` flag gives *green*; otherwise *street*. A river, palisade or manor can occur with any shape.
+**Shape.** Chosen from the brief, first match wins: a coast or lake, or settlement type Lake or Naval, gives *shore*; three or more exits, or two through roads that cross, give *crossroads*; otherwise *street*. Two exits that are not opposite make a street with a bend. The green is not a shape but an anchor, and a river, palisade, green or manor can occur with any shape.
 
 **Order of construction.**
 

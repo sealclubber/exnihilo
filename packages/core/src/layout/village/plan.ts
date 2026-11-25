@@ -7,12 +7,14 @@
  *
  * 1. Environment: a stream with broad bends, or a calm shore.
  * 2. Road: each route of the brief; opposite exits are one through road.
- * 3. Anchors: the green, then church, manor, mill and landing.
+ * 3. Anchors: the green (where the brief is flagged `plaza`, or by chance), then church, manor, mill and landing.
  * 4. Central forks: lanes off the road near the centre, and links between a
  *    crossroads' arms.
  * 5. Plots, outward from the centre along every way.
- *
- * Later steps (lanes for frontage, palisade, fields) are still to come.
+ * 6. Thicken, never lengthen: a lane at a time where frontage runs out, until
+ *    every building has a plot.
+ * 7. Palisade, for a village flagged `walls`, fitted round all the plots.
+ * 8. Fields, last, outside the village's envelope: drawing only.
  */
 import type { City } from '../../city/records.ts';
 import { stepRng } from '../../city/random.ts';
@@ -20,15 +22,18 @@ import type { SettingPack, VillageSettings } from '../../pack/schema.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { type Coast, type River, makeCoast, makeRiver } from '../staged/water.ts';
 import { type Anchors, placeAnchors } from './anchors.ts';
+import { type Countryside, layFields } from './fields.ts';
 import { layForks } from './forks.ts';
 import { Ground } from './ground.ts';
+import { thicken } from './lanes.ts';
+import { type Palisade, fitPalisade } from './palisade.ts';
 import { type Plot, PlotWalker } from './plots.ts';
 import { type Bridge, type Way, layRoads } from './roads.ts';
 
 export class VillageLayoutError extends Error {}
 
-/** The village's shape, from its brief: on a shore, at a crossroads, round a green, or along a street. */
-export type VillageShape = 'shore' | 'crossroads' | 'green' | 'street';
+/** The village's shape, from its brief: on a shore, at a crossroads, or along a street. A green is an anchor, not a shape. */
+export type VillageShape = 'shore' | 'crossroads' | 'street';
 
 /** What the village generator needs of the city: each building's ID and type. */
 export interface VillageInput {
@@ -49,8 +54,14 @@ export interface VillagePlan {
   anchors: Anchors;
   /** One for each building no anchor holds, as far as the ways allow so far. */
   plots: Plot[];
-  /** The buildings that have no plot yet. */
+  /** The buildings that have no plot yet: none once step 6 is done. */
   unplaced: string[];
+  /** How many lanes steps 4 and 6 added, how many plots a lane of step 6 took away to be laid again, and how much farther than the pack's reach the lanes had to go. */
+  lanes: { forks: number; thickened: number; displaced: number; reachScale: number };
+  /** Round a village flagged `walls`. */
+  palisade?: Palisade;
+  /** The envelope, and the fields, trees and boats about it: drawing only. */
+  countryside: Countryside;
   /** What could not be done as the brief asked, for the report. */
   notes: string[];
 }
@@ -72,15 +83,22 @@ export function villageInput(city: City): VillageInput {
 }
 
 /**
- * The shape, first match wins: a coast gives a shore village; two or more land routes that are not one through
- * road, a crossroads; the `plaza` flag, a green; otherwise a street. The brief carries no settlement type, so a
- * Lake or Naval settlement is a shore village only where it is coastal.
+ * The shape, first match wins: a coast gives a shore village; three or more land exits, or two through roads that
+ * cross, a crossroads; otherwise a street, which bends where its two exits are not opposite. The brief carries no
+ * settlement type, so a Lake or Naval settlement is a shore village only where it is coastal.
  */
-export function shapeOf(brief: SettlementBrief, throughRoads: number, arms: number): VillageShape {
+export function shapeOf(brief: SettlementBrief, landExits: number, throughRoads: number): VillageShape {
   if (brief.coast.isCoastal) return 'shore';
-  if (throughRoads + arms >= 2) return 'crossroads';
-  if (brief.flags.plaza) return 'green';
+  if (landExits >= 3 || throughRoads >= 2) return 'crossroads';
   return 'street';
+}
+
+/** Whether a village has a green: always where the brief is flagged `plaza`, otherwise by a seeded chance that rises with size. */
+export function hasGreen(brief: SettlementBrief, buildings: number, settings: VillageSettings, seed: number): boolean {
+  if (brief.flags.plaza) return true;
+  const { least, most, from, to } = settings.anchors.green.share;
+  const share = least + (most - least) * Math.min(Math.max((buildings - from) / Math.max(to - from, 1), 0), 1);
+  return stepRng(seed, 'village-green').next() < share;
 }
 
 export function planVillage(brief: SettlementBrief, input: VillageInput, pack: SettingPack, seed: number = brief.seed): VillagePlan {
@@ -97,10 +115,10 @@ export function planVillage(brief: SettlementBrief, input: VillageInput, pack: S
   // 2. Road.
   const roads = layRoads({ brief, settings, rng: stepRng(seed, 'village-roads'), ...(river && { river }), ...(coast && { coast }) });
   notes.push(...roads.notes);
-  const shape = shapeOf(brief, roads.through, roads.arms);
+  const shape = shapeOf(brief, roads.landExits, roads.through);
 
   // 3. Anchors.
-  const anchors = placeAnchors({ brief, settings, input, shape, rng: stepRng(seed, 'village-anchors'), ways: roads.ways, bridges: roads.bridges, buildings, ...(river && { river }), ...(coast && { coast }) });
+  const anchors = placeAnchors({ brief, settings, input, green: hasGreen(brief, buildings, settings, seed), rng: stepRng(seed, 'village-anchors'), ways: roads.ways, bridges: roads.bridges, buildings, ...(river && { river }), ...(coast && { coast }) });
   notes.push(...anchors.notes);
   const ground = new Ground([...roads.ways, ...anchors.lanes], river, coast);
   if (anchors.green) ground.occupy(anchors.green.outline);
@@ -115,8 +133,68 @@ export function planVillage(brief: SettlementBrief, input: VillageInput, pack: S
   const walker = new PlotWalker({ settings, pack, rng: stepRng(seed, 'village-plots'), ground, cap, buildings, toPlace: input.buildings.filter((building) => !held.has(building.id)) });
   walker.walk();
 
-  return { seed, buildings, cap, shape, ...(river && { river }), ...(coast && { coast }), ways: ground.ways, bridges: roads.bridges, anchors, plots: walker.plots, unplaced: walker.unplaced, notes };
+  // 6. Thicken, never lengthen.
+  const thickening = stepRng(seed, 'village-lanes');
+  let scale = 1;
+  let failed = 0;
+  let added = 0;
+  let displaced = 0;
+  while (walker.unplaced.length > 0) {
+    const before = walker.unplaced.length;
+    const found = thicken({ settings, rng: thickening, ground, cap, crossroads: shape === 'crossroads', walled: brief.flags.walls, scale, least: failed > 0 ? 0 : settings.thicken.least, ...(anchors.green && { green: anchors.green.outline }), ...(coast && { coast }) });
+    if (found) {
+      displaced += found.displaced.size;
+      ground.release(found.displaced);
+      walker.release(found.displaced);
+      walker.addWay(ground.addWay(found.lane));
+      walker.walk();
+      added++;
+    }
+    if (walker.unplaced.length < before) {
+      failed = 0;
+      continue;
+    }
+    // No lane would do, or none gave a plot: try again with any lane at all, and then reach farther, at most so
+    // many times running.
+    failed++;
+    if (failed % 2 === 1) continue;
+    if (failed / 2 > settings.thicken.relax) throw new VillageLayoutError(`${brief.name} (${brief.id}): ${walker.unplaced.length} of ${buildings} buildings found no plot after ${added} lanes were added and the reach grew ${settings.thicken.relax} times`);
+    scale *= settings.thicken.grow;
+    walker.reachScale = scale;
+  }
+  if (scale > 1) notes.push(`the lanes had to reach ${scale.toFixed(2)} times as far as the pack says to find room for every building`);
+
+  // 7. Palisade.
+  const onLand = [...walker.plots.map((plot) => plot.outline), ...anchors.sites.filter((site) => site.role !== 'landing' && site.role !== 'mill').map((site) => site.outline)];
+  let palisade: Palisade | undefined;
+  if (brief.flags.walls) {
+    const fitted = fitPalisade({ settings, rng: stepRng(seed, 'village-palisade'), outlines: onLand, ways: ground.ways, ...(river && { river }), ...(coast && { coast }) });
+    palisade = fitted.palisade;
+    notes.push(...fitted.notes);
+  }
+
+  // 8. Fields, last.
+  const landing = anchors.sites.find((site) => site.role === 'landing');
+  const countryside = layFields({
+    settings,
+    rng: stepRng(seed, 'village-fields'),
+    buildings,
+    plots: onLand,
+    ways: ground.ways,
+    ...(palisade && { palisade }),
+    ...(anchors.green && { green: anchors.green.outline }),
+    ...(landing && { landing: { outline: landing.outline, out: unitOf(landing.outline[0] as Point, landing.outline[1] as Point) } }),
+    ...(river && { river }),
+    ...(coast && { coast }),
+  });
+
+  return { seed, buildings, cap, shape, ...(river && { river }), ...(coast && { coast }), ways: ground.ways, bridges: roads.bridges, anchors, plots: walker.plots, unplaced: walker.unplaced, lanes: { forks: forks.lanes.length, thickened: added, displaced, reachScale: scale }, ...(palisade && { palisade }), countryside, notes };
 }
+
+const unitOf = (from: Point, to: Point): Point => {
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
+  return [(to[0] - from[0]) / length, (to[1] - from[1]) / length];
+};
 
 /** The centre of every village: where its roads meet. */
 export const CENTRE: Point = [0, 0];

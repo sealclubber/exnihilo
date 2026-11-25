@@ -751,10 +751,93 @@ const VillageSettingsSchema = z.strictObject({
     loopReach: share,
     tries: wholeNumber,
   }),
+  /**
+   * Thickening, never lengthening: when frontage runs out a lane is added. `candidates` are tried, each leaving a
+   * lane or the road within the cap, square to it or straight on from a lane's end (turned by about `turn` or
+   * `endTurn` radians), `length` metres long, straying `stray`; or, where two lanes end within `loopWithin` metres of
+   * each other, a lane joining the ends. None may reach farther from the centre than `reach` times the cap
+   * (`crossroadsReach` at a crossroads, and no more than `walledReach` in a village with a palisade), nor end more
+   * than `beyond` times that. One that meets another way more than `joinAfter` metres along stops there and joins
+   * it; one that ends within `joinWithin` of a way is carried on to it. It is refused if shorter than `shortest`,
+   * within `alongside` metres of another way along its body, or nearer than `baseClear` to the way it leaves beyond
+   * its first stretch, or if it crosses water or an anchor, or passes within `greenClear` of the green. Within its
+   * first `displaceWithin` metres it may cut through the plots lining the way it leaves: they are taken away and
+   * their buildings placed again, each costing `displaceCost` of its score; beyond, it may cross no plot.
+   * Free frontage is counted as plots `box.width` by `box.depth` every `box.step` metres along both sides; the kept
+   * lane has the most, times `joinBonus` for a join, less `nearness` for each metre of its middle from the centre,
+   * plus up to `luck`, and at least `least`. Where none will do, any lane at all is tried once more, and then the
+   * reach grows by `grow`, at most `relax` times running; after that the village cannot be laid out.
+   */
+  thicken: z.strictObject({
+    candidates: wholeNumber.min(1),
+    reach: share,
+    crossroadsReach: share,
+    walledReach: share,
+    beyond: share,
+    length: span,
+    stray: z.number().nonnegative(),
+    turn: z.number().nonnegative(),
+    endTurn: z.number().nonnegative(),
+    loopWithin: metres,
+    joinAfter: metres,
+    joinWithin: metres,
+    shortest: metres,
+    alongside: metres,
+    baseClear: metres,
+    greenClear: metres,
+    displaceWithin: metres,
+    displaceCost: z.number().nonnegative(),
+    box: z.strictObject({ width: metres, depth: metres, step: metres }),
+    joinBonus: share,
+    nearness: z.number().nonnegative(),
+    luck: z.number().nonnegative(),
+    least: z.number().nonnegative(),
+    grow: share,
+    relax: wholeNumber.min(1),
+  }),
+  /**
+   * A village flagged `walls` has a palisade, fitted after all plots: a near-circle round every plot and anchor at
+   * least `clear` metres inside it, its shorter axis no less than `round` of its longer, wobbling by `wobble` (two
+   * waves round it), grown by `grow` at a time until it fits, at most to `most` times its first size, drawn with
+   * `points` points and `width` metres thick. It has a gap where a road passes, `gate` metres either side of the
+   * roadway; a lane's tail beyond it is cut off.
+   */
+  palisade: z.strictObject({ clear: metres, round: probability, wobble: z.tuple([z.number().nonnegative(), z.number().nonnegative()]), grow: share, most: share, points: z.int().min(12), width: metres, gate: z.number().nonnegative() }),
+  /**
+   * Fields, last, outside the village's envelope: the palisade grown by `envelope.palisade`, or the plots grown by
+   * `envelope.grow` and shrunk by `envelope.shrink`. They reach `band` metres (`largeBand` from `largeFrom`
+   * buildings) beyond the farthest plot, keep `waterClear` from water and `greenClear` from the green, and are cut
+   * only by the roads, `roadClear` beyond the roadway. Within `strips.within` of the envelope they are long strips,
+   * `strips.width` wide and at most `strips.length` long; farther out, closes of about `closes.area` square metres;
+   * beyond `commons.beyond` of the envelope, commons of about `commons.area`. Fields are parted by `gap` metres, and
+   * none is under `least` square metres. A share `wood.share` of those beyond `wood.beyond` are woodland, a tree to
+   * every `wood.perTree` square metres, `wood.radius` across. Furrows run along a field `furrow` metres apart. A
+   * share `trees.share` of plots have a tree at a back corner, `trees.radius`; a landing has `boats.count` boats,
+   * `boats.length` by `boats.width`, out `boats.out` and along `boats.along` from it. All of it is drawing.
+   */
+  fields: z.strictObject({
+    envelope: z.strictObject({ palisade: metres, grow: metres, shrink: metres }),
+    band: metres,
+    largeBand: metres,
+    largeFrom: wholeNumber,
+    waterClear: z.number().nonnegative(),
+    greenClear: z.number().nonnegative(),
+    roadClear: z.number().nonnegative(),
+    strips: z.strictObject({ within: metres, width: span, length: metres }),
+    closes: z.strictObject({ area: span }),
+    commons: z.strictObject({ beyond: metres, area: span }),
+    gap: metres,
+    least: metres,
+    wood: z.strictObject({ share: probability, beyond: metres, perTree: metres, radius: span }),
+    furrow: metres,
+    trees: z.strictObject({ share: probability, radius: span }),
+    boats: z.strictObject({ count: wholeNumber, length: metres, width: metres, out: span, along: metres }),
+  }),
   /** At a crossroads, from the forks' `from`, a curved lane joins each two neighbouring arms no more than `widest` degrees apart, `radius` metres out on the one and that times `spread` on the other, bowed out by `bulge`. */
   links: z.strictObject({ radius: span, spread: span, bulge: span, widest: z.number().min(0).max(180) }),
   /**
-   * Plots, laid outward from the centre along both sides of every way. A plot is `width` by `depth` metres, wider
+   * Plots, laid outward from the centre along both sides of every way. A plot is `width` by `depth` metres
+   * (`largeDepth` from `largeFrom` buildings, so that a larger village is no more spread out than it must be), wider
    * the larger its building's lot, by `jitter` of the span at most; the next is `spacing` metres along. Its house
    * stands at the front, `house.setBack` back, `house.width` by `house.depth` (a share `turned` gable-on), at least
    * `house.margin` from the plot's sides. A plot wider than `farmstead.wider` is a farmstead by chance
@@ -768,6 +851,8 @@ const VillageSettingsSchema = z.strictObject({
   plots: z.strictObject({
     width: span,
     depth: span,
+    largeDepth: span,
+    largeFrom: wholeNumber,
     jitter: probability,
     spacing: span,
     house: z.strictObject({ width: span, depth: span, turned: probability, setBack: span, margin: z.number().nonnegative() }),
@@ -780,13 +865,14 @@ const VillageSettingsSchema = z.strictObject({
   }),
   /**
    * The anchors, placed before any plot, and the building types each holds: the first type the city has, the
-   * lowest ID of it. A green is an oval `length` by `width` metres (`large` from `largeFrom` buildings), with a
+   * lowest ID of it. A village flagged `plaza` has a green, and others by chance: `share.least` at `share.from`
+   * buildings, rising to `share.most` at `share.to`. A green is an oval `length` by `width` metres (`large` from `largeFrom` buildings), with a
    * pond and the well, beside the road at the centre; without one the well stands by the road there. A church's,
    * a manor's plot is `width` by `depth` and lies at least `from` metres from the centre. A mill is `length` by
    * `width` at the bank, `along` metres from the crossing. A landing is a jetty `length` metres over the water.
    */
   anchors: z.strictObject({
-    green: z.strictObject({ types: z.array(id).min(1), small: z.strictObject({ length: metres, width: metres }), large: z.strictObject({ length: metres, width: metres }), largeFrom: wholeNumber, wobble: probability, pond: metres, pondAlong: probability }),
+    green: z.strictObject({ types: z.array(id).min(1), share: z.strictObject({ least: probability, most: probability, from: wholeNumber, to: wholeNumber }), small: z.strictObject({ length: metres, width: metres }), large: z.strictObject({ length: metres, width: metres }), largeFrom: wholeNumber, wobble: probability, pond: metres, pondAlong: probability }),
     well: z.strictObject({ types: z.array(id).min(1), side: metres }),
     church: z.strictObject({ types: z.array(id).min(1), width: metres, depth: metres, from: z.number().nonnegative() }),
     manor: z.strictObject({ types: z.array(id).min(1), width: metres, depth: metres, from: z.number().nonnegative() }),
