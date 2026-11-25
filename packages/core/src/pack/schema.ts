@@ -709,11 +709,53 @@ const StagedSettingsSchema = z.strictObject({
 });
 export type StagedSettings = z.infer<typeof StagedSettingsSchema>;
 
+/**
+ * The numbers of the village generator, for a settlement under `below` residents: no mesh, wards or wall ring; the
+ * road leads, and buildings are placed one at a time (phase 6E, Villages).
+ */
+const VillageSettingsSchema = z.strictObject({
+  below: z.int().positive(),
+  /** A road's and a lane's full width. */
+  widths: z.strictObject({ road: metres, lane: metres }),
+  /** How far out roads and water are drawn. */
+  reach: metres,
+  /** The built stretch of the through road reaches about `base` metres plus `perBuilding` for each building each way; it is also the village's radius. */
+  cap: z.strictObject({ base: metres, perBuilding: metres }),
+  /** A stream, drawn as the staged generator draws its river, the radius being the cap. `least` is the least distance from the centre to its bank. */
+  river: z.strictObject({ width: metres, portWidth: share, distance: span, portDistance: span, bend: span, beyond: share, source: span, sourceTurn: span, least: metres }),
+  /** A calm shore, drawn as the staged generator draws its coast, the radius being the cap. */
+  coast: z.strictObject({ distance: span, knots: z.int().min(4).multipleOf(2), depth: metres, depthShare: share, smoothing: z.number().nonnegative(), clearAngle: z.number().min(0).max(90), steepest: metres }),
+  /** Two exits more than `through` degrees apart are one road through the centre. A road strays aside by `wander` times the reach, and is evened in steps of `step` metres. */
+  road: z.strictObject({ through: z.number().min(0).max(180), wander: share, step: metres }),
+  /** A bridge reaches `beyond` metres onto each bank past the water. */
+  bridge: z.strictObject({ beyond: metres }),
+  /** A plot stands `gap` metres back from the edge of the way it fronts. */
+  gap: z.number().nonnegative(),
+  /**
+   * The anchors, placed before any plot, and the building types each holds: the first type the city has, the
+   * lowest ID of it. A green is an oval `length` by `width` metres (`large` from `largeFrom` buildings), with a
+   * pond and the well, beside the road at the centre; without one the well stands by the road there. A church's,
+   * a manor's plot is `width` by `depth` and lies at least `from` metres from the centre. A mill is `length` by
+   * `width` at the bank, `along` metres from the crossing. A landing is a jetty `length` metres over the water.
+   */
+  anchors: z.strictObject({
+    green: z.strictObject({ types: z.array(id).min(1), small: z.strictObject({ length: metres, width: metres }), large: z.strictObject({ length: metres, width: metres }), largeFrom: wholeNumber, wobble: probability, pond: metres, pondAlong: probability }),
+    well: z.strictObject({ types: z.array(id).min(1), side: metres }),
+    church: z.strictObject({ types: z.array(id).min(1), width: metres, depth: metres, from: z.number().nonnegative() }),
+    manor: z.strictObject({ types: z.array(id).min(1), width: metres, depth: metres, from: z.number().nonnegative() }),
+    mill: z.strictObject({ types: z.array(id).min(1), length: metres, width: metres, along: z.number().nonnegative() }),
+    landing: z.strictObject({ types: z.array(id).min(1), length: metres, width: metres }),
+  }),
+});
+export type VillageSettings = z.infer<typeof VillageSettingsSchema>;
+
 const LayoutSettingsSchema = z.strictObject({
   /** Which generator lays towns out: the `staged` generator or the plain `grid`; left out, the grid. */
   generator: LayoutGeneratorSchema.optional(),
   /** The numbers of the `staged` generator, which is being built stage by stage. */
   staged: StagedSettingsSchema.optional(),
+  /** The numbers of the village generator. Left out, a village is laid out as any other town. */
+  village: VillageSettingsSchema.optional(),
   /** The full width of the roadway, per kind of street segment. */
   streetWidths: z.strictObject({ arterial: metres, street: metres, lane: metres, bridge: metres }),
   /** The land between streets: its length along the street and its depth. */

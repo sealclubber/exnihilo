@@ -721,6 +721,39 @@ the prototype.
 broken and how often the non-touching fallback is used.
 `PROBLEM-6E-districts.md` describes what is still open.
 
+**The village generator (phase 6E, Villages, being built).** A settlement
+under `village.below` residents (1,000; 136 of Lomia's 682) is to be laid out
+by `layout/village/`, after the approved prototype
+`docs/prototypes/proto_village5.py` and the Villages section of `sim-6e.md`:
+no mesh, wards or wall ring; the road leads and buildings are placed one at a
+time. Its numbers, and which building types hold its anchors, are in the
+`village` block of `layout.yaml`, and it draws on streams named `village-…`.
+It does not make layouts yet. Built so far:
+
+1. **Environment** (`village/plan.ts`). A stream with broad bends or a calm
+   shore, drawn by the staged generator's water stage with the village's
+   own numbers, the radius being the cap on the through road.
+2. **Road** (`village/roads.ts`). Each land route is a road 6 m wide from
+   the centre; two exits more than 140 degrees apart are one through road,
+   evened so that it bends at the centre. A small bridge wherever a road
+   crosses the stream; a road that would run into the sea stops at the shore.
+   The shape follows: a coast gives *shore*; two or more roads, *crossroads*;
+   the `plaza` flag, *green*; otherwise *street*. The brief carries no
+   settlement type, so a Lake or Naval settlement is a shore village only
+   where it is coastal.
+3. **Anchors** (`village/anchors.ts`). The green (flag `plaza`): an oval
+   beside a road at the centre, with a pond, the well and a lane round its
+   far side. Without it, the well by the road at the centre. A church
+   (flag `temple`, or a chapel in the city) in its churchyard by the green
+   or near the centre; a manor (flag `citadel`) in its own yard with a barn;
+   a mill beside the stream's crossing; a landing (flag `port`) with one
+   jetty and a lane to it. Each holds the first building of its pack types
+   the city has.
+
+`node scripts/render-village.ts <out> <suffix> [--as flag,flag] <name>...`
+draws a village's plan so far; `docs/renders/*-village-step3.svg` are
+Vereceldo (65 buildings) and Monhas (180) after step 3.
+
 `ringShare` is in every layout's summary so that a town falling back into
 rings and spokes shows without a picture. It is the share of street and lane
 length within 20° of a circle about the centre or of a line to it, leaving

@@ -600,3 +600,68 @@ staged:
     wander: 25
     wanderShare: 0.1
     clearOfBridge: 60
+
+# The village generator (phase 6E, Villages), for a settlement of fewer than
+# `below` residents. It has no mesh, wards or wall ring: the road leads, and
+# buildings are placed one at a time, outward from the centre. Left out, a
+# village is laid out as any other town. Every value is a placeholder, the
+# prototype's (docs/prototypes/proto_village5.py), to be tuned by eye.
+#
+#   widths   a road's and a lane's full width
+#   reach    how far out roads and water are drawn
+#   cap      the built stretch of the through road reaches about `base`
+#            metres plus `perBuilding` for each building each way from the
+#            centre; it is also the village's radius, for water
+#   river    a stream with broad bends, drawn as the staged river is, its
+#            distances shares of the cap; `least` metres at least from the
+#            centre to its bank
+#   coast    a calm shore, drawn as the staged coast is
+#   road     two exits more than `through` degrees apart are one road
+#            through the centre; a road strays aside by `wander` times the
+#            reach, and is evened in steps of `step` metres, so that a
+#            through road bends at the centre and does not turn a corner
+#   bridge   a bridge reaches `beyond` metres onto each bank
+#   gap      a plot stands this far back from the edge of its way
+#   anchors  placed before any plot, each holding the first of its `types`
+#            that the city has (the lowest ID of it). FOR REVIEW: which
+#            types are the green, well, church, manor, mill and landing is
+#            setting content and a first proposal.
+#     green    a town flagged `plaza` has a green: an oval `length` by
+#              `width` metres (`large` from `largeFrom` buildings), its
+#              outline wobbling by `wobble`, beside the road at the centre,
+#              with a pond of radius `pond` a share `pondAlong` of its length
+#              from its middle, the well, and a lane round it
+#     well     without a green the well stands by the road at the centre, a
+#              site `side` metres square
+#     church   a churchyard `width` by `depth`, by the green or at least
+#              `from` metres from the centre
+#     manor    a town flagged `citadel` has a manor in its own yard, `width`
+#              by `depth`, at least `from` metres from the centre
+#     mill     beside the river's crossing, `along` metres from it, `length`
+#              by `width` at the bank
+#     landing  a town flagged `port` has a landing: one jetty `length` by
+#              `width` metres, and a lane to it
+village:
+  below: 1000
+  widths: {road: 6, lane: 3.6}
+  reach: 900
+  cap: {base: 70, perBuilding: 0.85}
+  river: {width: 14, portWidth: 1.4, distance: {min: 0.35, max: 0.8}, portDistance: {min: 0.25, max: 0.45}, bend: {min: 0.12, max: 0.2}, beyond: 1.2, source: {min: 1.2, max: 1.6}, sourceTurn: {min: 25, max: 55}, least: 24}
+  coast: {distance: {min: 0.3, max: 0.5}, knots: 12, depth: 70, depthShare: 0.6, smoothing: 1.3, clearAngle: 15, steepest: 1.6}
+  road: {through: 140, wander: 0.05, step: 40}
+  bridge: {beyond: 4}
+  gap: 0.8
+  anchors:
+    green:
+      types: [market-square]
+      small: {length: 124, width: 60}
+      large: {length: 184, width: 84}
+      largeFrom: 110
+      wobble: 0.08
+      pond: 9
+      pondAlong: 0.35
+    well: {types: [well], side: 3}
+    church: {types: [temple, chapel], width: 34, depth: 40, from: 20}
+    manor: {types: [citadel], width: 58, depth: 62, from: 120}
+    mill: {types: [mill], length: 12, width: 8, along: 22}
+    landing: {types: [docks], length: 30, width: 3.6}
