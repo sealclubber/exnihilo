@@ -663,11 +663,6 @@ const StagedSettingsSchema = z.strictObject({
     roomDefault: z.number().min(1),
     barriers: z.strictObject({ highway: z.number().nonnegative(), mainStreet: z.number().nonnegative(), river: z.number().nonnegative(), wall: z.number().nonnegative() }),
     /**
-     * true grows the districts over the kept blocks after selection, bank by bank (phase 6F, Part B), in place of
-     * the districts selection settles at the borders. Left out, selection's.
-     */
-    afterSelection: z.boolean().optional(),
-    /**
      * Districts drawn over the kept houses, block by block (phase 6G, `staged/districting.ts`). Each district is
      * seeded at a block and shared among the banks: while a bank's districts want more than `over` houses beyond
      * what it holds, one crosses a bridge, whole if its count is within `whole` of what must move, else split,
@@ -679,8 +674,7 @@ const StagedSettingsSchema = z.strictObject({
      * `exactSteps`. Each district first claims its own landmarks' blocks and grows toward them, a block's way from a
      * landmark counting its own and `landmarkPull` times the landmark's way from the seed. Left out, the districts are the forecast's, repaired by selection.
      */
-    drawn: z
-      .strictObject({
+    drawn: z.strictObject({
         over: wholeNumber,
         whole: wholeNumber,
         nearLeast: wholeNumber,
@@ -692,8 +686,7 @@ const StagedSettingsSchema = z.strictObject({
         chainSteps: wholeNumber,
         exactSteps: wholeNumber,
         landmarkPull: z.number().nonnegative(),
-      })
-      .optional(),
+      }),
   }),
   /**
    * Ward character, by the kind of district a ward belongs to: `scale` multiplies the size of its houses and
@@ -705,13 +698,13 @@ const StagedSettingsSchema = z.strictObject({
     kinds: z.record(id, z.strictObject({ scale: share.optional(), blocks: share.optional(), wing: probability.optional(), passage: probability.optional() })),
   }),
   /**
-   * Choosing the town's houses from those made. Each house is scored by the growth rank of its ground. In each
-   * district the innermost `solid` of its count are always kept; beyond them a score is raised by its excess
+   * Choosing the town's houses from those made, as one town. Each house is scored by the growth rank of its ground.
+   * The innermost `solid` of the town's count are always kept; beyond them a score is raised by its excess
    * times a draw from an exponential of mean `luck`, so that further out keeping a house is more and more a
    * matter of chance. A house inside the wall has its score multiplied by `insideWall` and is not left to chance.
    * Where a town has too few houses in all, ground is taken again `moreGround` times as large, up to `tries` times.
    */
-  selection: z.strictObject({ solid: probability, luck: z.number().nonnegative(), insideWall: probability, rounds: wholeNumber.min(1), moreGround: z.number().min(1), tries: wholeNumber }),
+  selection: z.strictObject({ solid: probability, luck: z.number().nonnegative(), insideWall: probability, moreGround: z.number().min(1), tries: wholeNumber }),
   /**
    * Which building goes where. Within a district the buildings are sorted by the area of their pack lot and the
    * kept houses by the area of their footprint, and paired largest to largest: pack lot sizes are targets, not

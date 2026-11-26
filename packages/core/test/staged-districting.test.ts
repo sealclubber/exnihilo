@@ -125,7 +125,7 @@ describe('the districts stage', () => {
       const brief = lomiaWorld().settlements.find((settlement) => settlement.name === name);
       if (!brief) throw new Error(`no settlement ${name}`);
       const plan = planTown(brief, townInput(generateCity(brief, pack), pack), pack);
-      const kept = plan.selection.district.flatMap((of, house) => (of === undefined ? [] : [house]));
+      const kept = plan.selection.chosen;
       const all = plan.districts.reduce((sum, district) => sum + district.buildings, 0);
       const drawn = drawDistricts({ rules, blocks: plan.blocks, wards: plan.wards, houses: plan.houses, kept, tilesBeside: plan.tilesBeside, links: plan.links, seeds: plan.forecast.seeds, targets: plan.districts.map((district) => (district.buildings * kept.length) / all) });
       expect({ offAfterChains: drawn.offAfterChains, off: drawn.off, lent: drawn.lent.size, spans: drawn.spans, reseeded: drawn.reseeded }).toEqual(want);

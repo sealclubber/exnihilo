@@ -40,6 +40,7 @@
  */
 import type { StagedSettings } from '../../pack/schema.ts';
 import type { Point } from '../../schema.ts';
+import { distanceToPolygonEdge } from '../geometry.ts';
 
 export type DistrictingSettings = NonNullable<StagedSettings['districts']['drawn']>;
 
@@ -694,4 +695,84 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     withoutLandmarks: false,
     landmarksOutside: 0,
   };
+}
+
+export interface HouseDistricts {
+  /** For each house made, its district; nothing for a house not kept. */
+  district: Array<number | undefined>;
+  /** How many kept houses each district has: its count. */
+  kept: number[];
+  /** Houses given to a district from the ground of the nearest touching district with houses to spare, because the districts did not come out exact. */
+  leftovers: number;
+}
+
+/**
+ * Each kept house's district: its block's, but for a block that lends houses, whose houses nearest the
+ * neighbour's ground are the neighbour's. Where the districts did not come out exact, a district short of houses
+ * takes those it lacks from the nearest touching district with houses to spare, the houses nearest its own
+ * ground; they are counted.
+ */
+export function houseDistricts(drawn: Districting, { blocks, houses, kept, tilesBeside, links }: Pick<DistrictingInput, 'blocks' | 'houses' | 'kept' | 'tilesBeside' | 'links'> & { houses: ReadonlyArray<{ block: number; ward: number; centre: Point }> }): HouseDistricts {
+  const B = blocks.length;
+  const badj: number[][] = blocks.map((_, block) => (tilesBeside[block] ?? []).filter((other) => other < B));
+  for (const link of links) {
+    if (link.a >= B || link.b >= B) continue;
+    (badj[link.a] as number[]).push(link.b);
+    (badj[link.b] as number[]).push(link.a);
+  }
+  const district: Array<number | undefined> = houses.map(() => undefined);
+  const inBlock = blocks.map((): number[] => []);
+  for (const house of kept) (inBlock[(houses[house] as { block: number }).block] as number[]).push(house);
+  inBlock.forEach((list, block) => {
+    const of = drawn.blockDistrict[block];
+    if (list.length === 0) return;
+    if (of === undefined) throw new Error(`block ${block} has ${list.length} kept houses and no district`);
+    for (const house of list) district[house] = of;
+    const lent = drawn.lent.get(block);
+    if (!lent) return;
+    const theirs = (badj[block] as number[]).filter((other) => drawn.blockDistrict[other] === lent.to);
+    const away = (house: number) => Math.min(...theirs.map((other) => distanceToPolygonEdge((houses[house] as { centre: Point }).centre, (blocks[other] as { polygon: readonly Point[] }).polygon)));
+    const nearest = [...list].sort((a, b) => away(a) - away(b) || a - b).slice(0, lent.houses);
+    for (const house of nearest) district[house] = lent.to;
+  });
+  const count = drawn.targets.map(() => 0);
+  for (const of of district) if (of !== undefined) count[of] = (count[of] as number) + 1;
+  // What the districts could not make exact: from the nearest touching district with houses to spare.
+  let leftovers = 0;
+  const middle = blocks.map((block) => block.polygon.reduce((sum, point): Point => [sum[0] + point[0] / block.polygon.length, sum[1] + point[1] / block.polygon.length], [0, 0]));
+  for (let short = 0; short < count.length; short++) {
+    while ((count[short] as number) < (drawn.targets[short] as number)) {
+      const touching = new Map<number, Set<number>>();
+      for (let block = 0; block < B; block++) {
+        const x = drawn.blockDistrict[block];
+        if (x === undefined) continue;
+        for (const next of badj[block] as number[]) {
+          const y = drawn.blockDistrict[next];
+          if (y === undefined || y === x) continue;
+          if (!touching.has(x)) touching.set(x, new Set());
+          touching.get(x)?.add(y);
+        }
+      }
+      const spare = (of: number) => (count[of] as number) > (drawn.targets[of] as number);
+      let giver = -1;
+      const seen = new Set([short]);
+      for (let queue = [short]; queue.length > 0 && giver < 0; ) {
+        const next: number[] = [];
+        for (const x of queue) for (const y of [...(touching.get(x) ?? [])].sort((a, b) => a - b)) if (!seen.has(y)) (seen.add(y), next.push(y));
+        giver = next.find(spare) ?? -1;
+        queue = next;
+      }
+      if (giver < 0) giver = count.findIndex((_, of) => spare(of));
+      if (giver < 0) throw new Error(`district ${short} is short of houses and no district has any to spare`);
+      const own = drawn.blockDistrict.flatMap((of, block) => (of === short ? [block] : []));
+      const away = (house: number) => Math.min(...own.map((block) => Math.hypot((houses[house] as { centre: Point }).centre[0] - (middle[block] as Point)[0], (houses[house] as { centre: Point }).centre[1] - (middle[block] as Point)[1])));
+      const amount = Math.min((drawn.targets[short] as number) - (count[short] as number), (count[giver] as number) - (drawn.targets[giver] as number));
+      const theirs = district.flatMap((of, house) => (of === giver ? [house] : [])).sort((a, b) => away(a) - away(b) || a - b);
+      for (const house of theirs.slice(0, amount)) district[house] = short;
+      count[short] = (count[short] as number) + amount;
+      count[giver] = (count[giver] as number) - amount;
+      leftovers += amount;
+    }
+  }
+  return { district, kept: count, leftovers };
 }

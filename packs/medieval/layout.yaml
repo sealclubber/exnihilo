@@ -521,13 +521,10 @@ staged:
   #              Crossing a highway, a main street, the river (at a bridge)
   #              or the wall counts as this many metres more, so those
   #              become the borders between districts.
-  #   afterSelection  optional; true grows the districts over the kept
-  #              blocks after selection, bank by bank, with the same costs
-  #              (phase 6F, Part B), in place of the districts selection
-  #              settles at the borders. Left out, selection's.
-  #   drawn      optional (phase 6G): the districts are drawn over the
-  #              kept houses block by block, after selection, instead of
-  #              being the forecast's and repaired. Each district is seeded
+  #   drawn      the districts themselves are drawn over the kept houses
+  #              block by block, after selection (phase 6G); the wards'
+  #              districts above are a forecast, for the houses' character
+  #              and each district's seed. Each district is seeded
   #              at a block and the districts are shared among the river's
   #              banks: while a bank's districts want more than `over`
   #              houses beyond what it holds, one crosses a bridge, whole if
@@ -584,16 +581,17 @@ staged:
       harbour: {scale: 0.9, wing: 0.4}
       shanty: {scale: 0.62, blocks: 0.8, wing: 0.15, passage: 0.2}
 
-  # Choosing the town's houses: more are made than it has, and each district
-  # keeps exactly its own number. A house is scored by the growth rank of its
-  # ground. The innermost `solid` of a district's count are always kept;
+  # Choosing the town's houses: more are made than it has, and the town keeps
+  # exactly its number, chosen as one town; the districts are drawn over the
+  # kept houses afterwards. A house is scored by the growth rank of its
+  # ground. The innermost `solid` of the town's count are always kept;
   # beyond them a score is raised by its excess times a draw from an
   # exponential of mean `luck`, so that further out keeping a house is more
   # and more a matter of chance. A house inside the wall has its score
   # multiplied by `insideWall` and is not left to chance. If the whole town
   # has too few houses, ground is taken again `moreGround` times as large,
   # at most `tries` times; that is the generator's only loop.
-  selection: {solid: 0.62, luck: 1.4, insideWall: 0.2, rounds: 6, moreGround: 1.5, tries: 3}
+  selection: {solid: 0.62, luck: 1.4, insideWall: 0.2, moreGround: 1.5, tries: 3}
 
   # Which building goes where. Within a district the buildings are sorted by
   # the area of their lot above (frontage times depth) and the kept houses by

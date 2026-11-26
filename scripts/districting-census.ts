@@ -36,7 +36,7 @@ const started = Date.now();
 for (const brief of towns) {
   const city = generateCity(brief, pack);
   const plan = planTown(brief, townInput(city, pack), pack);
-  const kept = plan.selection.district.flatMap((of, house) => (of === undefined ? [] : [house]));
+  const kept = plan.selection.chosen;
   const total = kept.length;
   let targets: number[];
   if (generatorTargets) {

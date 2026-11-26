@@ -15,7 +15,7 @@ import { builtInChecks } from './checks.ts';
 import { type NetEdge, type NetNode, buildNetwork } from './network.ts';
 import { StagedLayoutError, type TownPlan, planTown, stagedSettings, townInput } from './plan.ts';
 import { cornersOf } from './rects.ts';
-import { grown, shared, widened, without } from './shapes.ts';
+import { grown, widened, without } from './shapes.ts';
 import { plainly } from './tiles.ts';
 
 export const STAGED_GENERATOR = 'staged';
@@ -455,7 +455,7 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     ...(courtyards.length > 0 && { courtyards }),
     walls,
     places,
-    blocks: plan.blocks.flatMap((block, at) => (builtBlocks.has(at) ? [{ id: `block-${number}-${pad(at + 1, 6)}`, polygon: block.polygon, ...(districtIdOf(plan.selection.blockDistrict[at]) !== undefined && { districtId: districtIdOf(plan.selection.blockDistrict[at]) as string }), growthRank: Math.min((plan.wards[block.ward] as TownPlan['wards'][number]).growthRank / most, 1) }] : [])),
+    blocks: plan.blocks.flatMap((block, at) => (builtBlocks.has(at) ? [{ id: `block-${number}-${pad(at + 1, 6)}`, polygon: block.polygon, ...(districtIdOf(plan.drawn.blockDistrict[at]) !== undefined && { districtId: districtIdOf(plan.drawn.blockDistrict[at]) as string }), growthRank: Math.min((plan.wards[block.ward] as TownPlan['wards'][number]).growthRank / most, 1) }] : [])),
     wards: plan.wards.map((ward, at) => ({ id: `ward-${number}-${pad(at + 1, 4)}`, polygon: ward.polygon, kind: ward.kind, ...(districtIdOf(plan.forecast.of[at]) !== undefined && { districtId: districtIdOf(plan.forecast.of[at]) as string }), growthRank: Math.min(ward.growthRank / most, 1) })),
     summary: {
       settlementId: brief.id,
@@ -586,14 +586,6 @@ function joinHoles(ring: readonly Point[], holes: readonly Point[][]): Point[] |
   return out;
 }
 
-/** How far a line dividing a shared block's tile reaches either way, in metres: beyond any tile. */
-const FAR = 5000;
-/** Where a shared block cannot be divided by a line, the second district's houses are grown by this to close the gaps between them, and shrunk back to this margin about them, in metres. */
-const CLOSE_GAPS = 3;
-const HOUSE_MARGIN = 0.1;
-/** How far in front of its houses that part reaches, in metres: past the street to the edge of the tile. */
-const TO_STREET = 15;
-
 const boxesMeet = (a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>) => a.minX <= b.maxX + 1 && b.minX <= a.maxX + 1 && a.minY <= b.maxY + 1 && b.minY <= a.maxY + 1;
 
 /** Where two straight pieces cross, or nothing. */
@@ -620,93 +612,38 @@ function pointAt(line: readonly Point[], along: number): Point {
 }
 
 /**
- * Each district's ground: every block's tile, and the plaza's and the castle's, given to the district that holds
- * most of its lots. Nothing is re-owned afterwards, so a district's ground may be in several pieces and a lot may
- * stand in a neighbour's; the census counts both. The tiles of one district are let overlap a little, which joins
- * them; those of different districts keep a finger's breadth apart, so that no ground is counted twice. Where a
- * bridge has one district's ground at each end, the two are joined by a bridge link; nothing is drawn across it.
+ * Each district's ground: the tiles of the blocks it was drawn over (`districting.ts`), and the plaza's and the
+ * castle's for the district of the landmark there. A block that lends houses to a neighbour stays its owner's
+ * ground, so those lots stand in a neighbour's ground, as does a landmark whose block ended in another district's;
+ * the census counts them. The tiles of one district are let overlap a
+ * little, which joins them; those of different districts keep a finger's breadth apart, so that no ground is
+ * counted twice. Where a bridge has one district's ground at each end, the two are joined by a bridge link; nothing
+ * is drawn across it.
  */
 function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): { areas: DistrictArea[]; joins: Array<{ bridge: number; a: string; b: string }> } {
-  const districtOfBuilding = new Map(lots.map((lot) => [lot.buildingId, lot.districtId]));
   const blocks = plan.blocks.length;
   const specials = plan.wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind !== 'ordinary');
-  const votes: Array<Map<string, number>> = plan.tiles.map(() => new Map());
-  const vote = (tile: number, district: string | undefined) => {
-    if (district === undefined || tile < 0) return;
-    const map = votes[tile] as Map<string, number>;
-    map.set(district, (map.get(district) ?? 0) + 1);
-  };
-  plan.houses.forEach((house, at) => {
-    const held = plan.fitting?.holder[at];
-    if (held !== undefined) vote(house.block, districtOfBuilding.get(held));
-  });
-  for (const landmark of plan.landmarks) {
-    vote(landmark.block ?? blocks + specials.findIndex(({ index }) => index === landmark.ward), districtOfBuilding.get(landmark.building));
-  }
-  // The district holding most of a tile's lots, the first by ID on a tie; a block with none keeps its district.
-  const owner: Array<string | undefined> = votes.map((map, tile) => {
-    const best = [...map].sort(([a, one], [b, other]) => other - one || (a < b ? -1 : 1))[0];
-    if (best) return best[0];
-    const of = tile < blocks ? plan.selection.blockDistrict[tile] : undefined;
-    return of === undefined ? undefined : plan.districts[of]?.id;
-  });
-  // Where the districts were grown after selection (phase 6F), a district's ground is the tiles of its blocks and its
-  // landmarks', with no vote; a block two districts share has its tile divided along the line between their houses.
-  if (plan.grown) {
-    const grownPlan = plan.grown;
-    for (let tile = 0; tile < plan.tiles.length; tile++) {
-      const of = tile < blocks ? grownPlan.blockDistrict[tile] : plan.landmarks.find((landmark) => landmark.block === undefined && blocks + specials.findIndex(({ index }) => index === landmark.ward) === tile)?.district;
-      owner[tile] = of === undefined ? undefined : plan.districts[of]?.id;
+  const idOf = (of: number | undefined) => (of === undefined ? undefined : plan.districts[of]?.id);
+  const owner: Array<string | undefined> = plan.tiles.map((_, tile) =>
+    idOf(tile < blocks ? plan.drawn.blockDistrict[tile] : plan.landmarks.find((landmark) => landmark.block === undefined && blocks + specials.findIndex(({ index }) => index === landmark.ward) === tile)?.district),
+  );
+  // A block no district reached goes, for its ground, to the district of most of the blocks about it.
+  for (let tile = 0; tile < blocks; tile++) {
+    if (owner[tile] !== undefined) continue;
+    const counts = new Map<string, number>();
+    for (const other of plan.tilesBeside[tile] ?? []) {
+      const of = other < blocks ? idOf(plan.drawn.blockDistrict[other]) : undefined;
+      if (of !== undefined) counts.set(of, (counts.get(of) ?? 0) + 1);
     }
-    // A block with no kept house belongs to no district; for its ground it goes to the district of most of the
-    // blocks about it, so that a district grown through it is not left in pieces.
-    for (let tile = 0; tile < blocks; tile++) {
-      if (owner[tile] !== undefined || plan.banks.bankOf[tile] === undefined) continue;
-      const counts = new Map<string, number>();
-      for (const other of plan.tilesBeside[tile] ?? []) {
-        const of = other < blocks ? grownPlan.blockDistrict[other] : undefined;
-        if (of !== undefined) counts.set(plan.districts[of]?.id as string, (counts.get(plan.districts[of]?.id as string) ?? 0) + 1);
-      }
-      const best = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
-      if (best) owner[tile] = best[0];
-    }
+    const best = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
+    if (best) owner[tile] = best[0];
   }
-  /** Each tile, or part of a shared one, with the district it belongs to; a part keeps its holes for being grown. */
+  /** Each tile with the district it belongs to. */
   const entries: Array<{ tile: number; district: string; rings: Point[][]; holes: Point[][] }> = [];
   plan.tiles.forEach((rings, tile) => {
     const district = owner[tile];
     if (district === undefined || rings.length === 0) return;
-    const split = plan.grown?.shared.find((one) => one.block === tile);
-    if (!split) return entries.push({ tile, district, rings: rings as Point[][], holes: [] });
-    // The half on the first district's side of the line, and the rest.
-    const along: Point = [-split.normal[1], split.normal[0]];
-    const [o, n] = [split.origin, split.normal];
-    const half: Point[] = [
-      [o[0] + along[0] * FAR, o[1] + along[1] * FAR],
-      [o[0] - along[0] * FAR, o[1] - along[1] * FAR],
-      [o[0] - along[0] * FAR - n[0] * FAR, o[1] - along[1] * FAR - n[1] * FAR],
-      [o[0] + along[0] * FAR - n[0] * FAR, o[1] + along[1] * FAR - n[1] * FAR],
-    ];
-    // Where the line parts the two districts' houses cleanly it divides the tile; where a run of houses turns a
-    // corner it cannot, and the second district's part is the ground close about its own houses instead.
-    const housesOf = (of: number) => plan.houses.flatMap((house, index) => (house.block === tile && plan.grown?.district[index] === of ? [house.outline] : []));
-    const sideOf = (point: Point) => (point[0] - o[0]) * n[0] + (point[1] - o[1]) * n[1];
-    const clean = housesOf(split.first).every((outline) => outline.every((corner) => sideOf(corner) < 0)) && housesOf(split.second).every((outline) => outline.every((corner) => sideOf(corner) > 0));
-    // Each of its houses with the ground in front of it out to the street, so that its part reaches the street.
-    const withFronts = () =>
-      plan.houses.flatMap((house, index) => {
-        if (house.block !== tile || plan.grown?.district[index] !== split.second) return [];
-        const middle: Point = [(house.front[0][0] + house.front[1][0]) / 2, (house.front[0][1] + house.front[1][1]) / 2];
-        const away = Math.hypot(middle[0] - house.centre[0], middle[1] - house.centre[1]) || 1;
-        const out: Point = [(middle[0] - house.centre[0]) / away, (middle[1] - house.centre[1]) / away];
-        return [house.outline, [house.front[0], house.front[1], [house.front[1][0] + out[0] * TO_STREET, house.front[1][1] + out[1] * TO_STREET], [house.front[0][0] + out[0] * TO_STREET, house.front[0][1] + out[1] * TO_STREET]] as Point[]];
-      });
-    const close = clean ? undefined : grown(grown(withFronts(), CLOSE_GAPS).rings, -(CLOSE_GAPS - HOUSE_MARGIN)).rings;
-    const inside = close ? without(rings as Point[][], close) : shared(rings as Point[][], [half]);
-    const outside = close ? shared(rings as Point[][], close) : without(rings as Point[][], [half]);
-    const idOf = (of: number) => plan.districts[of]?.id as string;
-    if (inside.rings.length > 0) entries.push({ tile, district: idOf(split.first), rings: inside.rings, holes: inside.holes });
-    if (outside.rings.length > 0) entries.push({ tile, district: idOf(split.second), rings: outside.rings, holes: outside.holes });
+    entries.push({ tile, district, rings: rings as Point[][], holes: [] });
   });
   const boxes = entries.map((entry) => boxOf(entry.rings.flat(), 0.2));
   const near = new SpatialIndex<number>(60);
@@ -722,16 +659,16 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): { are
         const shape = grown((entries[other] as (typeof entries)[number]).rings, 0.05, false, (entries[other] as (typeof entries)[number]).holes);
         return [...shape.rings, ...shape.holes];
       });
-    const keep = plan.grown?.shared.some((one) => one.block === tile) ? [] : tile < blocks ? (plan.blocks[tile] as TownPlan['blocks'][number]).polygon : (specials[tile - blocks] as (typeof specials)[number]).ward.polygon;
+    const keep = tile < blocks ? (plan.blocks[tile] as TownPlan['blocks'][number]).polygon : (specials[tile - blocks] as (typeof specials)[number]).ward.polygon;
     const ownGrown = grown(rings, 0.03, false, holes);
     const cut = without([...ownGrown.rings, ...ownGrown.holes], foreign);
     const plain = plainly(cut.rings, cut.holes, keep).filter((ring) => polygonArea(ring) > 0.5);
     if (!pieces.has(district)) pieces.set(district, []);
     pieces.get(district)?.push(...plain);
   });
-  // Where the districts were grown, a piece of a district's ground that holds none of its lots is a leftover sliver
-  // of a divided tile or an empty block, and is not drawn.
-  if (plan.grown) {
+  // A piece of a district's ground that holds none of its lots is a leftover sliver of a divided tile or an empty
+  // block, and is not drawn.
+  {
     for (const [district, polygons] of pieces) {
       const middles = lots.filter((lot) => lot.districtId === district).map((lot) => polygonCentroid(lot.polygon));
       const group = polygons.map((_, at) => at);

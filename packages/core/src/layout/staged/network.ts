@@ -186,7 +186,7 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
   // ---- How far out the town is built, and where each route leaves -------------------------------------------------
   let builtRadius = 0;
   plan.houses.forEach((house, index) => {
-    if (plan.selection.district[index] !== undefined) for (const corner of house.outline) builtRadius = Math.max(builtRadius, Math.hypot(corner[0], corner[1]));
+    if (plan.drawn.district[index] !== undefined) for (const corner of house.outline) builtRadius = Math.max(builtRadius, Math.hypot(corner[0], corner[1]));
   });
   for (const landmark of plan.landmarks) for (const corner of landmark.outline) builtRadius = Math.max(builtRadius, Math.hypot(corner[0], corner[1]));
   const edgeOfTown = Math.max(builtRadius * 1.1 + 30, plan.radius);
@@ -341,7 +341,7 @@ export function buildNetwork({ plan, settings, routes, builtBlocks, wallWidth }:
   for (const line of along) for (const piece of stretches(line, (point) => besideHouses(point) && offBridges(point))) ways.push({ points: piece, kind: 'lane', width: widths.lane, through: false });
   rings.forEach((ring) => ways.push({ points: [...ring, ring[0] as Point], kind: 'lane', width: widths.lane, through: false }));
   const houseBoxes = new SpatialIndex<Point[]>(40);
-  plan.houses.forEach((house, index) => plan.selection.district[index] !== undefined && houseBoxes.add(boxOf(house.outline, 3), house.outline));
+  plan.houses.forEach((house, index) => plan.drawn.district[index] !== undefined && houseBoxes.add(boxOf(house.outline, 3), house.outline));
   for (const landmark of plan.landmarks) if (landmark.block !== undefined) houseBoxes.add(boxOf((plan.blocks[landmark.block] as TownPlan['blocks'][number]).polygon, 3), (plan.blocks[landmark.block] as TownPlan['blocks'][number]).polygon);
   const tooNearHouses = (from: Point, to: Point, half: number) => {
     for (const outline of houseBoxes.near(boxOf([from, to], half))) if (distancePolygonToPolyline(outline, [from, to]) < half + 0.02) return true;
