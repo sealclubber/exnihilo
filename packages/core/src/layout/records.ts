@@ -151,6 +151,7 @@ export const LotSchema = z.strictObject({
   id: LotIdSchema,
   buildingId: BuildingIdSchema,
   polygon,
+  /** The district the lot stands in: its building's, but for a staged town's landmark with a block or a ward of its own, which takes the district whose ground it stands in. */
   districtId: DistrictIdSchema,
   /** The lot is entered from this point on this segment's centre line. */
   entrance: z.strictObject({ segmentId: SegmentIdSchema, point: PointSchema }),

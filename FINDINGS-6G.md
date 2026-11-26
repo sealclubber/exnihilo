@@ -211,10 +211,11 @@ Pack 0.20.0, `LAYOUT_VERSION` 13.
 | Landmarks whose block ended in another district | 0 | 1,008 of 4,339 (23.2%) |
 | Given a way of blocks to the water / to a bridgehead | | 1 (Pombal) / 0 |
 
+**Landmarks take the district they stand in** (added after the first renders: the castle stood as a red pentagon in a green district). A landmark with a block or a ward of its own now belongs to the district whose ground it stands in: its block's, or for the plaza and the castle the district holding most of the blocks beside it. Its lot's `districtId` is that district (`landmarkDistricts` in `staged/layout.ts`), the invariant that a lot's district is its building's allows it for those landmark types, and the server reports a building's district from its lot. The city's record of the building is not changed, so `life`, which reads the city, still places a landmark's district-wide rounds by the district the city made it for. About 1,008 of 4,339 landmarks change district so. Checked on the sample of 57 settlements (all invariants kept; town lots outside their own ground 0.76%), not on all 682.
+
 **What is not good yet.**
 - **Nine towns miss by over 2% of their houses**, all with a river and few districts: Orteres 43 of 538, Ririm 113 of 3,151, Jaszent 26 of 395, Tofiano 17 of 324, Jamsasarila 17 of 265, Feins 26 of 718, Zhisov 8 of 238, Meunglain 14 of 561, and the smaller Charoy 5 of 245. Where a bridge part sits in the middle of a bank it cuts the district around it in two, and no cell fits. Those houses stand in the neighbour's ground.
 - **Two districts are drawn in pieces.** Mihivesavo's centre has one house beyond a road at the far west, joined in the stage and drawn apart, because ground is not drawn across the widest roads. Rochambery's `lower` has a small part across the river that the census does not join by its bridge.
-- **Landmarks:** 23% stand in another district's ground. They keep their district.
 - **A small part across a river.** A district that must carry only a few houses over a bridge gets a small far part. It is correct and looks odd.
 
 **Tests.** `npm run typecheck` is clean. Where this was written the machine is too slow and too small for the whole suite, so `npm run check` still has to be run once on the development machine. What was run here:

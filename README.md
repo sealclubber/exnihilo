@@ -635,7 +635,12 @@ and each stage draws on streams named `staged-…`. The stages:
     from the neighbour beside it, hop by hop from the nearest district
     with houses to spare, so those few houses stand in a neighbour's
     ground. No block changes hands to settle a count, which is what keeps
-    the districts compact. If the whole
+    the districts compact. A landmark with a block or a ward of its own
+    (a bathhouse, a guild hall, the castle, the plaza) belongs to the
+    district whose ground it stands in, whichever district the city made
+    it for: its lot names that district (`landmarkDistricts`), and the
+    server reports it. The city's own record of the building is unchanged.
+    If the whole
     town has too few houses, ground is taken again half as large again, at
     most three times: the generator's only loop, which no settlement of
     Lomia needs.
@@ -772,7 +777,7 @@ houses), every layout invariant on:
 | Town lots outside their own district's ground | 5,229 of 523,259 (1.00%) |
 | Towns whose ground misses by over 2% of their houses | 9; the worst Orteres, 43 of 538, and Ririm, 113 of 3,151 |
 | Districts spanning a river | 157 |
-| Landmarks whose block ended in another district's ground | 1,008 of 4,339 (23.2%) |
+| Landmarks that took the district they stand in, not the one the city made them for | 1,008 of 4,339 (23.2%) |
 
 `docs/renders/districts-*.png` show twelve towns, each lot in its
 building's district's colour over the districts' ground.

@@ -7,6 +7,7 @@ import { type City, type Layout, VILLAGE_GENERATOR, checkLayout, createLife, cre
 import { groundOf, outsideGrounds } from '../src/life/wander.ts';
 import { STAGED_GENERATOR, generateStagedLayout } from '../src/layout/staged/layout.ts';
 import { planTown, townInput } from '../src/layout/staged/plan.ts';
+import { pointInPolygon, polygonCentroid } from '../src/layout/geometry.ts';
 import type { SettlementBrief } from '../src/schema.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
 
@@ -105,6 +106,13 @@ describe('the staged generator as a layout', () => {
       // Few lots stand outside their own district's ground.
       const ground = measureDistrictGround(layout);
       expect(ground.lotsOutside / ground.lots, name).toBeLessThan(0.05);
+      // Every landmark with ground of its own stands in the ground of the district its lot names.
+      const areas = new Map(layout.districtAreas.map((area) => [area.districtId, area.polygons]));
+      const lotOf = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
+      for (const landmark of plan.landmarks) {
+        const lot = lotOf.get(landmark.building)!;
+        expect(areas.get(lot.districtId)!.some((polygon) => pointInPolygon(polygonCentroid(lot.polygon), polygon)), `${name}: ${landmark.type}`).toBe(true);
+      }
     }
   });
 

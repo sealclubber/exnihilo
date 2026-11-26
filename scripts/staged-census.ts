@@ -106,7 +106,7 @@ console.log(`  houses standing in a neighbour's ground to make every count exact
 console.log(`  districts in more than one piece of blocks, in the stage's own terms: ${towns.inPieces}; districts spanning a river: ${towns.spans}; islands: ${towns.islands} houses`);
 console.log(`  towns with a district drawn in pieces, bridge links counted as joins: ${apart.length}${apart.length > 0 ? ` (${apart.join(', ')})` : ''}`);
 console.log(`  given a way of blocks to the water: ${towns.waterPaths}; to their bridgehead: ${towns.headPaths}`);
-console.log(`  landmarks whose block ended in another district: ${towns.landmarksOutside} of ${towns.landmarks} (${share(towns.landmarksOutside, towns.landmarks)})`);
+console.log(`  landmarks that took the district whose ground they stand in, not the one the city made them for: ${towns.landmarksOutside} of ${towns.landmarks} (${share(towns.landmarksOutside, towns.landmarks)})`);
 console.log(`  took more ground: ${towns.moreGround}`);
 console.log(`Generating the layouts took ${(generating / 1000).toFixed(0)} s`);
 if (listTowns) for (const line of failing) console.log(line);

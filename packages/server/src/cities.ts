@@ -78,6 +78,7 @@ export class CityView {
   private readonly brief: SettlementBrief;
   private readonly pack: SettingPack;
   private madeLayout: Layout | undefined;
+  private standing: Map<string, string> | undefined;
   private pathFinder: PathFinder | undefined;
   private livedLife: SettlementLife | undefined;
   private townForAvatar: AvatarTown | undefined;
@@ -101,6 +102,15 @@ export class CityView {
       if (list) list.push(person);
       else this.staff.set(person.employerHouseholdId, [person]);
     }
+  }
+
+  /**
+   * The district a building stands in: its lot's in the layout. That is the city's own for every building but a
+   * landmark with ground of its own, which belongs to the district whose ground it stands in.
+   */
+  districtOfBuilding(building: Building): string {
+    this.standing ??= new Map(this.layout.lots.map((lot) => [lot.buildingId, lot.districtId]));
+    return this.standing.get(building.id) ?? building.districtId;
   }
 
   /** The town's layout, made the first time it is asked for and kept with the city. */
@@ -304,7 +314,7 @@ export class CityView {
     const byWork = filters.occupation !== undefined || filters.category !== undefined;
     return paged(
       this.city.buildings.filter((building) => {
-        if (filters.district !== undefined && building.districtId !== filters.district) return false;
+        if (filters.district !== undefined && this.districtOfBuilding(building) !== filters.district) return false;
         if (filters.kind !== undefined && building.kind !== filters.kind) return false;
         if (filters.type !== undefined && building.type !== filters.type) return false;
         return !byWork || building.workerIds.some((id) => this.worksAs(this.people.get(id) as Person, filters));
@@ -346,7 +356,7 @@ export class CityView {
     if (!building) return undefined;
     return {
       building,
-      district: this.districtRef(building.districtId),
+      district: this.districtRef(this.districtOfBuilding(building)),
       workers: building.workerIds.map((worker) => this.people.get(worker) as Person),
       households: building.householdIds.map((household) => this.listItem(this.households.get(household) as Household)),
     };

@@ -398,11 +398,12 @@ export function generateStagedLayout(city: City, brief: SettlementBrief, pack: S
     if (at < 0) fail(`route ${position} (${route.routeId}) has no exit on the network: ${net.notes.join('; ')}`);
     exits.push({ id: `exit-${number}-${pad(position + 1, 3)}`, junctionId: junctionId.get(at) as string, routeId: route.routeId, ...(route.name !== undefined && { name: route.name }), kind: route.kind, bearing: route.bearing, ...((net.nodes[at] as NetNode).atQuay && { atQuay: true }) });
   });
+  const standing = landmarkDistricts(plan);
   const lots: Lot[] = [];
   city.buildings.forEach((building, at) => {
     const draft = drafts.get(building.id);
     if (!draft) return fail(`${building.id}, a ${building.type}, was given no place`);
-    lots.push({ id: `lot-${number}-${pad(at + 1, 6)}`, buildingId: building.id, polygon: draft.polygon, districtId: building.districtId, entrance: { segmentId: segmentId.get(draft.entrance.edge) as string, point: draft.entrance.point }, footprints: draft.footprints, ...(draft.front && { front: draft.front }) });
+    lots.push({ id: `lot-${number}-${pad(at + 1, 6)}`, buildingId: building.id, polygon: draft.polygon, districtId: standing.get(building.id) ?? building.districtId, entrance: { segmentId: segmentId.get(draft.entrance.edge) as string, point: draft.entrance.point }, footprints: draft.footprints, ...(draft.front && { front: draft.front }) });
   });
   const walls: WallRecord[] = [];
   if (plan.wall && wallLines.length > 0) {
@@ -611,11 +612,39 @@ function pointAt(line: readonly Point[], along: number): Point {
   return line[0] as Point;
 }
 
+/** The district holding most of the blocks beside a tile: whose ground the plaza's and the castle's is. */
+function besideMost(plan: TownPlan, tile: number): number | undefined {
+  const blocks = plan.blocks.length;
+  const counts = new Map<number, number>();
+  for (const other of plan.tilesBeside[tile] ?? []) {
+    const of = other < blocks ? plan.drawn.blockDistrict[other] : undefined;
+    if (of !== undefined) counts.set(of, (counts.get(of) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
+}
+
+/**
+ * The district each landmark with a block or a ward of its own stands in: its block's, or for the plaza and the
+ * castle the district holding most of the blocks beside it. A landmark belongs to the district whose ground it
+ * stands in, whichever the city made it for, so no landmark is a stranger in a neighbour's ground.
+ */
+export function landmarkDistricts(plan: TownPlan): Map<string, string> {
+  const specials = plan.wards.flatMap((ward, index) => (ward.kind === 'ordinary' ? [] : [index]));
+  const standing = new Map<string, string>();
+  for (const landmark of plan.landmarks) {
+    const at = landmark.reservation === 'ward' ? specials.indexOf(landmark.ward) : -1;
+    const of = landmark.block !== undefined ? plan.drawn.blockDistrict[landmark.block] : at >= 0 ? besideMost(plan, plan.blocks.length + at) : undefined;
+    const id = of === undefined ? undefined : plan.districts[of]?.id;
+    if (id !== undefined) standing.set(landmark.building, id);
+  }
+  return standing;
+}
+
 /**
  * Each district's ground: the tiles of the blocks it was drawn over (`districting.ts`), and the plaza's and the
- * castle's for the district holding most of the blocks beside each. A block that lends houses to a neighbour stays its owner's
- * ground, so those lots stand in a neighbour's ground, as does a landmark whose block ended in another district's;
- * the census counts them. The tiles of one district are let overlap a
+ * castle's for the district holding most of the blocks beside each. The few houses that make every district's count
+ * exact stand in a neighbour's ground; the census counts them. A landmark belongs to the district whose ground it
+ * stands in (`landmarkDistricts`). The tiles of one district are let overlap a
  * little, which joins them; those of different districts keep a finger's breadth apart, so that no ground is
  * counted twice. Where a bridge has one district's ground at each end, the two are joined by a bridge link; nothing
  * is drawn across it.
@@ -626,15 +655,7 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): { are
   const idOf = (of: number | undefined) => (of === undefined ? undefined : plan.districts[of]?.id);
   // The plaza's and the castle's ground goes to the district holding most of the blocks beside it, whatever district
   // the landmark there belongs to.
-  const besideMost = (tile: number) => {
-    const counts = new Map<number, number>();
-    for (const other of plan.tilesBeside[tile] ?? []) {
-      const of = other < blocks ? plan.drawn.blockDistrict[other] : undefined;
-      if (of !== undefined) counts.set(of, (counts.get(of) ?? 0) + 1);
-    }
-    return [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
-  };
-  const owner: Array<string | undefined> = plan.tiles.map((_, tile) => idOf(tile < blocks ? plan.drawn.blockDistrict[tile] : besideMost(tile)));
+  const owner: Array<string | undefined> = plan.tiles.map((_, tile) => idOf(tile < blocks ? plan.drawn.blockDistrict[tile] : besideMost(plan, tile)));
   // A block no district holds, open country among them, is nobody's ground and is not drawn.
   /** Each tile with the district it belongs to. */
   const entries: Array<{ tile: number; district: string; rings: Point[][]; holes: Point[][] }> = [];
