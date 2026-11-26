@@ -2,7 +2,7 @@
 
 Nov 26, 2026. Branch `6g-districts`, from `main` at `1ebf85f`.
 
-**Status.** Step 1 is done. Step 2 (unowned sites) was reverted after its landmark rule failed; the amended Landmarks section of `sim-6g.md` replaces it, and is ported and measured. Step 3, the switch-over, is built. The 19 districts whose landmark blocks were cut off are fixed by counting landmark blocks in the chains' check. It is **stopped for review** on 15 districts whose plaza or castle ground is drawn apart from their blocks. The step 3 commit is work in progress: the old selection and Part B tests are not yet rewritten, so `npm run check` does not pass on it.
+**Status (Nov 26).** Amendment 2 (cells) is ported and matches its sandbox; stopped because Pombal's waterside district no longer reaches the water (a layout invariant), and 7 districts are drawn in pieces. Earlier: Step 1 is done. Step 2 (unowned sites) was reverted after its landmark rule failed; the amended Landmarks section of `sim-6g.md` replaces it, and is ported and measured. Step 3, the switch-over, is built. The 19 districts whose landmark blocks were cut off are fixed by counting landmark blocks in the chains' check. It is **stopped for review** on 15 districts whose plaza or castle ground is drawn apart from their blocks. The step 3 commit is work in progress: the old selection and Part B tests are not yet rewritten, so `npm run check` does not pass on it.
 
 ## Step 1: the districts stage, ported (`staged/districting.ts`)
 
@@ -130,6 +130,52 @@ They show two more things the census does not measure:
 Main's districts are worse: ribbons one block wide, and a district strung round another.
 
 **For your decision.** One option is that the district of the landmark on the plaza or in the castle claims a block beside that ward when seeded, as it claims its landmark blocks. Another is that the special ward's ground goes to the district of most of the blocks around it, while the landmark keeps its district; that would count as a landmark outside its ground.
+
+## Amendment 2: district shape (cells), ported; stopped on Pombal
+
+Ported from `docs/prototypes/districts-convex-cells.test.ts` (`OUTER=8 POWER=1 LMPULL=1 LM=0 PIECEFIX=1`):
+- **Open country.** A run of more than `openRun` (8) touching empty blocks is nobody's ground, with pockets of houses keeping their way back to the town.
+- **Cells.** Weighted cells per bank replace growth, then each unit's pieces are tidied.
+- **Fall-back.** A town not exact with cells is drawn again with growth, the landmarks leading (the first amendment), and failing that with plain growth.
+- **Plaza and castle.** Each one's ground goes to the district holding most of the blocks beside it.
+- **Unheld blocks.** A block no district holds is no longer handed to a neighbour for drawing; it is nobody's ground.
+
+New numbers in the pack: `openRun`, `cellRounds`, `cellStep`, `cellStepLate` and `cellStepRounds`.
+
+On eight towns run through the reference itself (Karlen, Ruha, Haurinen, Pombal, Borfino, Badanos, Cevilefon, Ririm), the port matches it field for field.
+
+| Measure, all 546 towns | Amendment 2 (539) | Port, sandbox targets | Port, generator targets | Stop if |
+| --- | --- | --- | --- | --- |
+| Districts in pieces (stage) | 0 | 0 | 0 | any |
+| Towns not exact with cells, before the fall-back | 2 (Ririm, Slutstiy) | Ririm, Slutstiy | Ririm, Slutstiy | |
+| Towns not exact at the end | | 0 | 0 | |
+| Shared blocks | 1,331 | 1,318 | 1,187 | > 2% |
+| Landmarks outside their district's ground | 901 (21%) | 896 of 4,339 (20.7%) | 905 of 4,339 (20.9%) | > 25% |
+
+Both fall-back towns come out exact by growth.
+
+**Renders.** `docs/renders/<town>-districts-6g.svg` are redrawn with cells: Karlen, Pombal, Badanos and Cevilefon, each district in its own colour, its ground outlined.
+- They look like the "after" side of the pictures in `docs/prototypes/`: open country left out, compact districts, the same layout of districts on each bank.
+- Mine are drawn with y to the south, so they are mirrored top to bottom against those pictures.
+- A landmark lot drawn in its own district's colour inside another district's ground is one of the 21% outside their ground.
+
+**Layout census, all 682 settlements** (`node scripts/staged-census.ts`):
+
+| Measure | Result | Stop if |
+| --- | --- | --- |
+| Settlements keeping every invariant | **681 of 682** | |
+| Town lots outside their own ground | 3,078 of 523,259 (0.59%) | |
+| Town districts in pieces, bridge links counted as joins | **7** (was 39) | any |
+
+**Stop 1: Pombal breaks a layout invariant.**
+- The invariant: a waterside district must reach the water.
+- What happens: `district-5-034`, Pombal's waterside district, ends 139.9 m from the water, against the pack's `watersideReach` of 40 m.
+- Why: its cell is placed by its seed and its landmarks; nothing ties it to the water. The growth method kept it there because it grew from a waterside seed.
+- Effect: with checking on (the default), Pombal's layout is refused. The sandbox did not run the layout invariants.
+
+**Stop 2: 7 town districts drawn in pieces.**
+- 6 span a river: Tiorpanki, Forviroria, Rochambery, Klovsvaatas, Charoy and Puerda. These are probably the census's nearest-middle guess at which piece a bridge joins.
+- 1 is on one bank: Mihivesavo's centre (`district-623-001`). Both of its pieces are ordinary blocks that the stage counts as joined, but they are drawn apart. I have not traced it.
 
 ## Not yet run
 

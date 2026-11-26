@@ -106,7 +106,7 @@ Landmark sites stay owned and stay where main puts them, in the owner's forecast
 1. **Claim.** After seeding and bank sharing, before growth, each district claims the blocks holding its own landmark sites, on any bank where it has a unit.
 2. **Grow toward them.** A unit's score for a candidate block is the smaller of its distance to the seed, and its distance to one of the unit's landmark blocks plus half that landmark block's distance to the seed.
 3. **Release.** After growth and the leftover pass, any block of a unit that cannot be reached from its seed or bridgeheads is released, and joins a touching unit as leftovers do. This is what keeps districts in one piece.
-4. **Protect.** In chains, a unit never hands over a block holding its own landmark.
+4. **Protect.** In chains, a unit never hands over a block holding its own landmark. And when chains count a unit's pieces, a piece counts if it holds houses or one of the unit's own landmark blocks, so a hand-over can never leave a landmark block standing alone. (Added after the switch-over found 19 such blocks; the sandbox's piece count had not seen them. With this condition: 0 pieces on all 539 towns, the same four fall-back towns, shared blocks 1,307.)
 5. **Fall back.** If a town does not come out exact, run the stage again for that town without steps 1 to 4 and keep that result.
 
 A landmark whose block ends in another district's ground stays on its site and keeps its district. Count it in the census. Nothing is moved, so no house is displaced.
@@ -197,3 +197,35 @@ Commit after each step. Run the census after steps 1, 3 and 4.
 - If a number misses its threshold, stop and write it up. No new repair passes, no tolerance changes.
 - Per-ward random streams stay as they are. The districts stage uses no randomness.
 
+## Amendment 2: district shape
+
+Added Nov 25 after the first 6G renders. The districts were whole and exact but looked bad: an outer district wrapped the town through empty ground, and inner districts grew as strings. This replaces step 3 (grow in turns) and drops the landmark claims of the first amendment. Everything else stands.
+
+Reference: `docs/prototypes/districts-convex-cells.test.ts`, run with `OUTER=8 POWER=1 LMPULL=1 LM=0 PIECEFIX=1`. Before-and-after pictures of four towns are beside it.
+
+### The method
+
+1. **Open country.** A run of more than 8 touching empty blocks is nobody's ground. Empty means no kept house, no landmark, and not a bridgehead. Open country is never claimed and never drawn as district ground.
+2. **Pockets.** If leaving out open country cuts a pocket of houses off from the town, the shortest path of blocks from the pocket back to the town stops being open country. Banks are then worked out over what is left.
+3. **Seeds and bank sharing.** Unchanged.
+4. **Cells, in place of growth.** On each bank, every unit has a centre and a weight. A block goes to the unit with the smallest value of distance squared from block centre to unit centre, minus the unit's weight.
+   - A unit's centre is the average of its seed block's centre and the centres of its own landmark blocks on that bank. A unit seeded on a bridgehead keeps the bridgehead as its centre.
+   - Weights start at zero. Each round, a unit's weight rises by step × scale × (target − houses held). Scale is the mean squared distance of the bank's blocks from the bank's middle, divided by the bank's houses. Step is 0.5 for 200 rounds, then 0.2.
+   - Run up to 400 rounds. Keep the round with the smallest total miss. Stop early when the total miss is no more than the number of units.
+5. **Tidy.** Bridgehead blocks go to the unit that crosses there. A unit left in several pieces keeps the piece with its bridgehead, or else the piece with most houses; its other pieces are released and join a touching unit, as leftovers do. Each unit's seed becomes its housed block nearest its centre.
+6. **Chains and the exact step.** Unchanged, with the landmark-aware piece count.
+7. **Fall back.** If a town does not come out exact, draw it again with the growth method of the first amendment and keep that.
+
+### Measured, all 539 towns
+
+| Measure | Growth (first amendment) | Cells |
+| --- | --- | --- |
+| Districts in more than one piece | 0 | 0 |
+| Towns not exact, before the fall-back | 4 | 2 (Ririm 45 houses, Slutstiy 202) |
+| Shared blocks | 1,307 | 1,331 |
+| Landmarks outside their district's ground | 414 (9.7%) | 901 (21%) |
+| Pairs of touching blocks that fall in different districts, four render towns | 27% | 19% |
+
+The cost is landmarks: twice as many stand outside their district's ground. Swapping same-type landmarks between sites was measured and does not help (901 to 894). The stop for landmarks outside their ground moves from 15% to 25%.
+
+**Not tested:** the fall-back in step 7 as one run, and how the plaza and castle wards draw. The rule for those stands: a ward's ground goes to the district holding most of the blocks beside it.

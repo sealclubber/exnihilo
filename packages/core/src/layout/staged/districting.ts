@@ -15,10 +15,11 @@
  *    nearest the bridge goes over whole if it nearly fits, or splits, both
  *    parts seeded on their bridgeheads, which are theirs from then on. A bank
  *    with no bridge sends its largest unit to the bank with most room.
- * 3. Grow in turns. The unit furthest below its count claims the unclaimed
- *    block touching its ground on its own bank nearest its seed, empty blocks
- *    too; then blocks left over join the touching unit with the smallest
- *    surplus, and a block that touches none, the nearest unit.
+ * 3. Cells (or, falling back, growth in turns: the unit furthest below its
+ *    count claims the unclaimed block touching its ground on its own bank
+ *    nearest its seed, empty blocks too); then blocks left over join the
+ *    touching unit with the smallest surplus, and a block that touches none,
+ *    the nearest unit.
  * 4. Pass surplus along chains. A unit short is handed border blocks along a
  *    path of touching units from the nearest with a surplus, each to the next,
  *    never a seed or a bridgehead and never leaving either side in more pieces.
@@ -27,13 +28,23 @@
  *    ground, keeps at least one of its owner's houses, and lends to one
  *    neighbour only.
  *
- * Landmarks lead the ground. After the banks are shared, each district claims
- * the blocks of its own landmarks on every bank it has a unit on, and grows
- * toward them as well as from its seed; a block it cannot then reach from its
- * seed or its bridgeheads is let go, and chains never take a landmark's block.
- * A town that does not come out exact this way is drawn again without the
- * landmarks, and a landmark whose block ends in another district's ground
- * stays there.
+ * Open country is nobody's: a run of more than `openRun` touching empty
+ * blocks (no kept house, no landmark, no bridgehead) is never claimed, but a
+ * pocket of houses it would cut off keeps its shortest way back to the town.
+ *
+ * Step 3 is cells, not growth (Amendment 2 of `sim-6g.md`): on each bank every
+ * unit has a centre, its seed with its own landmarks' blocks on that bank, and
+ * a weight; a block goes to the unit for which its squared distance from the
+ * centre less the weight is least, and the weights are raised and lowered
+ * until each unit holds about its count. A unit left in pieces keeps its piece
+ * with its bridgehead, or else with most houses, and lets the rest go to its
+ * neighbours.
+ *
+ * A town that does not come out exact with cells is drawn again with growth,
+ * the landmarks leading: each district claims its own landmarks' blocks and
+ * grows toward them, lets go of what it cannot reach, and never chains a
+ * landmark's block away. One still not exact so is drawn with plain growth. A
+ * landmark whose block ends in another district's ground stays there.
  *
  * The stage reads no randomness. Ties go to the first in the order blocks,
  * units and districts are given.
@@ -106,8 +117,11 @@ export interface Districting {
   /** Landmark blocks claimed by their districts, and blocks let go for being out of reach of their unit's seed. */
   claimed: number;
   released: number;
-  /** Whether the town was drawn again without its landmarks, for not coming out exact with them. */
-  withoutLandmarks: boolean;
+  /** How the districts were drawn: with cells; with growth, the landmarks leading, because cells did not come out exact; or with plain growth, because neither did. */
+  method: 'cells' | 'growth' | 'plain';
+  /** Blocks of open country, and blocks of it kept as a way to a pocket of houses. */
+  openCountry: number;
+  connectors: number;
   /** Landmarks with a district and a block whose block ends in another district's ground. */
   landmarksOutside: number;
 }
@@ -118,13 +132,15 @@ const apart = (a: Point, b: Point) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const half = (have: readonly number[], want: readonly number[]) => Math.round(have.reduce((sum, value, at) => sum + Math.abs(value - (want[at] as number)), 0) / 2);
 
 export function drawDistricts(input: DistrictingInput): Districting {
-  const led = input.landmarks && input.landmarks.length > 0 ? draw(input, true) : undefined;
-  const drawn = led && led.off === 0 ? led : { ...draw(input, false), withoutLandmarks: led !== undefined };
+  let drawn = draw(input, 'cells');
+  if (drawn.off > 0) drawn = draw(input, 'growth');
+  if (drawn.off > 0) drawn = draw(input, 'plain');
   drawn.landmarksOutside = (input.landmarks ?? []).filter((landmark) => landmark.district !== undefined && landmark.block !== undefined && landmark.block < input.blocks.length && drawn.blockDistrict[landmark.block] !== landmark.district).length;
   return drawn;
 }
 
-function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, targets, landmarks = [] }: DistrictingInput, led: boolean): Districting {
+function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, targets, landmarks = [] }: DistrictingInput, method: Districting['method']): Districting {
+  const led = method === 'growth';
   const B = blocks.length;
   const D = targets.length;
   const keptB: number[] = blocks.map(() => 0);
@@ -175,16 +191,95 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     seedWard.push(ward);
   }
 
+  // Open country: a run of more than `openRun` touching empty blocks, where empty is no kept house, no landmark
+  // and no bridgehead. It is nobody's ground.
+  const markBlocks = new Set(landmarks.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
+  const linkEnds = new Set(links.flatMap((link) => [link.a, link.b]));
+  const empty = (block: number) => keptB[block] === 0 && !markBlocks.has(block) && !linkEnds.has(block);
+  const outside: boolean[] = blocks.map(() => false);
+  const seenEmpty: boolean[] = blocks.map(() => false);
+  for (let start = 0; start < B; start++) {
+    if (seenEmpty[start] || !empty(start)) continue;
+    const run = [start];
+    seenEmpty[start] = true;
+    for (let at = 0; at < run.length; at++) {
+      for (const next of badj[run[at] as number] as number[]) {
+        if (seenEmpty[next] || !empty(next)) continue;
+        seenEmpty[next] = true;
+        run.push(next);
+      }
+    }
+    if (run.length > rules.openRun) for (const block of run) outside[block] = true;
+  }
+  // A pocket of houses that open country cuts off from the town keeps the shortest way of blocks back to it.
+  let connectors = 0;
+  {
+    const piece: number[] = blocks.map(() => -1);
+    const housesIn: number[] = [];
+    for (let start = 0; start < B; start++) {
+      if ((piece[start] as number) >= 0 || outside[start]) continue;
+      const id = housesIn.length;
+      housesIn.push(0);
+      const stack = [start];
+      piece[start] = id;
+      while (stack.length > 0) {
+        const at = stack.pop() as number;
+        housesIn[id] = (housesIn[id] as number) + (keptB[at] as number);
+        for (const next of badj[at] as number[]) {
+          if ((piece[next] as number) >= 0 || outside[next]) continue;
+          piece[next] = id;
+          stack.push(next);
+        }
+      }
+    }
+    let town = 0;
+    housesIn.forEach((count, id) => {
+      if (count > (housesIn[town] as number)) town = id;
+    });
+    const joined = new Set([town]);
+    for (let id = 0; id < housesIn.length; id++) {
+      if (joined.has(id) || housesIn[id] === 0) continue;
+      const previous = new Map<number, number>();
+      const queue: number[] = [];
+      for (let block = 0; block < B; block++) {
+        if (piece[block] !== id) continue;
+        queue.push(block);
+        previous.set(block, -1);
+      }
+      let hit = -1;
+      for (let head = 0; head < queue.length && hit < 0; head++) {
+        const at = queue[head] as number;
+        for (const next of badj[at] as number[]) {
+          if (previous.has(next)) continue;
+          previous.set(next, at);
+          if ((piece[next] as number) >= 0 && joined.has(piece[next] as number)) {
+            hit = next;
+            break;
+          }
+          queue.push(next);
+        }
+      }
+      if (hit < 0) continue;
+      for (let at = previous.get(hit) as number; at >= 0 && piece[at] !== id; at = previous.get(at) as number) {
+        if (!outside[at]) continue;
+        outside[at] = false;
+        connectors++;
+      }
+      joined.add(id);
+    }
+  }
+  const openCountry = outside.filter(Boolean).length;
+
   const bank: number[] = blocks.map(() => -1);
   let banks = 0;
   for (let start = 0; start < B; start++) {
-    if ((bank[start] as number) >= 0) continue;
+    if ((bank[start] as number) >= 0 || outside[start]) continue;
     const stack = [start];
     bank[start] = banks;
     while (stack.length > 0) {
       const at = stack.pop() as number;
       for (const next of badj[at] as number[]) {
-        if ((bank[next] as number) >= 0 || across.has(`${at}:${next}`)) continue;
+        if ((bank[next] as number) >= 0 || outside[next] || across.has(`${at}:${next}`)) continue;
         bank[next] = banks;
         stack.push(next);
       }
@@ -192,7 +287,9 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     banks++;
   }
   const cap: number[] = new Array<number>(banks).fill(0);
-  keptB.forEach((value, block) => (cap[bank[block] as number] = (cap[bank[block] as number] as number) + value));
+  keptB.forEach((value, block) => {
+    if ((bank[block] as number) >= 0) cap[bank[block] as number] = (cap[bank[block] as number] as number) + value;
+  });
   const taken = new Set<number>();
   /** The free block with kept houses nearest a point, on the bank given or any. */
   const nearestKept = (from: Point, onBank: number | undefined): number => {
@@ -337,7 +434,7 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     }
   }
 
-  // ---- 3. Grow in turns ----------------------------------------------------------------------------------------
+  // ---- 3. Cells, or growth in turns ----------------------------------------------------------------------------
   const U = units.length;
   const UT = units.map((unit) => unit.target);
   const g: Array<number | undefined> = blocks.map(() => undefined);
@@ -381,9 +478,10 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     for (const block of unit.heads ?? []) if (g[block] === at) reach(at, block);
     for (const block of marks[at] as number[]) reach(at, block);
   });
+  if (method === 'cells') cells();
   const stopped: boolean[] = units.map(() => false);
   const furthestBelow = (a: number, b: number) => (hv[a] as number) / (UT[a] as number) - (hv[b] as number) / (UT[b] as number);
-  for (;;) {
+  while (method !== 'cells') {
     const turn = [...Array(U).keys()].filter((at) => !stopped[at] && (hv[at] as number) < (UT[at] as number)).sort(furthestBelow);
     if (turn.length === 0) break;
     let claimed = false;
@@ -416,6 +514,113 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
       break;
     }
     if (!claimed) break;
+  }
+  /**
+   * Each bank cut into cells, one per unit: a block goes to the unit for which its squared distance from the unit's
+   * centre less the unit's weight is least, and the weights are moved toward each unit's count.
+   */
+  function cells() {
+    const centre: Point[] = units.map((unit) => [...(blockMiddle[unit.seed] as Point)] as Point);
+    // A unit's centre is its seed's with its own landmarks' blocks on its bank; a unit on a bridgehead keeps that.
+    const sums = units.map((_, at) => [(centre[at] as Point)[0], (centre[at] as Point)[1], 1] as [number, number, number]);
+    for (const landmark of landmarks) {
+      if (landmark.district === undefined || landmark.block === undefined || landmark.block >= B || (bank[landmark.block] as number) < 0) continue;
+      const block = landmark.block;
+      const at = units.findIndex((unit) => unit.district === landmark.district && bank[unit.seed] === bank[block] && !unit.heads);
+      if (at < 0) continue;
+      const sum = sums[at] as [number, number, number];
+      sum[0] += (blockMiddle[block] as Point)[0];
+      sum[1] += (blockMiddle[block] as Point)[1];
+      sum[2]++;
+    }
+    sums.forEach((sum, at) => (centre[at] = [sum[0] / sum[2], sum[1] / sum[2]]));
+    const weight: number[] = units.map(() => 0);
+    for (let onBank = 0; onBank < banks; onBank++) {
+      const here = [...Array(U).keys()].filter((at) => bank[(units[at] as DistrictUnit).seed] === onBank);
+      const ground = blocks.flatMap((_, block) => (bank[block] === onBank ? [block] : []));
+      if (here.length === 0 || ground.length === 0) continue;
+      const mx = ground.reduce((sum, block) => sum + (blockMiddle[block] as Point)[0], 0) / ground.length;
+      const my = ground.reduce((sum, block) => sum + (blockMiddle[block] as Point)[1], 0) / ground.length;
+      const spread = ground.reduce((sum, block) => sum + ((blockMiddle[block] as Point)[0] - mx) ** 2 + ((blockMiddle[block] as Point)[1] - my) ** 2, 0) / ground.length;
+      const scale = spread / Math.max(1, cap[onBank] as number);
+      const cell = new Map<number, number>();
+      let bestMiss = Infinity;
+      let best = new Map<number, number>();
+      for (let round = 0; round < rules.cellRounds; round++) {
+        const held = new Map<number, number>(here.map((at) => [at, 0]));
+        for (const block of ground) {
+          let owner = -1;
+          let least = Infinity;
+          for (const at of here) {
+            const value = ((blockMiddle[block] as Point)[0] - (centre[at] as Point)[0]) ** 2 + ((blockMiddle[block] as Point)[1] - (centre[at] as Point)[1]) ** 2 - (weight[at] as number);
+            if (value < least) {
+              least = value;
+              owner = at;
+            }
+          }
+          cell.set(block, owner);
+          held.set(owner, (held.get(owner) as number) + (keptB[block] as number));
+        }
+        const miss = here.reduce((sum, at) => sum + Math.abs((held.get(at) as number) - (UT[at] as number)), 0);
+        if (miss < bestMiss) {
+          bestMiss = miss;
+          best = new Map(cell);
+        }
+        if (miss <= here.length) break;
+        const step = round < rules.cellStepRounds ? rules.cellStep : rules.cellStepLate;
+        for (const at of here) weight[at] = (weight[at] as number) + step * scale * ((UT[at] as number) - (held.get(at) as number));
+      }
+      for (const block of ground) g[block] = best.get(block);
+    }
+    units.forEach((unit, at) => {
+      for (const head of unit.heads ?? []) g[head] = at;
+    });
+    // A unit cut in pieces keeps the piece with its bridgehead, or else the one with most houses; the rest is let go.
+    // Its seed is then its housed block nearest its centre.
+    for (let at = 0; at < U; at++) {
+      const unit = units[at] as DistrictUnit;
+      const mine = blocks.flatMap((_, block) => (g[block] === at ? [block] : []));
+      const seen = new Set<number>();
+      let keep: number[] = [];
+      let keepScore = -1;
+      for (const start of mine) {
+        if (seen.has(start)) continue;
+        const piece = [start];
+        seen.add(start);
+        let count = 0;
+        let head = false;
+        for (let i = 0; i < piece.length; i++) {
+          const block = piece[i] as number;
+          count += keptB[block] as number;
+          if ((unit.heads ?? []).includes(block)) head = true;
+          for (const next of badj[block] as number[]) {
+            if (g[next] !== at || bank[next] !== bank[block] || seen.has(next)) continue;
+            seen.add(next);
+            piece.push(next);
+          }
+        }
+        const score = head ? Number.MAX_SAFE_INTEGER / 2 + count : count;
+        if (score > keepScore) {
+          keepScore = score;
+          keep = piece;
+        }
+      }
+      const kept = new Set(keep);
+      for (const block of mine) if (!kept.has(block)) g[block] = undefined;
+      let seed = -1;
+      let least = Infinity;
+      for (const block of keep) {
+        if ((keptB[block] as number) === 0) continue;
+        const away = ((blockMiddle[block] as Point)[0] - (centre[at] as Point)[0]) ** 2 + ((blockMiddle[block] as Point)[1] - (centre[at] as Point)[1]) ** 2;
+        if (away < least) {
+          least = away;
+          seed = block;
+        }
+      }
+      if (seed >= 0 && !unit.heads) unit.seed = seed;
+    }
+    hv.fill(0);
+    for (let block = 0; block < B; block++) if (g[block] !== undefined) hv[g[block] as number] = (hv[g[block] as number] as number) + (keptB[block] as number);
   }
   // Blocks left over join the touching unit on their bank with the smallest surplus.
   const fillIn = () => {
@@ -696,7 +901,9 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     unclaimed,
     claimed,
     released,
-    withoutLandmarks: false,
+    method,
+    openCountry,
+    connectors,
     landmarksOutside: 0,
   };
 }

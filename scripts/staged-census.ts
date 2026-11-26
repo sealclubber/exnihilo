@@ -72,9 +72,9 @@ lomiaWorld().settlements.forEach((brief, index) => {
       towns.islands += drawn.islands;
       towns.landmarks += plan.landmarks.filter((landmark) => landmark.district !== undefined && landmark.block !== undefined).length;
       towns.landmarksOutside += drawn.landmarksOutside;
-      if (drawn.withoutLandmarks) {
+      if (drawn.method !== 'cells') {
         towns.redrawn++;
-        redrawn.push(brief.name);
+        redrawn.push(`${brief.name} (${drawn.method})`);
       }
       towns.moreGround += plan.moreGround;
     }
@@ -103,6 +103,6 @@ console.log(`  not exact after the districts stage: ${towns.notExact}, ${towns.l
 console.log(`  houses out after the chains, before single houses: ${towns.offAfterChains} (${share(towns.offAfterChains, towns.houses)})`);
 console.log(`  shared blocks: ${towns.lent} (${share(towns.lent, towns.blocks)}); districts spanning a river: ${towns.spans}; islands: ${towns.islands} houses`);
 console.log(`  landmarks whose block ended in another district: ${towns.landmarksOutside} of ${towns.landmarks} (${share(towns.landmarksOutside, towns.landmarks)})`);
-console.log(`  drawn again without the landmarks: ${towns.redrawn}${redrawn.length > 0 ? ` (${redrawn.join(', ')})` : ''}; took more ground: ${towns.moreGround}`);
+console.log(`  not exact with cells, so drawn again by growth: ${towns.redrawn}${redrawn.length > 0 ? ` (${redrawn.join(', ')})` : ''}; took more ground: ${towns.moreGround}`);
 console.log(`Generating the layouts took ${(generating / 1000).toFixed(0)} s`);
 if (listTowns) for (const line of failing) console.log(line);

@@ -79,11 +79,11 @@ for (const brief of towns) {
   sum.landmarksOutside += drawn.landmarksOutside;
   sum.claimed += drawn.claimed;
   sum.released += drawn.released;
-  if (drawn.withoutLandmarks) {
+  if (drawn.method !== 'cells') {
     sum.redrawn++;
-    redrawn.push(brief.name);
+    redrawn.push(`${brief.name} (${drawn.method})`);
   }
-  const line = { houses: total, districts: plan.districts.length, blocks: plan.blocks.length, inPieces: drawn.inPieces, offAfterChains: drawn.offAfterChains, unrounded, off: drawn.off, lentBlocks: drawn.lent.size, lentHouses, spans: drawn.spans, islands: drawn.islands, reseeded: drawn.reseeded, relocated: drawn.relocated, chainMoves: drawn.chainMoves, landmarksOutside: drawn.landmarksOutside, claimed: drawn.claimed, released: drawn.released, withoutLandmarks: drawn.withoutLandmarks };
+  const line = { houses: total, districts: plan.districts.length, blocks: plan.blocks.length, inPieces: drawn.inPieces, offAfterChains: drawn.offAfterChains, unrounded, off: drawn.off, lentBlocks: drawn.lent.size, lentHouses, spans: drawn.spans, islands: drawn.islands, reseeded: drawn.reseeded, relocated: drawn.relocated, chainMoves: drawn.chainMoves, landmarksOutside: drawn.landmarksOutside, claimed: drawn.claimed, released: drawn.released, method: drawn.method, openCountry: drawn.openCountry, connectors: drawn.connectors };
   out[brief.name] = line;
   if (only) console.log(brief.name, JSON.stringify(line));
 }
@@ -96,6 +96,6 @@ console.log(`Shared blocks: ${sum.lentBlocks} (${share(sum.lentBlocks, sum.block
 console.log(`Districts spanning a river: ${sum.spans}`);
 console.log(`Islands: ${sum.islands} houses; unclaimed: ${sum.unclaimed}; re-seeded for want of a bridge: ${sum.reseeded}; moved across whole: ${sum.relocated}`);
 console.log(`Landmarks outside their district's ground: ${sum.landmarksOutside} of ${sum.landmarks} block landmarks (${share(sum.landmarksOutside, sum.landmarks)}); ${sum.claimed} claimed, ${sum.released} blocks let go`);
-console.log(`Towns not exact with the landmarks leading, so drawn again without: ${sum.redrawn}${redrawn.length > 0 ? ` (${redrawn.join(', ')})` : ''}`);
+console.log(`Towns not exact with cells, so drawn again by growth: ${sum.redrawn}${redrawn.length > 0 ? ` (${redrawn.join(', ')})` : ''}`);
 const file = option('--out');
 if (file) writeFileSync(file, JSON.stringify(out, null, 1));

@@ -613,7 +613,7 @@ function pointAt(line: readonly Point[], along: number): Point {
 
 /**
  * Each district's ground: the tiles of the blocks it was drawn over (`districting.ts`), and the plaza's and the
- * castle's for the district of the landmark there. A block that lends houses to a neighbour stays its owner's
+ * castle's for the district holding most of the blocks beside each. A block that lends houses to a neighbour stays its owner's
  * ground, so those lots stand in a neighbour's ground, as does a landmark whose block ended in another district's;
  * the census counts them. The tiles of one district are let overlap a
  * little, which joins them; those of different districts keep a finger's breadth apart, so that no ground is
@@ -624,20 +624,18 @@ function districtGround(plan: TownPlan, city: City, lots: readonly Lot[]): { are
   const blocks = plan.blocks.length;
   const specials = plan.wards.map((ward, index) => ({ ward, index })).filter(({ ward }) => ward.kind !== 'ordinary');
   const idOf = (of: number | undefined) => (of === undefined ? undefined : plan.districts[of]?.id);
-  const owner: Array<string | undefined> = plan.tiles.map((_, tile) =>
-    idOf(tile < blocks ? plan.drawn.blockDistrict[tile] : plan.landmarks.find((landmark) => landmark.block === undefined && blocks + specials.findIndex(({ index }) => index === landmark.ward) === tile)?.district),
-  );
-  // A block no district reached goes, for its ground, to the district of most of the blocks about it.
-  for (let tile = 0; tile < blocks; tile++) {
-    if (owner[tile] !== undefined) continue;
-    const counts = new Map<string, number>();
+  // The plaza's and the castle's ground goes to the district holding most of the blocks beside it, whatever district
+  // the landmark there belongs to.
+  const besideMost = (tile: number) => {
+    const counts = new Map<number, number>();
     for (const other of plan.tilesBeside[tile] ?? []) {
-      const of = other < blocks ? idOf(plan.drawn.blockDistrict[other]) : undefined;
+      const of = other < blocks ? plan.drawn.blockDistrict[other] : undefined;
       if (of !== undefined) counts.set(of, (counts.get(of) ?? 0) + 1);
     }
-    const best = [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
-    if (best) owner[tile] = best[0];
-  }
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
+  };
+  const owner: Array<string | undefined> = plan.tiles.map((_, tile) => idOf(tile < blocks ? plan.drawn.blockDistrict[tile] : besideMost(tile)));
+  // A block no district holds, open country among them, is nobody's ground and is not drawn.
   /** Each tile with the district it belongs to. */
   const entries: Array<{ tile: number; district: string; rings: Point[][]; holes: Point[][] }> = [];
   plan.tiles.forEach((rings, tile) => {
