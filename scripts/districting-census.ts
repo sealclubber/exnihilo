@@ -8,6 +8,7 @@
  *   --towns      only the towns named, each with a line of its own
  *   --every      every nth town
  *   --out        write each town's figures to a JSON file
+ *   --plain      without the landmarks leading the ground
  */
 import { writeFileSync } from 'node:fs';
 import { generateCity } from '../packages/core/src/index.ts';
@@ -20,14 +21,16 @@ const option = (name: string) => (args.includes(name) ? args[args.indexOf(name) 
 const generatorTargets = args.includes('--generator');
 const only = option('--towns')?.split(',');
 const every = Number(option('--every') ?? 1);
+const plain = args.includes('--plain');
 const pack = medievalPack();
 const rules = stagedSettings(pack).districts.drawn;
 if (!rules) throw new Error('the pack has no layout.staged.districts.drawn');
 
 const all = lomiaWorld().settlements.filter((brief) => brief.population >= 1000);
 const towns = only ? all.filter((brief) => only.includes(brief.name)) : all.filter((_, index) => index % every === 0);
-const sum = { towns: 0, houses: 0, districts: 0, blocks: 0, inPieces: 0, notExact: 0, offExact: 0, offAfterChains: 0, offAfterChainsUnrounded: 0, lentBlocks: 0, lentHouses: 0, spans: 0, islands: 0, unclaimed: 0, reseeded: 0, relocated: 0 };
+const sum = { towns: 0, houses: 0, districts: 0, blocks: 0, inPieces: 0, notExact: 0, offExact: 0, offAfterChains: 0, offAfterChainsUnrounded: 0, lentBlocks: 0, lentHouses: 0, spans: 0, islands: 0, unclaimed: 0, reseeded: 0, relocated: 0, landmarks: 0, landmarksOutside: 0, redrawn: 0, claimed: 0, released: 0 };
 const notExact: string[] = [];
+const redrawn: string[] = [];
 const out: Record<string, unknown> = {};
 const started = Date.now();
 for (const brief of towns) {
@@ -47,7 +50,7 @@ for (const brief of towns) {
     const all = plan.districts.reduce((count, district) => count + district.buildings, 0);
     targets = plan.districts.map((district) => (district.buildings * total) / all);
   }
-  const drawn = drawDistricts({ rules, blocks: plan.blocks, wards: plan.wards, houses: plan.houses, kept, tilesBeside: plan.tilesBeside, links: plan.links, seeds: plan.forecast.seeds, targets });
+  const drawn = drawDistricts({ rules, blocks: plan.blocks, wards: plan.wards, houses: plan.houses, kept, tilesBeside: plan.tilesBeside, links: plan.links, seeds: plan.forecast.seeds, targets, ...(!plain && { landmarks: plan.landmarks }) });
   const lentHouses = [...drawn.lent.values()].reduce((count, entry) => count + entry.houses, 0);
   sum.towns++;
   sum.houses += total;
@@ -72,7 +75,15 @@ for (const brief of towns) {
   sum.unclaimed += drawn.unclaimed;
   sum.reseeded += drawn.reseeded;
   sum.relocated += drawn.relocated;
-  const line = { houses: total, districts: plan.districts.length, blocks: plan.blocks.length, inPieces: drawn.inPieces, offAfterChains: drawn.offAfterChains, unrounded, off: drawn.off, lentBlocks: drawn.lent.size, lentHouses, spans: drawn.spans, islands: drawn.islands, reseeded: drawn.reseeded, relocated: drawn.relocated, chainMoves: drawn.chainMoves };
+  sum.landmarks += plan.landmarks.filter((landmark) => landmark.district !== undefined && landmark.block !== undefined).length;
+  sum.landmarksOutside += drawn.landmarksOutside;
+  sum.claimed += drawn.claimed;
+  sum.released += drawn.released;
+  if (drawn.withoutLandmarks) {
+    sum.redrawn++;
+    redrawn.push(brief.name);
+  }
+  const line = { houses: total, districts: plan.districts.length, blocks: plan.blocks.length, inPieces: drawn.inPieces, offAfterChains: drawn.offAfterChains, unrounded, off: drawn.off, lentBlocks: drawn.lent.size, lentHouses, spans: drawn.spans, islands: drawn.islands, reseeded: drawn.reseeded, relocated: drawn.relocated, chainMoves: drawn.chainMoves, landmarksOutside: drawn.landmarksOutside, claimed: drawn.claimed, released: drawn.released, withoutLandmarks: drawn.withoutLandmarks };
   out[brief.name] = line;
   if (only) console.log(brief.name, JSON.stringify(line));
 }
@@ -84,5 +95,7 @@ console.log(`Houses out after step 4, before step 5: ${sum.offAfterChains} (${sh
 console.log(`Shared blocks: ${sum.lentBlocks} (${share(sum.lentBlocks, sum.blocks)} of blocks), ${sum.lentHouses} houses lent`);
 console.log(`Districts spanning a river: ${sum.spans}`);
 console.log(`Islands: ${sum.islands} houses; unclaimed: ${sum.unclaimed}; re-seeded for want of a bridge: ${sum.reseeded}; moved across whole: ${sum.relocated}`);
+console.log(`Landmarks outside their district's ground: ${sum.landmarksOutside} of ${sum.landmarks} block landmarks (${share(sum.landmarksOutside, sum.landmarks)}); ${sum.claimed} claimed, ${sum.released} blocks let go`);
+console.log(`Towns not exact with the landmarks leading, so drawn again without: ${sum.redrawn}${redrawn.length > 0 ? ` (${redrawn.join(', ')})` : ''}`);
 const file = option('--out');
 if (file) writeFileSync(file, JSON.stringify(out, null, 1));

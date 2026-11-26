@@ -676,7 +676,8 @@ const StagedSettingsSchema = z.strictObject({
      * most `fills` passes. A district short by `chainAt` or more is passed blocks along a chain of neighbours from
      * one with that surplus: a block holding at most `chainOver` more houses than wanted, the `chainTries`
      * largest tried, in at most `chainSteps` steps; then single houses make the counts exact, in at most
-     * `exactSteps`. Left out, the districts are the forecast's, repaired by selection.
+     * `exactSteps`. Each district first claims its own landmarks' blocks and grows toward them, a block's way from a
+     * landmark counting its own and `landmarkPull` times the landmark's way from the seed. Left out, the districts are the forecast's, repaired by selection.
      */
     drawn: z
       .strictObject({
@@ -690,6 +691,7 @@ const StagedSettingsSchema = z.strictObject({
         chainTries: wholeNumber.min(1),
         chainSteps: wholeNumber,
         exactSteps: wholeNumber,
+        landmarkPull: z.number().nonnegative(),
       })
       .optional(),
   }),

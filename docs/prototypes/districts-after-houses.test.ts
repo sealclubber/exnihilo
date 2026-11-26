@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { generateCity } from '../src/index.ts';
 import { planTown, townInput } from '../src/layout/staged/plan.ts';
 import { medievalPack, lomiaWorld } from './pack.ts';
-
+ 
 function components(nodes: number[], adj: (n: number) => number[]): number {
   const set = new Set(nodes); let c = 0;
   while (set.size) { c++; const st = [set.values().next().value as number]; set.delete(st[0]!); while (st.length) { const n = st.pop()!; for (const m of adj(n)) if (set.has(m)) { set.delete(m); st.push(m); } } }
@@ -109,14 +109,16 @@ test('districts after houses', () => {
     const g: Array<number | undefined> = new Array(B).fill(undefined); const hv = new Array(U).fill(0);
     units.forEach((u, i) => { g[u.seed] = i; hv[i] += keptB[u.seed]; });
     units.forEach((u, i) => { for (const k of u.extra ?? []) if (g[k] === undefined) { g[k] = i; hv[i] += keptB[k]; } });
+    const LM = process.env.LM ?? '0'; const lmOf: number[][] = uo.map(() => []); let preclaimed = 0;
+    if (LM !== '0') for (const l of plan.landmarks) { if (l.district === undefined || l.block === undefined || l.block >= B) continue; const k = l.block as number; const cs = uo.filter((i) => units[i]!.d === l.district && bank[units[i]!.seed] === bank[k]); if (!cs.length) continue; const i = cs[0]!; if (g[k] === undefined) { g[k] = i; hv[i] += keptB[k]; } if (g[k] === i && !lmOf[i]!.includes(k)) { lmOf[i]!.push(k); preclaimed++; } }
     const front: Array<Set<number>> = uo.map(() => new Set<number>());
     const addFront = (i: number, k: number) => { for (const m of badj[k]!) if (g[m] === undefined && bank[m] === bank[units[i]!.seed]) front[i]!.add(m); };
-    uo.forEach((i) => { addFront(i, units[i]!.seed); for (const k of units[i]!.extra ?? []) if (g[k] === i) addFront(i, k); });
+    uo.forEach((i) => { addFront(i, units[i]!.seed); for (const k of units[i]!.extra ?? []) if (g[k] === i) addFront(i, k); for (const k of lmOf[i]!) addFront(i, k); });
     const stop = new Array(U).fill(false);
     for (let guard = 0; guard < B * 3; guard++) {
       const pri = (i: number) => hv[i] / UT[i]; // tried and rejected: letting bridgehead parts grow first (it walls in their neighbours)
       const cands = uo.filter((i) => !stop[i] && hv[i] < UT[i]).sort((x, y) => pri(x) - pri(y)); if (!cands.length) break; let done = false;
-      for (const i of cands) { let best = -1, bs = 1e18; for (const k of front[i]!) { if (g[k] !== undefined) { front[i]!.delete(k); continue; } const sc = Math.hypot(bcen[k][0] - bcen[units[i]!.seed][0], bcen[k][1] - bcen[units[i]!.seed][1]); if (sc < bs) { bs = sc; best = k; } }
+      for (const i of cands) { let best = -1, bs = 1e18; for (const k of front[i]!) { if (g[k] !== undefined) { front[i]!.delete(k); continue; } let sc = Math.hypot(bcen[k][0] - bcen[units[i]!.seed][0], bcen[k][1] - bcen[units[i]!.seed][1]); if (LM === '2') for (const q of lmOf[i]!) sc = Math.min(sc, Math.hypot(bcen[k][0] - bcen[q][0], bcen[k][1] - bcen[q][1]) + Math.hypot(bcen[q][0] - bcen[units[i]!.seed][0], bcen[q][1] - bcen[units[i]!.seed][1]) * 0.5); if (sc < bs) { bs = sc; best = k; } }
         if (best < 0) { stop[i] = true; continue; } g[best] = i; hv[i] += keptB[best]; front[i]!.delete(best); addFront(i, best); done = true; break; }
       if (!done) break;
     }
@@ -124,6 +126,11 @@ test('districts after houses', () => {
     // houses on a bank no district lives on (no bridge): they join the nearest district as an island
     let islands = 0; const islandD = new Set<number>();
     for (let k = 0; k < B; k++) if (g[k] === undefined && keptB[k] > 0) { let best = -1, bs = 1e18; units.forEach((u, i) => { const dd = Math.hypot(bcen[k][0] - bcen[u.seed][0], bcen[k][1] - bcen[u.seed][1]); if (dd < bs) { bs = dd; best = i; } }); if (best >= 0) { g[k] = best; hv[best] += keptB[k]; islands += keptB[k]; islandD.add(units[best]!.d); } }
+    let released = 0;
+    if (LM !== '0') { for (const i of uo) { const seen = new Set<number>([units[i]!.seed]); const st = [units[i]!.seed]; for (const e of units[i]!.extra ?? []) if (g[e] === i && !seen.has(e)) { seen.add(e); st.push(e); }
+        while (st.length) { const x = st.pop()!; for (const m of badj[x]!) if (g[m] === i && bank[m] === bank[x] && !seen.has(m)) { seen.add(m); st.push(m); } }
+        for (let k = 0; k < B; k++) if (g[k] === i && !seen.has(k)) { g[k] = undefined; hv[i] -= keptB[k]; released++; lmOf[i] = lmOf[i]!.filter((x) => x !== k); } }
+      for (let pass = 0; pass < 80; pass++) { let any = false; for (let k = 0; k < B; k++) if (g[k] === undefined) { let best = -1, bs = 1e18; for (const m of badj[k]!) { const i = g[m]; if (i !== undefined && bank[m] === bank[k] && hv[i] - UT[i] < bs) { bs = hv[i] - UT[i]; best = i; } } if (best >= 0) { g[k] = best; hv[best] += keptB[k]; any = true; } } if (!any) break; } }
     const left2 = keptB.reduce((a: number, v: number, k: number) => a + (g[k] === undefined ? v : 0), 0);
     const distHave = () => { const h = new Array(D).fill(0); units.forEach((u, i) => (h[u.d] += hv[i])); return h; };
     const imbGrow = imb(distHave());
@@ -131,7 +138,7 @@ test('districts after houses', () => {
     const bOf = (i: number) => g.map((x, k) => (x === i ? k : -1)).filter((k) => k >= 0);
     const aIn = (i: number) => (n: number) => badj[n]!.filter((m) => g[m] === i && bank[m] === bank[n]);
     const give = (from: number, to: number, want: number): number => {
-      let cands: number[] = []; for (let k = 0; k < B; k++) if (g[k] === from && keptB[k] > 0 && k !== units[from]!.seed && !(units[from]!.extra ?? []).includes(k) && badj[k]!.some((m) => g[m] === to && bank[m] === bank[k])) cands.push(k);
+      let cands: number[] = []; for (let k = 0; k < B; k++) if (g[k] === from && keptB[k] > 0 && k !== units[from]!.seed && !(units[from]!.extra ?? []).includes(k) && !lmOf[from]!.includes(k) && badj[k]!.some((m) => g[m] === to && bank[m] === bank[k])) cands.push(k);
       cands = cands.filter((k) => keptB[k] <= want + 2).sort((x, y) => keptB[y] - keptB[x]); const before = comps(bOf(from), aIn(from)), beforeTo = comps(bOf(to), aIn(to));
       for (const k of cands.slice(0, 12)) { g[k] = to; if (comps(bOf(from), aIn(from)) <= before && comps(bOf(to), aIn(to)) <= beforeTo) { hv[from] -= keptB[k]; hv[to] += keptB[k]; return keptB[k]; } g[k] = from; }
       return 0; };
@@ -178,10 +185,9 @@ test('districts after houses', () => {
     }
     const offAfter = Math.round(hX.reduce((a, v, d) => a + Math.abs(v - IT[d]), 0) / 2);
     const stranded2 = plan.landmarks.filter((l: any) => l.district !== undefined && l.block !== undefined && dOfBlock[l.block] !== l.district).length;
-    const v2 = { dbg, reseeded, islands, piecesNotIsland: order.filter((d) => dPieces[d] > 1 && !islandD.has(d)).length, piecedKinds: order.filter((d) => dPieces[d] > 1).map((d) => plan.districts[d].kind + ':' + dPieces[d]), offBefore, offAfter, sharedBlocks: shared.size, sharedHouses, banks: cap.filter((c) => c > 0), spans, relocated, afterGrowthByBlock: imbGrow, afterChains: imb(hD), chainMoves, unclaimed: left2, pieces: dPieces.filter((p) => p > 1).length, maxOff: Math.max(...order.map((d) => Math.abs(hD[d] - T[d]))), worst: order.map((d) => [plan.districts[d].kind, Math.round(T[d]), hD[d], dPieces[d]]).sort((x: any, y: any) => Math.abs(y[2] - y[1]) - Math.abs(x[2] - x[1])).slice(0, 3), landmarksElsewhere: stranded2 };
+    const v2 = { preclaimed, released, lmBlocks: plan.landmarks.filter((l: any) => l.district !== undefined && l.block !== undefined).length, reseeded, islands, piecesNotIsland: order.filter((d) => dPieces[d] > 1 && !islandD.has(d)).length, piecedKinds: order.filter((d) => dPieces[d] > 1).map((d) => plan.districts[d].kind + ':' + dPieces[d]), offBefore, offAfter, sharedBlocks: shared.size, sharedHouses, banks: cap.filter((c) => c > 0), spans, relocated, afterGrowthByBlock: imbGrow, afterChains: imb(hD), chainMoves, unclaimed: left2, pieces: dPieces.filter((p) => p > 1).length, maxOff: Math.max(...order.map((d) => Math.abs(hD[d] - T[d]))), worst: order.map((d) => [plan.districts[d].kind, Math.round(T[d]), hD[d], dPieces[d]]).sort((x: any, y: any) => Math.abs(y[2] - y[1]) - Math.abs(x[2] - x[1])).slice(0, 3), landmarksElsewhere: stranded2 };
     const stranded = plan.landmarks.filter((l: any) => l.district !== undefined && l.block !== undefined && bd[l.block] !== l.district).length;
     out[name] = { buildings: total, districts: D, wards: W, blocks: B, imbalanceToday: imb(haveF), afterHousesByWard: imbWard, afterBlockTrades: imb(haveB), blockMoves: moves, unclaimed, piecesBefore: pieces0.filter((p) => p > 1).length, piecesAfter: pieces1.filter((p) => p > 1).length, worst: order.map((d) => [plan.districts[d].kind, Math.round(T[d]), haveF[d], haveB[d]]).sort((x: any, y: any) => Math.abs(y[3] - y[1]) - Math.abs(x[3] - x[1])).slice(0, 3), landmarks: plan.landmarks.length, landmarksInAnotherDistrict: stranded, oldFallback: plan.selection.fallback, v2 }; console.log(name, total, Date.now() - t0, 'ms', v2.afterChains, v2.offAfter);
   }
   writeFileSync(process.env.OUT ?? '/tmp/r6.json', JSON.stringify(out, null, 1));
 }, 7200000);
-

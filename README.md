@@ -762,13 +762,14 @@ broken and how often the non-touching fallback is used.
 **Districts drawn after houses (phase 6G, in progress; `sim-6g.md`).**
 `staged/districting.ts` draws the districts over the kept houses block by
 block (seed, share among the banks, grow in turns, chains, single houses);
-its numbers are `districts.drawn` in `layout.yaml`. It is not wired in yet.
-`node scripts/districting-census.ts [--generator] [--towns a,b] [--every n]
-[--out file]` runs it beside the generator on every town of 1,000 people or
-more and prints the gameplan's census; `node scripts/landmark-sites.ts
-[every]` counts where block landmarks would stand under the gameplan's
-landmark rule. Landmark sites are reserved by kind (template and place) for
-no district. `FINDINGS-6G.md` has the figures and what is open.
+each district claims its own landmarks' blocks and grows toward them, and a
+town that is not exact so is drawn again without them. Its numbers are
+`districts.drawn` in `layout.yaml`. It is not wired in yet.
+`node scripts/districting-census.ts [--generator] [--plain] [--towns a,b]
+[--every n] [--out file]` runs it beside the generator on every town of
+1,000 people or more and prints the gameplan's census, with landmarks
+outside their district's ground (`--plain`: without the landmarks leading).
+`FINDINGS-6G.md` has the figures and what is open.
 
 **The village generator (phase 6E, Villages).** A settlement under
 `village.below` residents (1,000; 136 of Lomia's 682) is laid out by

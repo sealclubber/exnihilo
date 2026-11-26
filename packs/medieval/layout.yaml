@@ -541,7 +541,11 @@ staged:
   #              wanted, the `chainTries` largest tried, in at most
   #              `chainSteps` steps; then single houses are lent through
   #              border blocks to make the counts exact, in at most
-  #              `exactSteps`.
+  #              `exactSteps`. Before growing, each district claims the
+  #              blocks of its own landmarks and grows toward them too: a
+  #              block's way from a landmark counts in full, the landmark's
+  #              way from the seed `landmarkPull` times. A town that does
+  #              not come out exact is drawn again without them.
   #   inward     a ward's growth rank counts this many times in the order
   #              wards are claimed, so that districts fill the inner ground
   #              first and compete for it.
@@ -559,7 +563,7 @@ staged:
     room: {centre: 1.0, middle: 1.0, waterside: 1.0, edge: 1.0}
     roomDefault: 1.0
     barriers: {highway: 160, mainStreet: 90, river: 350, wall: 220}
-    drawn: {over: 2, whole: 3, nearLeast: 6, rounds: 30, fills: 80, chainAt: 2, chainOver: 2, chainTries: 12, chainSteps: 6000, exactSteps: 4000}
+    drawn: {over: 2, whole: 3, nearLeast: 6, rounds: 30, fills: 80, chainAt: 2, chainOver: 2, chainTries: 12, chainSteps: 6000, exactSteps: 4000, landmarkPull: 0.5}
 
   # Ward character, by the kind of district a ward belongs to. FOR REVIEW:
   # these are placeholders. `scale` multiplies the size of houses and blocks:

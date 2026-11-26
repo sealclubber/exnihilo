@@ -99,6 +99,29 @@ Two earlier steps use districts before the houses exist. Neither was tested in t
 
 ### Landmarks
 
+**Amended Nov 25 after step 3 stopped. This replaces the rule below, which failed: 35% of landmarks needed a site next door, and its second case cannot work.**
+
+Landmark sites stay owned and stay where main puts them, in the owner's forecast wards. Revert step 2 (`efcb18e`). The districts stage then makes ground follow the landmarks:
+
+1. **Claim.** After seeding and bank sharing, before growth, each district claims the blocks holding its own landmark sites, on any bank where it has a unit.
+2. **Grow toward them.** A unit's score for a candidate block is the smaller of its distance to the seed, and its distance to one of the unit's landmark blocks plus half that landmark block's distance to the seed.
+3. **Release.** After growth and the leftover pass, any block of a unit that cannot be reached from its seed or bridgeheads is released, and joins a touching unit as leftovers do. This is what keeps districts in one piece.
+4. **Protect.** In chains, a unit never hands over a block holding its own landmark.
+5. **Fall back.** If a town does not come out exact, run the stage again for that town without steps 1 to 4 and keep that result.
+
+A landmark whose block ends in another district's ground stays on its site and keeps its district. Count it in the census. Nothing is moved, so no house is displaced.
+
+Measured on all 539 towns, on main's site placement, reference `docs/prototypes/districts-after-houses-landmarks.test.ts` run with `LM=2`:
+
+| Measure | Without claims | With claims |
+| --- | --- | --- |
+| Landmarks outside their district's ground | 1,059 of 4,289 (25%) | 414 (9.7%) |
+| Districts in more than one piece | 0 | 0 |
+| Towns not exact, before the fall-back in step 5 | 1 | 4 (Nobla, Meunglain, Tuvaaki, Borfino) |
+| Shared blocks | 1,220 | 1,261 |
+
+Stop and report if landmarks outside their ground exceed 15%, or any district is in pieces.
+
 Today a landmark is tied to a district when its site is reserved. With districts drawn later, 1,059 of 4,397 landmarks (in 342 towns, up to 19 in one) stand on a block that ends in another district.
 
 The change: a site is reserved by kind of slot only (plaza edge, main street, row slot, and so on). After the districts stage, each landmark building takes a free site of the right kind inside its owner's ground, nearest the district's seed.

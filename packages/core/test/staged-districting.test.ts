@@ -85,6 +85,22 @@ describe('the districts stage', () => {
     expect(drawn.blockDistrict[5]).toBe(drawn.blockDistrict[offset + 3]);
   });
 
+  it("claims a district's landmark block and grows toward it", () => {
+    // A row of blocks, four houses in each but the sixth, which holds district 0's landmark. District 0 is seeded
+    // at the right end, district 1 at the left.
+    const town = grid(9, 1, (column) => (column === 5 ? 0 : 4));
+    const input: DistrictingInput = { rules, ...town, links: [], seeds: [8, 0], targets: [12, 20], landmarks: [{ district: 0, block: 5 }] };
+    const drawn = drawDistricts(input);
+    expect(drawn.withoutLandmarks).toBe(false);
+    expect(drawn.blockDistrict[5]).toBe(0);
+    expect(drawn.landmarksOutside).toBe(0);
+    expect(drawn.inPieces).toBe(0);
+    expect(housesBy(input, drawn)).toEqual([12, 20]);
+    // Without the claim, the empty block is left over and joins the other district.
+    const plain = drawDistricts({ ...input, landmarks: [] });
+    expect(plain.blockDistrict[5]).toBe(1);
+  });
+
   it('gives the same districts for the same input', () => {
     const town = grid(5, 4, (column, row) => (column + row) % 3);
     const input: DistrictingInput = { rules, ...town, links: [], seeds: [0, 19], targets: [town.kept.length - 7, 7] };
@@ -92,12 +108,16 @@ describe('the districts stage', () => {
   });
 
   // The regression towns of sim-6g.md, beside the current pipeline, with the reference's targets (each district's
-  // buildings scaled to the kept total). On main at 1ebf85f these were the reference's own figures (Borfino 26
-  // short); since landmark sites are reserved for no district (phase 6G step 2) the kept houses differ a little.
+  // buildings scaled to the kept total): without landmarks each figure is the reference's own on main at 1ebf85f.
   const expected: Record<string, { offAfterChains: number; off: number; lent: number; spans: number; reseeded: number }> = {
-    Karlen: { offAfterChains: 4, off: 0, lent: 4, spans: 1, reseeded: 0 },
-    Haurinen: { offAfterChains: 3, off: 0, lent: 5, spans: 2, reseeded: 1 },
-    Borfino: { offAfterChains: 46, off: 0, lent: 40, spans: 1, reseeded: 0 },
+    Karlen: { offAfterChains: 5, off: 0, lent: 4, spans: 1, reseeded: 0 },
+    Haurinen: { offAfterChains: 4, off: 0, lent: 7, spans: 2, reseeded: 1 },
+    Borfino: { offAfterChains: 73, off: 26, lent: 29, spans: 1, reseeded: 0 },
+  };
+  const withLandmarks: Record<string, { outside: number; again: boolean; off: number; inPieces: number }> = {
+    Karlen: { outside: 2, again: false, off: 0, inPieces: 0 },
+    Haurinen: { outside: 1, again: false, off: 0, inPieces: 0 },
+    Borfino: { outside: 10, again: true, off: 26, inPieces: 0 },
   };
   for (const [name, want] of Object.entries(expected)) {
     it(`gives ${name} its pinned figures`, () => {
@@ -111,6 +131,9 @@ describe('the districts stage', () => {
       expect({ offAfterChains: drawn.offAfterChains, off: drawn.off, lent: drawn.lent.size, spans: drawn.spans, reseeded: drawn.reseeded }).toEqual(want);
       expect(drawn.inPieces).toBe(0);
       expect(drawn.islands).toBe(0);
+      // With the landmarks leading the ground, as the generator draws it (Borfino is not exact so, and is drawn again without).
+      const led = drawDistricts({ rules, blocks: plan.blocks, wards: plan.wards, houses: plan.houses, kept, tilesBeside: plan.tilesBeside, links: plan.links, seeds: plan.forecast.seeds, targets: plan.districts.map((district) => (district.buildings * kept.length) / all), landmarks: plan.landmarks });
+      expect({ outside: led.landmarksOutside, again: led.withoutLandmarks, off: led.off, inPieces: led.inPieces }).toEqual(withLandmarks[name]);
     });
   }
 });
