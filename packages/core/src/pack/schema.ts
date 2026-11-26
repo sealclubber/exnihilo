@@ -667,6 +667,31 @@ const StagedSettingsSchema = z.strictObject({
      * the districts selection settles at the borders. Left out, selection's.
      */
     afterSelection: z.boolean().optional(),
+    /**
+     * Districts drawn over the kept houses, block by block (phase 6G, `staged/districting.ts`). Each district is
+     * seeded at a block and shared among the banks: while a bank's districts want more than `over` houses beyond
+     * what it holds, one crosses a bridge, whole if its count is within `whole` of what must move, else split,
+     * and a district already crossing carries more unless that would leave under `nearLeast` houses on the near
+     * bank; at most `rounds` times. The districts then grow in turns, and blocks left over join a neighbour, in at
+     * most `fills` passes. A district short by `chainAt` or more is passed blocks along a chain of neighbours from
+     * one with that surplus: a block holding at most `chainOver` more houses than wanted, the `chainTries`
+     * largest tried, in at most `chainSteps` steps; then single houses make the counts exact, in at most
+     * `exactSteps`. Left out, the districts are the forecast's, repaired by selection.
+     */
+    drawn: z
+      .strictObject({
+        over: wholeNumber,
+        whole: wholeNumber,
+        nearLeast: wholeNumber,
+        rounds: wholeNumber,
+        fills: wholeNumber,
+        chainAt: wholeNumber.min(1),
+        chainOver: wholeNumber,
+        chainTries: wholeNumber.min(1),
+        chainSteps: wholeNumber,
+        exactSteps: wholeNumber,
+      })
+      .optional(),
   }),
   /**
    * Ward character, by the kind of district a ward belongs to: `scale` multiplies the size of its houses and

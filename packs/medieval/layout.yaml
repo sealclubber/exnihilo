@@ -525,6 +525,23 @@ staged:
   #              blocks after selection, bank by bank, with the same costs
   #              (phase 6F, Part B), in place of the districts selection
   #              settles at the borders. Left out, selection's.
+  #   drawn      optional (phase 6G): the districts are drawn over the
+  #              kept houses block by block, after selection, instead of
+  #              being the forecast's and repaired. Each district is seeded
+  #              at a block and the districts are shared among the river's
+  #              banks: while a bank's districts want more than `over`
+  #              houses beyond what it holds, one crosses a bridge, whole if
+  #              its count is within `whole` of what must move, else split;
+  #              one already crossing carries more unless that leaves under
+  #              `nearLeast` houses behind; at most `rounds` times. They grow
+  #              in turns; blocks left over join a neighbour, in at most
+  #              `fills` passes. A district `chainAt` or more short is
+  #              passed blocks along a chain of neighbours from one with that
+  #              surplus: a block with at most `chainOver` more houses than
+  #              wanted, the `chainTries` largest tried, in at most
+  #              `chainSteps` steps; then single houses are lent through
+  #              border blocks to make the counts exact, in at most
+  #              `exactSteps`.
   #   inward     a ward's growth rank counts this many times in the order
   #              wards are claimed, so that districts fill the inner ground
   #              first and compete for it.
@@ -542,6 +559,7 @@ staged:
     room: {centre: 1.0, middle: 1.0, waterside: 1.0, edge: 1.0}
     roomDefault: 1.0
     barriers: {highway: 160, mainStreet: 90, river: 350, wall: 220}
+    drawn: {over: 2, whole: 3, nearLeast: 6, rounds: 30, fills: 80, chainAt: 2, chainOver: 2, chainTries: 12, chainSteps: 6000, exactSteps: 4000}
 
   # Ward character, by the kind of district a ward belongs to. FOR REVIEW:
   # these are placeholders. `scale` multiplies the size of houses and blocks:
