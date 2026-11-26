@@ -92,14 +92,15 @@ describe('the districts stage', () => {
   });
 
   // The regression towns of sim-6g.md, beside the current pipeline, with the reference's targets (each district's
-  // buildings scaled to the kept total): each figure is the reference's own.
+  // buildings scaled to the kept total). On main at 1ebf85f these were the reference's own figures (Borfino 26
+  // short); since landmark sites are reserved for no district (phase 6G step 2) the kept houses differ a little.
   const expected: Record<string, { offAfterChains: number; off: number; lent: number; spans: number; reseeded: number }> = {
-    Karlen: { offAfterChains: 5, off: 0, lent: 4, spans: 1, reseeded: 0 },
-    Haurinen: { offAfterChains: 4, off: 0, lent: 7, spans: 2, reseeded: 1 },
-    Borfino: { offAfterChains: 73, off: 26, lent: 29, spans: 1, reseeded: 0 },
+    Karlen: { offAfterChains: 4, off: 0, lent: 4, spans: 1, reseeded: 0 },
+    Haurinen: { offAfterChains: 3, off: 0, lent: 5, spans: 2, reseeded: 1 },
+    Borfino: { offAfterChains: 46, off: 0, lent: 40, spans: 1, reseeded: 0 },
   };
   for (const [name, want] of Object.entries(expected)) {
-    it(`gives ${name} the reference's figures`, () => {
+    it(`gives ${name} its pinned figures`, () => {
       const pack = medievalPack();
       const brief = lomiaWorld().settlements.find((settlement) => settlement.name === name);
       if (!brief) throw new Error(`no settlement ${name}`);
