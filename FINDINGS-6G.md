@@ -234,4 +234,4 @@ Pack 0.20.0, `LAYOUT_VERSION` 13.
 
 ## Not yet run
 
-Step 4's house-character figure (the share of buildings on a house smaller than their footprint needs, before and after). Branch `6f-ground-districts` is not deleted; that waits until the phase is in.
+Step 4's house-character figure (the share of buildings on a house smaller than their footprint needs, before and after). Branch `6f-ground-districts` was deleted on Nov 26, 2026, unmerged (its last commit was `0526e30`).
