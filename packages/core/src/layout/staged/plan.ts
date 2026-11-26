@@ -13,8 +13,6 @@ import type { Building } from '../../city/records.ts';
 import type { Point, SettlementBrief } from '../../schema.ts';
 import { type Block, type Lane, cutBlocks, wardKey, wardVariation } from './blocks.ts';
 import { polygonCentroid } from '../geometry.ts';
-import { type BankPlan, shareBanks } from './banks.ts';
-import { type GrownDistricts, growDistricts } from './grow.ts';
 import { type Character, type DistrictForecast, type Placement, type TownDistrict, characterOf, forecastDistricts, roomIn } from './districts.ts';
 import { type Fitting, fitBuildings } from './fitting.ts';
 import { type Ground, takeGround } from './ground.ts';
@@ -25,6 +23,7 @@ import { type Ward, cutWards } from './wards.ts';
 import { type LandmarkBuilding, type PlacedLandmark, reserve } from './landmarks.ts';
 import { type House, type Passage, layRows } from './rows.ts';
 import { type Selection, chooseHouses } from './selection.ts';
+import { type Districting, type HouseDistricts, drawDistricts, houseDistricts } from './districting.ts';
 import { gateLanes } from './network.ts';
 import { bridgeLinks, tileBlocks } from './tiles.ts';
 import { type SpecialWard, planSpecialWards, plazaRadius } from './special.ts';
@@ -72,8 +71,10 @@ export interface TownPlan extends WardPlan {
   /** Which district each ward is forecast to be: it sets the wards' character. */
   forecast: DistrictForecast;
   characters: Character[];
-  /** Which houses the town keeps, and for which district. */
+  /** Which houses the town keeps. */
   selection: Selection;
+  /** The districts drawn over the kept houses, block by block, and each kept house's district. */
+  drawn: Districting & HouseDistricts;
   /** How many times more ground was taken because the town had too few houses. */
   moreGround: number;
   /** The gatehouses that stand at gates, in the order gates are given them, and the ward borders let through the wall for them. */
@@ -87,10 +88,6 @@ export interface TownPlan extends WardPlan {
   links: Array<{ a: number; b: number; line: Point[]; bridge: number }>;
   /** Which building stands in which house: only where the plan was made for a city's own buildings. */
   fitting?: Fitting;
-  /** The banks the kept houses stand on, and how many of each district's houses go to each. */
-  banks: BankPlan;
-  /** The districts grown over the kept blocks after selection, where the pack asks for them: then `selection` carries them. */
-  grown?: GrownDistricts;
 }
 
 /** What the staged generator reads of a city: how many buildings, its districts, and which buildings are landmarks. */
@@ -238,19 +235,12 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     const tiles = tileBlocks([...blocks.map((block) => block.polygon), ...specials.map(({ ward }) => ward.polygon)], [settings.widths.lane / 2 + 0.2, settings.widths.wardBorder / 2 + 0.25, settings.widths.mainStreet / 2 + 1, corridor / 2 + 0.6]);
     // Blocks whose ground touches are beside each other. For whole blocks the two at the ends of a bridge are too:
     // a district whose block stands at each end has its ground joined across the bridge.
-    const touching = blocks.map((_, index) => (tiles.beside[index] as number[]).filter((other) => other < blocks.length));
-    const beside = touching.map((list) => [...list]);
-    const fixed = new Map<number, number>();
-    for (const landmark of placed) if (landmark.block !== undefined && landmark.district !== undefined) fixed.set(landmark.block, landmark.district);
-    // The same links the districts' ground is joined by: the blocks nearest each end of a bridge. A landmark's
-    // block, which never changes district, and the plaza and the castle are passed for the next block along the road.
+    const fixed = new Set(placed.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
+    // The links the districts' ground is joined by: the blocks nearest each end of a bridge. A landmark's block, and
+    // the plaza and the castle, are passed for the next block along the road.
     const links = bridgeLinks(tiles.rings, site.bridges, (tile) => tile >= blocks.length || fixed.has(tile));
-    for (const link of links) {
-      if (link.a >= blocks.length || link.b >= blocks.length) continue;
-      (beside[link.a] as number[]).push(link.b);
-      (beside[link.b] as number[]).push(link.a);
-    }
-    const chosen = chooseHouses({ settings, seed, houses, blocks, wards: wards.wards, plan: forecast, wanted, ground: wards.ground, beside, fixed, ...(site.wall && { wall: site.wall }) });
+    const total = wanted.reduce((sum, want) => sum + want, 0);
+    const chosen = chooseHouses({ settings, seed, houses, wards: wards.wards, ground: wards.ground, total, ...(site.wall && { wall: site.wall }) });
     if (chosen.short > 0 && attempt < settings.selection.tries) {
       more *= settings.selection.moreGround;
       continue;
@@ -258,49 +248,16 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     if (chosen.short > 0) {
       throw new StagedLayoutError(`${brief.name} (${brief.id}): ${houses.length} houses were made for ${input.buildings} buildings and the town is ${chosen.short} short, after taking ${more.toFixed(2)} times the ground in ${attempt} further tries; raise layout.staged.ground.factor or layout.staged.selection.tries`);
     }
-    const plazaWard = wards.wards.findIndex((ward) => ward.kind === 'plaza');
-    const banks = shareBanks({
-      blocks,
-      houseBlocks: houses.map((house) => house.block),
-      kept: chosen.district,
-      tilesBeside: tiles.beside,
-      links,
-      specials: specials.map(({ ward, index }) => ({ ward: index, kind: ward.kind as 'plaza' | 'castle', polygon: ward.polygon })),
-      landmarks: placed,
-      districts: input.districts,
-      placementOf: (kind) => placements.get(kind) ?? 'middle',
-      houses: chosen.kept,
-      from: plazaWard >= 0 ? polygonCentroid((wards.wards[plazaWard] as Ward).polygon) : [0, 0],
-      ...(site.river && { river: site.river }),
-    });
-    // Where the pack asks, the districts are grown over the kept blocks, bank by bank, in place of those selection
-    // settled at the borders. Selection still decides which houses exist.
-    const grown = settings.districts.afterSelection
-      ? growDistricts({
-          settings,
-          blocks,
-          houses,
-          keptBy: chosen.district,
-          banks,
-          tilesBeside: tiles.beside,
-          links,
-          tiles: tiles.rings,
-          landmarks: placed,
-          wards: wards.wards,
-          forecast,
-          districts: input.districts,
-          placementOf: (kind) => placements.get(kind) ?? 'middle',
-          highways: wards.highways.map((highway) => highway.points),
-          streets: wards.streets.map((street) => street.points),
-          walls: site.wall ? site.wall.parts.map((part) => (part.closed ? [...part.points, part.points[0] as Point] : part.points)) : [],
-          from: plazaWard >= 0 ? polygonCentroid((wards.wards[plazaWard] as Ward).polygon) : [0, 0],
-          ...(site.river && { river: site.river }),
-          ...(site.coast && { coast: site.coast }),
-          ...(wards.harbour && { quay: wards.harbour.quay }),
-        })
-      : undefined;
-    const selection: Selection = grown ? { ...chosen, district: grown.district, blockDistrict: grown.blockDistrict, kept: grown.kept, borrowed: grown.kept.map(() => 0), moved: 0, fallback: 0 } : chosen;
-    const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, elsewhere: atGates, houses, kept: selection.district, roads });
-    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, forecast, characters, selection, moreGround: attempt, gatehouses, gateLanes: gateLanesChosen, tiles: tiles.rings, tilesBeside: tiles.beside, links, banks, ...(grown && { grown }), ...(fitting && { fitting }) };
+    // The districts, drawn over the kept houses block by block, each to exactly its count.
+    const lines = { blocks, houses, kept: chosen.chosen, tilesBeside: tiles.beside, links };
+    // How far each block's ground is from the water's edge, for the districts that must touch it.
+    const { river, coast } = site;
+    const gap = (point: Point) => Math.max(0, Math.min(river ? river.gap(point) : Infinity, coast ? coast.gap(point) : Infinity));
+    const fromWater = river || coast ? blocks.map((block, index) => Math.min(...[...block.polygon, ...((tiles.rings[index] ?? []) as Point[][]).flat()].map(gap))) : undefined;
+    const waterside = input.districts.map((district) => placements.get(district.kind) === 'waterside');
+    const districting = drawDistricts({ rules: settings.districts.drawn, wards: wards.wards, seeds: forecast.seeds, targets: wanted, landmarks: placed, waterside, ...(fromWater && { water: fromWater }), waterReach: pack.layout.watersideReach * 0.75, ...lines });
+    const drawn = { ...districting, ...houseDistricts(districting, lines) };
+    const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, elsewhere: atGates, houses, kept: drawn.district, roads });
+    return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, forecast, characters, selection: chosen, drawn, moreGround: attempt, gatehouses, gateLanes: gateLanesChosen, tiles: tiles.rings, tilesBeside: tiles.beside, links, ...(fitting && { fitting }) };
   }
 }

@@ -2,8 +2,8 @@
  * The district forecast: before any house exists, which kind of district each
  * ward is expected to be. It sets each ward's character (house scale, lane
  * frequency); it is a forecast, not the districts. Which district each kept
- * house belongs to is decided after selection, bank by bank (`banks.ts`).
- * Until that replaces it (phase 6F, Part B), selection still reads it.
+ * house belongs to is decided after selection (`districting.ts`), which reads
+ * the forecast only for each district's seed ward.
  *
  * Each of the city's districts starts from a seed ward chosen by its kind's
  * placement, and grows over neighbouring wards, nearest first. Crossing a

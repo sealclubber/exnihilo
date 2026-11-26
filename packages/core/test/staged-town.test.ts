@@ -37,7 +37,7 @@ function everyPlan(): Planned[] {
 const named = (name: string) => everyPlan().find(({ brief }) => brief.name === name) as Planned;
 const TEST_TOWNS = ['Badanos', 'Pombal', 'Cevilefon', 'Vereceldo', 'Flupines'];
 const quantile = (values: number[], share: number) => [...values].sort((a, b) => a - b)[Math.floor(share * (values.length - 1))] as number;
-const keptHouses = (plan: TownPlan) => plan.houses.filter((_, index) => plan.selection.district[index] !== undefined);
+const keptHouses = (plan: TownPlan) => plan.houses.filter((_, index) => plan.drawn.district[index] !== undefined);
 const housesByBlock = (plan: TownPlan) => {
   const map = new Map<number, TownPlan['houses']>();
   for (const house of plan.houses) {
@@ -332,8 +332,8 @@ describe('exact counts', () => {
         const landmarks = plan.landmarks.filter((landmark) => landmark.district === index).length;
         // A gatehouse at a gate needs no house either.
         const atGates = (input.list ?? []).filter((building) => building.districtId === district.id && plan.gatehouses.includes(building.id)).length;
-        expect((plan.selection.kept[index] as number) + landmarks + atGates, `${brief.name}: ${district.id}`).toBe(district.buildings);
-        expect(plan.selection.district.filter((of) => of === index).length, `${brief.name}: ${district.id}`).toBe(plan.selection.kept[index]);
+        expect((plan.drawn.kept[index] as number) + landmarks + atGates, `${brief.name}: ${district.id}`).toBe(district.buildings);
+        expect(plan.drawn.district.filter((of) => of === index).length, `${brief.name}: ${district.id}`).toBe(plan.drawn.kept[index]);
       });
       expect(plan.selection.short, brief.name).toBe(0);
       expect(keptHouses(plan).length + plan.landmarks.length + plan.gatehouses.length, brief.name).toBe(input.buildings);
@@ -356,13 +356,13 @@ describe('exact counts', () => {
       }
       const keptIn = plan.blocks.map(() => 0);
       plan.houses.forEach((house, index) => {
-        if (plan.selection.district[index] === undefined) return;
+        if (plan.drawn.district[index] === undefined) return;
         keptIn[house.block] = (keptIn[house.block] as number) + 1;
         kept++;
       });
       const seen = new Set<number>();
       const pieces = new Map<number, number[]>();
-      plan.selection.blockDistrict.forEach((of, index) => {
+      plan.drawn.blockDistrict.forEach((of, index) => {
         if (of === undefined || seen.has(index)) return;
         const piece = [index];
         seen.add(index);
@@ -370,7 +370,7 @@ describe('exact counts', () => {
         for (let head = 0; head < piece.length; head++) {
           houses += keptIn[piece[head] as number] as number;
           for (const next of beside[piece[head] as number] as number[]) {
-            if (seen.has(next) || plan.selection.blockDistrict[next] !== of) continue;
+            if (seen.has(next) || plan.drawn.blockDistrict[next] !== of) continue;
             seen.add(next);
             piece.push(next);
           }
@@ -395,46 +395,32 @@ describe('exact counts', () => {
     }
     expect(links).toBeGreaterThan(100);
     expect(onLandmarks / links).toBeLessThan(0.02);
-    // Montica's one bridge ends at a landmark's block: its banks trade all the same.
-    expect(named('Montica').plan.selection.fallback).toBe(0);
+    // Montica's one bridge ends at a landmark's block: its districts are whole all the same.
+    expect(named('Montica').plan.drawn.inPieces).toBe(0);
   });
 
-  it('falls back on a district that does not touch only in a few settlements, and counts the houses', () => {
-    let settlements = 0;
-    let houses = 0;
-    for (const { plan } of everyPlan()) {
-      expect(plan.selection.fallback).toBeLessThanOrEqual(plan.selection.borrowed.reduce((sum, count) => sum + count, 0));
-      if (plan.selection.fallback > 0) settlements++;
-      houses += plan.selection.fallback;
-    }
-    console.log(`The non-touching fallback: ${settlements} settlements, ${houses} houses`);
-    expect(settlements).toBeLessThan(60);
-  });
-
-  it('a house is kept by the district of its block, but for the few borrowed from a neighbour', () => {
+  it('a house is kept by the district of its block, but for the few that make every count exact', () => {
     let kept = 0;
-    let borrowed = 0;
-    let moved = 0;
-    let blocks = 0;
+    let strangers = 0;
+    let miss = 0;
     for (const { brief, plan } of everyPlan()) {
-      let strangers = 0;
+      let here = 0;
       plan.houses.forEach((house, index) => {
-        const of = plan.selection.district[index];
+        const of = plan.drawn.district[index];
         if (of === undefined) return;
         kept++;
-        if (plan.selection.blockDistrict[house.block] !== of) strangers++;
+        if (plan.drawn.blockDistrict[house.block] !== of) here++;
       });
-      expect(strangers, brief.name).toBe(plan.selection.borrowed.reduce((sum, count) => sum + count, 0));
-      borrowed += strangers;
-      moved += plan.selection.moved;
-      blocks += plan.blocks.length;
-      expect(plan.blocks.filter((block, index) => plan.selection.blockDistrict[index] !== plan.forecast.of[block.ward]).length, brief.name).toBe(plan.selection.moved);
+      // No more houses stand in a neighbour's ground than were passed along to settle the counts.
+      expect(here, brief.name).toBeLessThanOrEqual(plan.drawn.leftovers);
+      strangers += here;
+      miss += plan.drawn.off;
+      expect(plan.drawn.unclaimed, brief.name).toBe(0);
+      expect(plan.drawn.islands, brief.name).toBe(0);
     }
-    // Measured: about 1% of houses stand in a neighbour's block at a shared border. A third of all blocks are in
-    // another district than their ward's: most of them unbuilt ground at the town's edge, which a district that is
-    // short crosses to reach houses.
-    expect(borrowed / kept).toBeLessThan(0.03);
-    expect(moved / blocks).toBeLessThan(0.4);
+    console.log(`Houses standing in a neighbour's ground: ${strangers} of ${kept}; the ground misses the counts by ${miss}`);
+    expect(strangers / kept).toBeLessThan(0.03);
+    expect(miss / kept).toBeLessThan(0.02);
   });
 });
 
@@ -493,7 +479,7 @@ describe('districts', () => {
     for (const { plan } of everyPlan()) {
       plan.houses.forEach((house, index) => {
         const of = plan.forecast.of[house.ward];
-        if (plan.selection.district[index] === undefined || of === undefined) return;
+        if (plan.drawn.district[index] === undefined || of === undefined) return;
         const kind = (plan.districts[of] as TownPlan['districts'][number]).kind;
         if (!areas.has(kind)) areas.set(kind, []);
         areas.get(kind)?.push(house.area);
@@ -511,51 +497,19 @@ describe('districts', () => {
   });
 });
 
-describe('banks, and districts shared among them (phase 6F, Part B)', () => {
-  it('groups the kept houses into banks that never cross water, and shares every district\'s houses among them exactly', () => {
-    const counts = new Map<number, number>();
-    let spanning = 0;
-    let unjoined = 0;
-    let over = 0;
-    for (const { brief, plan } of everyPlan()) {
-      const { banks, shares } = plan.banks;
-      counts.set(banks.length, (counts.get(banks.length) ?? 0) + 1);
-      // A town with no river is one bank; every kept house stands on exactly one.
-      if (!plan.river) expect(banks.length, brief.name).toBe(1);
-      const kept = plan.selection.district.filter((district) => district !== undefined).length;
-      expect(banks.reduce((sum, bank) => sum + bank.houses, 0), brief.name).toBe(kept);
-      expect(new Set(banks.flatMap((bank) => bank.blocks)).size, brief.name).toBe(banks.reduce((sum, bank) => sum + bank.blocks.length, 0));
-      if (plan.river) for (const bank of banks) expect(new Set(bank.blocks.map((block) => plan.river!.side(polygonCentroid(plan.blocks[block]!.polygon)))).size, brief.name).toBe(1);
-      // Every district gets all its houses, and no bank more than it holds.
-      shares.forEach((parts, district) => expect(parts.reduce((sum, part) => sum + part.houses, 0), `${brief.name} ${district}`).toBe(plan.selection.kept[district]));
-      banks.forEach((bank, index) => expect(shares.flat().filter((part) => part.bank === index).reduce((sum, part) => sum + part.houses, 0), brief.name).toBe(bank.houses));
-      spanning += plan.banks.spanning.length;
-      unjoined += plan.banks.unjoined.length;
-      if (plan.banks.spanning.length > Math.max(banks.length - 1, 0)) over++;
-    }
-    console.log(`Banks in Lomia: ${JSON.stringify(Object.fromEntries([...counts].sort((a, b) => a[0] - b[0])))} (banks: settlements); ${spanning} districts span banks, ${unjoined} of them without a bridge between; ${over} settlements have more spanning districts than banks less one`);
-  });
-
-  it('pulls a landmark\'s owner to the landmark\'s bank', () => {
-    for (const { brief, plan } of everyPlan()) {
-      for (const [district, bank] of plan.banks.pulled) expect(plan.banks.shares[district]?.[0]?.bank, `${brief.name} ${district}`).toBe(bank);
-    }
-  });
-});
-
 describe('selection', () => {
   it('keeps the innermost of the town solid, and everything inside a wall', () => {
     let inside = 0;
     let insideKept = 0;
     for (const { brief, plan } of everyPlan()) {
-      const total = plan.selection.kept.reduce((sum, count) => sum + count, 0);
+      const total = plan.drawn.kept.reduce((sum, count) => sum + count, 0);
       const ranked = plan.houses.map((house, index) => ({ index, rank: plan.ground.rank(house.centre) * (plan.wall?.inside(house.centre) ? settings.selection.insideWall : 1) })).sort((a, b) => a.rank - b.rank || a.index - b.index);
-      for (const { index } of ranked.slice(0, Math.min(ranked.length, Math.floor(settings.selection.solid * total)))) expect(plan.selection.district[index], `${brief.name}: an inner house was not kept`).toBeDefined();
+      for (const { index } of ranked.slice(0, Math.min(ranked.length, Math.floor(settings.selection.solid * total)))) expect(plan.drawn.district[index], `${brief.name}: an inner house was not kept`).toBeDefined();
       if (!plan.wall) continue;
       plan.houses.forEach((house, index) => {
         if (!plan.wall?.inside(house.centre)) return;
         inside++;
-        if (plan.selection.district[index] !== undefined) insideKept++;
+        if (plan.drawn.district[index] !== undefined) insideKept++;
       });
     }
     expect(insideKept / inside).toBeGreaterThan(0.97);
@@ -568,7 +522,7 @@ describe('selection', () => {
       const cuts = [0.2, 0.4, 0.6, 0.8, 1].map((share) => quantile(ranks, share));
       const share = cuts.map((cut, at) => {
         const band = plan.houses.map((_, index) => index).filter((index) => (ranks[index] as number) <= cut && (at === 0 || (ranks[index] as number) > (cuts[at - 1] as number)));
-        return band.filter((index) => plan.selection.district[index] !== undefined).length / band.length;
+        return band.filter((index) => plan.drawn.district[index] !== undefined).length / band.length;
       });
       // The town's houses are chosen as one town, so its innermost fifth is solid.
       expect(share[0], name).toBeGreaterThan(0.97);
@@ -607,7 +561,7 @@ describe('determinism, the one loop, and pack edits', () => {
     expect(tight.moreGround).toBeGreaterThan(0);
     expect(tight.moreGround).toBeLessThanOrEqual(3);
     expect(tight.selection.short).toBe(0);
-    expect(tight.selection.kept.reduce((sum, count) => sum + count, 0) + tight.landmarks.length + tight.gatehouses.length).toBe(input.buildings);
+    expect(tight.drawn.kept.reduce((sum, count) => sum + count, 0) + tight.landmarks.length + tight.gatehouses.length).toBe(input.buildings);
     raw.layout.staged.selection.tries = 0;
     expect(() => planTown(brief, input, parsePack(raw))).toThrow(StagedLayoutError);
     expect(() => planTown(brief, input, parsePack(raw))).toThrow(/Flupines.*short/);
@@ -620,12 +574,12 @@ describe('determinism, the one loop, and pack edits', () => {
     const grand = planTown(brief, input, parsePack(raw));
     const craft = (other: TownPlan) => {
       const of = other.districts.findIndex((district) => district.kind === 'craft');
-      return quantile(other.houses.filter((_, index) => other.selection.district[index] === of).map((house) => house.area), 0.5);
+      return quantile(other.houses.filter((_, index) => other.drawn.district[index] === of).map((house) => house.area), 0.5);
     };
     // Not the whole 1.6: a district's border shifts by blocks cut to its neighbours' character.
     expect(craft(grand)).toBeGreaterThan(1.2 * craft(plan));
     // Larger blocks may hold a landmark more or fewer; houses and landmarks together are still the town's buildings.
-    expect(grand.selection.kept.reduce((sum, count) => sum + count, 0) + grand.landmarks.length + grand.gatehouses.length).toBe(input.buildings);
+    expect(grand.drawn.kept.reduce((sum, count) => sum + count, 0) + grand.landmarks.length + grand.gatehouses.length).toBe(input.buildings);
   });
 });
 
@@ -661,7 +615,7 @@ describe('which building goes where', () => {
       for (const id of places) expect(buildings.has(id), brief.name).toBe(true);
       plan.houses.forEach((_, index) => {
         const held = plan.fitting?.holder[index];
-        const of = plan.selection.district[index];
+        const of = plan.drawn.district[index];
         expect(held !== undefined, brief.name).toBe(of !== undefined);
         if (held !== undefined) expect(buildings.get(held)?.districtId, brief.name).toBe(plan.districts[of as number]?.id);
       });
@@ -728,7 +682,7 @@ describe('which building goes where', () => {
     expect(near(plan)).toBeGreaterThan(near(without));
     expect(fronting / loving).toBeGreaterThan(0.25);
     // Which houses are kept does not change.
-    expect(JSON.stringify(without.selection.district)).toBe(JSON.stringify(plan.selection.district));
+    expect(JSON.stringify(without.drawn.district)).toBe(JSON.stringify(plan.drawn.district));
   });
 
   it('is left out where the plan was made for a bare number of buildings', () => {
@@ -765,13 +719,13 @@ describe('built-in checks, pins and local edits', () => {
     // Through selection a few houses elsewhere are kept that were not, or the other way about: most of them at
     // the town's edge. Measured: 24 of 4,913, 13 of them beyond four-fifths of the kept houses.
     const name = (house: TownPlan['houses'][number]) => `${house.outline[0]?.[0].toFixed(3)},${house.outline[0]?.[1].toFixed(3)}:${house.area.toFixed(3)}`;
-    const before = new Map(plan.houses.map((house, index) => [name(house), plan.selection.district[index] !== undefined]));
+    const before = new Map(plan.houses.map((house, index) => [name(house), plan.drawn.district[index] !== undefined]));
     let changed = 0;
     let elsewhere = 0;
     edited.houses.forEach((house, index) => {
       if (house.ward === ward.index || !before.has(name(house))) return;
       elsewhere++;
-      if (before.get(name(house)) !== (edited.selection.district[index] !== undefined)) changed++;
+      if (before.get(name(house)) !== (edited.drawn.district[index] !== undefined)) changed++;
     });
     expect(changed / elsewhere).toBeLessThan(0.02);
     expect(keptHouses(edited).length + edited.landmarks.length + edited.gatehouses.length).toBe(input.buildings);

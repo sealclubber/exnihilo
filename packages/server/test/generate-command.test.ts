@@ -41,7 +41,7 @@ describe('the generate command', () => {
     const text = readFileSync(result.summaryPath, 'utf8');
     expect(text).toBe(result.summaryText);
     expect(text).toContain('Badanos (settlement-641)');
-    expect(text).toContain('pack medieval 0.18.0');
+    expect(text).toContain('pack medieval 0.20.0');
     expect(text).toMatch(/Residents\s+9,607/);
     expect(text).toMatch(/Working\s+4,419\s+46\.0%/);
     expect(text).toMatch(/Trade\s+1,487\s+33\.7%/);

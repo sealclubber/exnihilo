@@ -20,7 +20,7 @@ export interface BuiltInChecks {
 }
 
 export function builtInChecks(plan: TownPlan): BuiltInChecks {
-  const kept = plan.houses.map((house, index) => ({ house, index })).filter(({ index }) => plan.selection.district[index] !== undefined);
+  const kept = plan.houses.map((house, index) => ({ house, index })).filter(({ index }) => plan.drawn.district[index] !== undefined);
   const byBlock = new Map<number, typeof kept>();
   for (const entry of kept) {
     if (!byBlock.has(entry.house.block)) byBlock.set(entry.house.block, []);

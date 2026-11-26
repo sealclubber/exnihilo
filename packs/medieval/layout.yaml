@@ -521,10 +521,31 @@ staged:
   #              Crossing a highway, a main street, the river (at a bridge)
   #              or the wall counts as this many metres more, so those
   #              become the borders between districts.
-  #   afterSelection  optional; true grows the districts over the kept
-  #              blocks after selection, bank by bank, with the same costs
-  #              (phase 6F, Part B), in place of the districts selection
-  #              settles at the borders. Left out, selection's.
+  #   drawn      the districts themselves are drawn over the kept houses
+  #              block by block, after selection (phase 6G); the wards'
+  #              districts above are a forecast, for the houses' character
+  #              and each district's seed. They are cut for their shape:
+  #              each comes out near its count, and the few houses over or
+  #              under stand in a neighbour's ground. A run of more than
+  #              `openRun` touching empty blocks is open country, nobody's
+  #              ground; so is an empty block with housed blocks on fewer
+  #              than `fringeSides` of the eight sides about it, within
+  #              `fringeRadius` metres. Each district is seeded at a block
+  #              and the districts are shared among the river's banks:
+  #              while a bank's districts want more than `over` houses
+  #              beyond what it holds, one crosses a bridge, whole if its
+  #              count is within `whole` of what must move, else split; one
+  #              already crossing carries more unless that leaves under
+  #              `nearLeast` houses behind; at most `rounds` times. Each
+  #              bank is cut into cells, one per district part, weighted
+  #              toward its count in at most `cellRounds` rounds: the
+  #              weights move `cellStep` times the miss for
+  #              `cellStepRounds` rounds, then `cellStepLate` times. Blocks
+  #              left over join a neighbour, in at most `fills` passes.
+  #              A cell cut in two by a wall or the water loses its smaller
+  #              part, so the cells are cut up to `cellTries` times, each
+  #              try asking of a part `cellCorrection` times what it came
+  #              out short by more; the try nearest the counts is kept.
   #   inward     a ward's growth rank counts this many times in the order
   #              wards are claimed, so that districts fill the inner ground
   #              first and compete for it.
@@ -542,6 +563,7 @@ staged:
     room: {centre: 1.0, middle: 1.0, waterside: 1.0, edge: 1.0}
     roomDefault: 1.0
     barriers: {highway: 160, mainStreet: 90, river: 350, wall: 220}
+    drawn: {over: 2, whole: 3, nearLeast: 6, rounds: 30, fills: 80, openRun: 8, fringeRadius: 120, fringeSides: 5, cellRounds: 400, cellStep: 0.5, cellStepLate: 0.2, cellStepRounds: 200, cellTries: 6, cellCorrection: 0.5}
 
   # Ward character, by the kind of district a ward belongs to. FOR REVIEW:
   # these are placeholders. `scale` multiplies the size of houses and blocks:
@@ -562,16 +584,17 @@ staged:
       harbour: {scale: 0.9, wing: 0.4}
       shanty: {scale: 0.62, blocks: 0.8, wing: 0.15, passage: 0.2}
 
-  # Choosing the town's houses: more are made than it has, and each district
-  # keeps exactly its own number. A house is scored by the growth rank of its
-  # ground. The innermost `solid` of a district's count are always kept;
+  # Choosing the town's houses: more are made than it has, and the town keeps
+  # exactly its number, chosen as one town; the districts are drawn over the
+  # kept houses afterwards. A house is scored by the growth rank of its
+  # ground. The innermost `solid` of the town's count are always kept;
   # beyond them a score is raised by its excess times a draw from an
   # exponential of mean `luck`, so that further out keeping a house is more
   # and more a matter of chance. A house inside the wall has its score
   # multiplied by `insideWall` and is not left to chance. If the whole town
   # has too few houses, ground is taken again `moreGround` times as large,
   # at most `tries` times; that is the generator's only loop.
-  selection: {solid: 0.62, luck: 1.4, insideWall: 0.2, rounds: 6, moreGround: 1.5, tries: 3}
+  selection: {solid: 0.62, luck: 1.4, insideWall: 0.2, moreGround: 1.5, tries: 3}
 
   # Which building goes where. Within a district the buildings are sorted by
   # the area of their lot above (frontage times depth) and the kept houses by

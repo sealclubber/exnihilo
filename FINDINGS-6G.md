@@ -1,0 +1,231 @@
+# Phase 6G findings: districts drawn after houses
+
+Nov 26, 2026. Branch `6g-districts`, from `main` at `1ebf85f`.
+
+**Status (Nov 26).** Amendment 2 (cells) is ported and matches its sandbox; stopped because Pombal's waterside district no longer reaches the water (a layout invariant), and 7 districts are drawn in pieces. Earlier: Step 1 is done. Step 2 (unowned sites) was reverted after its landmark rule failed; the amended Landmarks section of `sim-6g.md` replaces it, and is ported and measured. Step 3, the switch-over, is built. The 19 districts whose landmark blocks were cut off are fixed by counting landmark blocks in the chains' check. It is **stopped for review** on 15 districts whose plaza or castle ground is drawn apart from their blocks. The step 3 commit is work in progress: the old selection and Part B tests are not yet rewritten, so `npm run check` does not pass on it.
+
+## Step 1: the districts stage, ported (`staged/districting.ts`)
+
+`drawDistricts` is a pure function ported from the `version 3` section of the reference. It is not wired in. It has the five steps (seed, share among banks, grow in turns, chains, exact) and no randomness. Its numbers are in the pack (`layout.staged.districts.drawn`, pack 0.19.0). `scripts/districting-census.ts` runs it beside the current pipeline on every town of 1,000 people or more.
+
+Lomia has **546** such towns, not 539. Seven names are shared by two towns each (Migry, Ville, Bryan, Charoy, Viazhech, Feins, Vaakka). The reference looks towns up by name and keys its results by name, so it counted 539. Counted the same way, the port gives the sandbox's figures exactly:
+
+| Measure | Sandbox (539) | Port, counted as the sandbox (539) | Port, all 546, sandbox targets | Port, all 546, generator targets | Stop if |
+| --- | --- | --- | --- | --- | --- |
+| Houses | 513,236 | 513,236 | 518,468 | 518,468 | |
+| Districts in more than one piece | 0 | 0 | 0 | 0 | > 5 |
+| Towns not exact after step 5 | 1 (Borfino 26) | 1 (Borfino 26) | 1 (Borfino 26) | 1 (Borfino 22) | > 5 or 200 houses |
+| Houses out after step 4 | 1,425 | 1,425 | 1,445 (0.28%) | 1,364 (0.26%) | > 1% |
+| Shared blocks | 1,220 | 1,220 | 1,230 (0.71%) | 1,203 (0.70%) | > 2% |
+| Houses lent | 2,021 | 2,021 | 2,042 | 2,011 | |
+| Districts spanning a river | 146 | 146 | 150 | 148 | record |
+| Islands | 0 | 0 | 0 | 0 | any |
+
+- **Sandbox targets** are the reference's: each district's buildings scaled to the kept total.
+- **Generator targets** are each district's buildings that need a house, which is what the switch-over will use.
+- **"Houses out after step 4"** is measured against the targets before rounding, as the sandbox's 1,425 was. Against the whole-number targets it is 1,430 for all 546 towns.
+- **Regression towns.** The six towns run through the reference itself (Karlen, Ruha, Haurinen, Pombal, Borfino, Badanos) match it field for field. Karlen, Haurinen and Borfino are pinned in `test/staged-districting.test.ts`.
+
+## Landmarks lead the ground (amended rule)
+
+The first landmark rule (sites reserved by kind, each landmark taking a free site in its own ground) failed when measured: 35% of block landmarks would have needed a site in a touching district, against a limit of about 5%, and its second case needed a house selection never kept. Step 2 (`efcb18e`) is reverted, so sites are owned and placed as on main, and `LAYOUT_VERSION` is back to 12.
+
+Under the amended rule, the districts stage makes the ground follow the landmarks, ported from `docs/prototypes/districts-after-houses-landmarks.test.ts` with `LM=2`:
+- **Claim.** After bank sharing, each district claims its own landmarks' blocks, on any bank where it has a unit.
+- **Grow toward them.** A block's score is its distance to the seed, or its distance to one of the unit's landmark blocks plus `landmarkPull` (0.5, in the pack) times that landmark's distance to the seed, whichever is less.
+- **Release.** Blocks the unit cannot reach from its seed or bridgeheads are let go, and join a neighbour as leftovers do.
+- **Protect.** Chains never hand over a landmark's block.
+- **Fall back.** A town that is not exact is drawn again without the landmarks.
+
+A landmark whose block ends in another district's ground stays where it is and keeps its district. The two fallback cases of the old rule are gone.
+
+The six regression towns match the reference field for field. The exception is Borfino: the reference has no fall-back, and the port draws Borfino again without landmarks because it is not exact with them.
+
+| Measure, all 546 towns | Sandbox (539, before fall-back) | Sandbox targets | Generator targets | Stop if |
+| --- | --- | --- | --- | --- |
+| Landmarks outside their district's ground | 414 of 4,289 (9.7%) | 427 of 4,339 (9.8%) | 436 of 4,339 (10.0%) | > 15% |
+| Districts in more than one piece | 0 | 0 | 0 | any |
+| Towns drawn again without landmarks | 4 | 4 (Meunglain, Borfino, Nobla, Tuvaaki) | the same 4 | |
+| Towns not exact at the end | n/a | 1 (Borfino 26) | 1 (Borfino 22) | > 5 or 200 houses |
+| Houses out after step 4 | | 1,507 (0.29%) | 1,373 (0.26%) | > 1% |
+| Shared blocks | 1,261 | 1,273 (0.74%) | 1,212 (0.70%) | > 2% |
+| Islands | | 0 | 0 | any |
+
+My figures are after the fall-back, which moves a few of those four towns' landmarks back outside (Borfino: 5 outside with the claims, 10 without them). That, and the seven towns that share a name, account for the gap to 414 of 4,289. Every measure is inside its threshold.
+
+## Step 3: the switch-over (stopped)
+
+What is built:
+- **Selection** keeps the town's houses by growth rank and nothing else. All of its district repair is deleted: block moves, chains, single houses and the non-touching fallback, along with `selection.rounds`.
+- **The districts stage** runs after selection, with each district's target set to its buildings that need a house, and the landmarks leading.
+- **Each kept house's district** is its block's district. A lent block's houses nearest the neighbour's ground are the neighbour's. In a town that isn't exact (Borfino), the short district takes the houses it lacks from the nearest touching district with houses to spare, the ones nearest its own ground; these are counted.
+- **Fitting** places each district's buildings on its own houses, unchanged.
+- **District ground** is the tiles of the blocks each district was drawn over, plus the plaza and the castle for their landmark's district.
+- **A lent block stays wholly its owner's ground**, as the gameplan says ("the block stays the giver's ground"). Its lent houses' lots therefore stand in a neighbour's ground and are counted there. I first divided such tiles between the two districts, as the Part B code did. That left the lent share drawn apart from its own district, so I took it out.
+- **Removed:** Part B (`grow.ts`, `banks.ts`, `afterSelection`) and the census lines that counted houses against forecast ground.
+
+Census, all 682 settlements (`node scripts/staged-census.ts`):
+
+| Measure | Result | Stop if |
+| --- | --- | --- |
+| Settlements keeping every invariant | 682 of 682 | |
+| Towns not exact (houses given from a neighbour's ground) | 1, Borfino, 22 houses | > 5 or 200 houses |
+| Houses out after step 4 | 1,373 (0.26%) | > 1% |
+| Shared blocks | 1,212 (0.70%) | > 2% |
+| Districts spanning a river | 148 | record |
+| Islands | 0 | any |
+| Landmarks whose block ended in another district | 436 of 4,339 (10.05%) | > 15% |
+| Towns drawn again without landmarks | 4: Meunglain, Borfino, Nobla, Tuvaaki | |
+| Town lots outside their own district's ground | 2,722 of 523,259 (0.52%) | |
+| **Town districts in more than one piece, bridge links counted as joins** | **39 of 2,078** | any |
+
+Most of the 3.76% of lots outside their ground across all settlements are in villages, where the measure's 0.02 m pull toward a lot's middle meets the village generator's own 0.02 m; the fix for that (0.005) is on `6f-ground-districts` and was never on main.
+
+**The pieces, by cause**, at block level with bridges counted as joins (the stage's own terms):
+- **No district has two pieces with houses.**
+- **19 districts have a landmark block standing alone**, all with the district's own landmark on it: Ruha, Sangeyri (2), Courceauligy, Burrealca, Chargis, Higones, Merenetsto, Ririm, Ikauna, Perston, Vehka, Borcillon, Tivet, Blokki, Hedavendare (2), Chanarena and Bonach.
+  - **How it happens.** The district claimed the block and grew to it, and then the chains handed away the blocks that joined it. A hand-over is refused if it leaves the giver in more pieces, but that check counts only pieces holding houses, and a landmark block holds none.
+  - **The evidence.** In Hedavendare and Chanarena, running the stage with chains off leaves each of those landmark blocks joined to its district.
+  - **Why the sandbox missed it.** The reference counts pieces the same way, so it reported 0.
+- **The other 20 of the census's 39** are joined at block level but drawn apart. I have not traced them. One possibility is the census's guess of which piece a bridge ends in, by nearest middle. Another is a tile corner lost where neighbouring districts' ground is kept a finger's breadth apart.
+
+**Options (for your decision; not built).**
+1. **Count landmark blocks as pieces in the chains' check.** A hand-over is refused if it leaves the giver in more pieces counting houses or its own landmarks. This is one condition in step 4, not a new pass. It may cost some exactness, and the fall-back would then catch more towns.
+2. **Accept these pieces.** The landmark keeps its district and the census counts a piece, which needs the threshold changed.
+
+I'd take option 1, and trace the 20 drawn-only pieces as part of the same step.
+
+## Step 3, continued: landmark blocks in the chains' check; the drawn-only pieces
+
+**The chains' check.** A piece now counts in the chains' piece check if it holds houses or one of the unit's own landmark blocks (option 1 above). The stage's own count of districts in pieces counts a district's landmark blocks the same way.
+
+Stage census, all 546 towns, sandbox targets:
+
+| Measure | Sandbox | Port |
+| --- | --- | --- |
+| Districts in pieces | 0 | 0 |
+| Towns drawn again without landmarks | Meunglain, Borfino, Nobla, Tuvaaki | the same four |
+| Shared blocks | 1,307 | 1,307 |
+
+The port's shared-block figure is counted as the sandbox counted, before any redraw and once per name. Counted my usual way (all 546 towns, after the redraws) it is 1,319.
+
+**The 20 pieces seen only in the drawn ground. Not all span a river: 5 do and 15 do not.** Of the 15, 14 are a town's **centre** district. Karlen and both of Pombal's affected districts show the same thing:
+
+| Town | District | The stray piece |
+| --- | --- | --- |
+| Karlen | `district-8-001` | the castle ward, drawn for the citadel's district |
+| Pombal | `district-5-001` | the castle ward, drawn for the citadel's district |
+| Pombal | `district-5-003` | the plaza, drawn for the market square's district |
+
+The rest of each district's ground is one piece of blocks.
+
+**Why.** The plaza and the castle are not blocks, so the districts stage leaves them alone, as the gameplan says ("whatever stands in them stays as it is"). Their ground is still drawn for the district of the landmark standing there. Nothing makes that district's blocks reach the special ward, so its tile is drawn apart from the rest. The 5 river-spanning districts are probably the census's nearest-middle bridge guess, but I have not traced them, because the instruction was to stop if the 20 were not all river-spanning.
+
+**Renders.** `docs/renders/<town>-districts-6g.svg` (this branch) and `<town>-districts-main.svg` (main at `1ebf85f`), for Karlen, Pombal, Badanos and Cevilefon. Every district has its own colour, its ground outlined and its number written in it. In Karlen the castle (labelled 001), in the middle of the walled town, belongs to a district whose blocks lie elsewhere.
+
+They show two more things the census does not measure:
+- **Empty fringe.** The leftover pass gives every empty block to a touching district, so a few outer districts take a ring of empty ground round the whole town.
+- **Ragged borders.** Growth in turns and the chains leave interlocking, saw-toothed borders.
+
+Main's districts are worse: ribbons one block wide, and a district strung round another.
+
+**For your decision.** One option is that the district of the landmark on the plaza or in the castle claims a block beside that ward when seeded, as it claims its landmark blocks. Another is that the special ward's ground goes to the district of most of the blocks around it, while the landmark keeps its district; that would count as a landmark outside its ground.
+
+## Amendment 2: district shape (cells), ported; stopped on Pombal
+
+Ported from `docs/prototypes/districts-convex-cells.test.ts` (`OUTER=8 POWER=1 LMPULL=1 LM=0 PIECEFIX=1`):
+- **Open country.** A run of more than `openRun` (8) touching empty blocks is nobody's ground, with pockets of houses keeping their way back to the town.
+- **Cells.** Weighted cells per bank replace growth, then each unit's pieces are tidied.
+- **Fall-back.** A town not exact with cells is drawn again with growth, the landmarks leading (the first amendment), and failing that with plain growth.
+- **Plaza and castle.** Each one's ground goes to the district holding most of the blocks beside it.
+- **Unheld blocks.** A block no district holds is no longer handed to a neighbour for drawing; it is nobody's ground.
+
+New numbers in the pack: `openRun`, `cellRounds`, `cellStep`, `cellStepLate` and `cellStepRounds`.
+
+On eight towns run through the reference itself (Karlen, Ruha, Haurinen, Pombal, Borfino, Badanos, Cevilefon, Ririm), the port matches it field for field.
+
+| Measure, all 546 towns | Amendment 2 (539) | Port, sandbox targets | Port, generator targets | Stop if |
+| --- | --- | --- | --- | --- |
+| Districts in pieces (stage) | 0 | 0 | 0 | any |
+| Towns not exact with cells, before the fall-back | 2 (Ririm, Slutstiy) | Ririm, Slutstiy | Ririm, Slutstiy | |
+| Towns not exact at the end | | 0 | 0 | |
+| Shared blocks | 1,331 | 1,318 | 1,187 | > 2% |
+| Landmarks outside their district's ground | 901 (21%) | 896 of 4,339 (20.7%) | 905 of 4,339 (20.9%) | > 25% |
+
+Both fall-back towns come out exact by growth.
+
+**Renders (since deleted; in git history at `c2ce7c2`).** `docs/renders/<town>-districts-6g.svg` were redrawn with cells: Karlen, Pombal, Badanos and Cevilefon, each district in its own colour, its ground outlined.
+- They look like the "after" side of the pictures in `docs/prototypes/`: open country left out, compact districts, the same layout of districts on each bank.
+- Mine are drawn with y to the south, so they are mirrored top to bottom against those pictures.
+- A landmark lot drawn in its own district's colour inside another district's ground is one of the 21% outside their ground.
+
+**Layout census, all 682 settlements** (`node scripts/staged-census.ts`):
+
+| Measure | Result | Stop if |
+| --- | --- | --- |
+| Settlements keeping every invariant | **681 of 682** | |
+| Town lots outside their own ground | 3,078 of 523,259 (0.59%) | |
+| Town districts in pieces, bridge links counted as joins | **7** (was 39) | any |
+
+**Stop 1: Pombal breaks a layout invariant.**
+- The invariant: a waterside district must reach the water.
+- What happens: `district-5-034`, Pombal's waterside district, ends 139.9 m from the water, against the pack's `watersideReach` of 40 m.
+- Why: its cell is placed by its seed and its landmarks; nothing ties it to the water. The growth method kept it there because it grew from a waterside seed.
+- Effect: with checking on (the default), Pombal's layout is refused. The sandbox did not run the layout invariants.
+
+**Stop 2: 7 town districts drawn in pieces.**
+- 6 span a river: Tiorpanki, Forviroria, Rochambery, Klovsvaatas, Charoy and Puerda. These are probably the census's nearest-middle guess at which piece a bridge joins.
+- 1 is on one bank: Mihivesavo's centre (`district-623-001`). Both of its pieces are ordinary blocks that the stage counts as joined, but they are drawn apart. I have not traced it.
+- Renders of all seven were at `docs/renders/<town>-pieces.svg` (now in git history), the district in pieces outlined in red. In Charoy and Forviroria the district's part on the far bank is broken up among its neighbours' blocks, which is more than a bridge being guessed wrong.
+
+## The stage simplified: cells only, counts settled house by house (final)
+
+Nov 25, 2026. Branch `6g-cells`, from `6g-districts` at `c8adcff`.
+
+**Why.** The stage was asked to do five things at once with district ground: hold exactly each district's count, stay in one piece, be compact, hold its own landmarks, and touch the water where it must. Each pass that forced one broke another. Charoy's stripes were the cells coming out clean and the redraw by growth and the chains then threading blocks between neighbours to make the counts exact.
+
+**What changed.** District ground is no longer made exact. The cells are cut near their counts and left alone; `houseDistricts` settles the remainder house by house, so every district still has exactly its count of houses and layout still never changes the city.
+
+- **Removed:** growth in turns, landmark claims, chains (step 4), lending through shared blocks (step 5), both redraws, `scripts/districting-census.ts`, and the pack keys `chainAt`, `chainOver`, `chainTries`, `chainSteps`, `exactSteps`, `landmarkPull`.
+- **Bridgeheads.** A part of a district at a bridgehead takes the blocks nearest the bridgehead, each touching the last, up to its count, before the cells are cut. Forcing the bridgehead block into a cell centred elsewhere is what left far-bank parts of 6 to 11 houses. The district that crosses is the one whose centre, landmarks included, is nearest the bridge.
+- **Water.** A waterside district is seeded on a block within reach of the water, keeps its piece at the water when it is cut in two, and failing all that is given the shortest way of blocks to the water. This is the Pombal failure: its harbour ended 140 m from the river.
+- **Open country.** An empty block with housed blocks on fewer than `fringeSides` of the eight sides about it (within `fringeRadius`) is open country too, so districts no longer trail empty blocks at the town's edge.
+- **Pieces.** A cell cut in two keeps its larger part; the part let go joins the district most of its neighbours are in. The cells are then cut again up to `cellTries` times, asking `cellCorrection` times the shortfall more of each part, and the try nearest the counts is kept.
+- **Leftover houses** pass hop by hop from the nearest district with houses to spare, each district handing the next the houses nearest that one's ground. A house only ever joins a district whose ground is beside it.
+
+Pack 0.20.0, `LAYOUT_VERSION` 13.
+
+**Census, all 682 settlements, every layout invariant on** (`node scripts/staged-census.ts`):
+
+| Measure | main (`1ebf85f`) | Now |
+| --- | --- | --- |
+| Settlements keeping every invariant | 682 | 682 |
+| Town districts in more than one piece of blocks, in the stage's terms | | 0 |
+| Town districts drawn in pieces, bridge links counted as joins | 108 of 2,229 | 2 of 2,078 (Mihivesavo, Rochambery) |
+| Houses the ground misses the counts by | | 2,888 of 518,468 (0.56%) |
+| Houses standing in a neighbour's ground, each hop counted | | 3,954 (0.76%) |
+| Town lots outside their own district's ground | 0.56% of all lots | 5,229 of 523,259 (1.00%) |
+| Houses placed by the non-touching fallback | 1,372 | none: there is no fallback |
+| Districts spanning a river | | 157 |
+| Islands | | 0 |
+| Landmarks whose block ended in another district | 0 | 1,008 of 4,339 (23.2%) |
+| Given a way of blocks to the water / to a bridgehead | | 1 (Pombal) / 0 |
+
+**Landmarks take the district they stand in** (added after the first renders: the castle stood as a red pentagon in a green district). A landmark with a block or a ward of its own now belongs to the district whose ground it stands in: its block's, or for the plaza and the castle the district holding most of the blocks beside it. Its lot's `districtId` is that district (`landmarkDistricts` in `staged/layout.ts`), the invariant that a lot's district is its building's allows it for those landmark types, and the server reports a building's district from its lot. The city's record of the building is not changed, so `life`, which reads the city, still places a landmark's district-wide rounds by the district the city made it for. About 1,008 of 4,339 landmarks change district so. Checked on the sample of 57 settlements (all invariants kept; town lots outside their own ground 0.76%), not on all 682.
+
+**What is not good yet.**
+- **Nine towns miss by over 2% of their houses**, all with a river and few districts: Orteres 43 of 538, Ririm 113 of 3,151, Jaszent 26 of 395, Tofiano 17 of 324, Jamsasarila 17 of 265, Feins 26 of 718, Zhisov 8 of 238, Meunglain 14 of 561, and the smaller Charoy 5 of 245. Where a bridge part sits in the middle of a bank it cuts the district around it in two, and no cell fits. Those houses stand in the neighbour's ground.
+- **Two districts are drawn in pieces.** Mihivesavo's centre has one house beyond a road at the far west, joined in the stage and drawn apart, because ground is not drawn across the widest roads. Rochambery's `lower` has a small part across the river that the census does not join by its bridge.
+- **A small part across a river.** A district that must carry only a few houses over a bridge gets a small far part. It is correct and looks odd.
+
+**Tests.** `npm run typecheck` is clean. Where this was written the machine is too slow and too small for the whole suite, so `npm run check` still has to be run once on the development machine. What was run here:
+- Passed: `staged-districting` (rewritten for the new stage), `staged-layout`, `staged-mesh`, `staged-roads`, `staged-wall`, `layout`, `layout-invariants`, `walls`, `spacing`, `pack`, `coherence`, `city`, and the server's tests.
+- Not finished: `staged-town` plans all 682 settlements in one test and ran out of time and memory here. Its stale tests are rewritten for the new stage but have not been seen to pass.
+- Failed on time alone: the `cost` tests of `life`, `rounds` and `outsiders`, and `avatar`'s "answers quickly in Pombal too". They measure speed.
+- Failed, cause not traced: `rounds.test.ts`, "has, among the busiest streets around midday, one that the market stalls open onto" (Badanos). It may only reflect where Badanos's market now stands; it was not checked against the branch before this change.
+- Fixed after they failed: the layout version pinned at 12 in `life-places` and `districts`.
+- Not run: `npm run test:viewer`.
+
+## Not yet run
+
+Step 4's house-character figure (the share of buildings on a house smaller than their footprint needs, before and after). Branch `6f-ground-districts` is not deleted; that waits until the phase is in.

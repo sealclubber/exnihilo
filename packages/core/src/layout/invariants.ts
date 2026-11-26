@@ -197,6 +197,8 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
 
   // Lots: one per building, in the building's district, entered from a segment that borders it.
   const widest = Math.max(0, ...segments.map((segment) => segment.width));
+  // The landmark types that reserve a block or a ward of their own under the staged generator.
+  const ownGround = new Set(Object.entries(pack.layout.staged?.landmarks.types ?? {}).flatMap(([type, mark]) => (mark.reservation === 'ward' || mark.reservation === 'block' ? [type] : [])));
   const lotOfBuilding = new Map<string, Lot>();
   let builtArea = 0;
   let townRadius = 0;
@@ -205,9 +207,10 @@ export function checkLayout(layout: Layout, city: City, brief: SettlementBrief, 
     for (const point of lot.polygon) townRadius = Math.max(townRadius, distance(ORIGIN, point));
     const building = buildingById.get(lot.buildingId);
     if (!building) problem(`${lot.id} belongs to ${lot.buildingId}, which does not exist`);
-    else if (building.districtId !== lot.districtId) {
+    else if (building.districtId !== lot.districtId && !ownGround.has(building.type)) {
+      // A landmark with a block or a ward of its own belongs to the district whose ground it stands in.
       problem(`${lot.id} is in ${lot.districtId} but its building ${building.id} is in ${building.districtId}`);
-    }
+    } else if (!districtById.has(lot.districtId)) problem(`${lot.id} is in ${lot.districtId}, which does not exist`);
     if (lotOfBuilding.has(lot.buildingId)) problem(`${lot.buildingId} has more than one lot`);
     lotOfBuilding.set(lot.buildingId, lot);
     const segment = segmentById.get(lot.entrance.segmentId);

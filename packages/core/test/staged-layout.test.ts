@@ -90,21 +90,23 @@ describe('the staged generator as a layout', () => {
     expect(moving / out).toBeGreaterThan(0.5);
   });
 
-  it('with the districts grown after selection, keeps every invariant and every count, and puts every lot and landmark in its own ground', () => {
-    const staged = pack.layout.staged!;
-    const grownPack = { ...pack, layout: { ...pack.layout, staged: { ...staged, districts: { ...staged.districts, afterSelection: true } } } };
-    for (const name of ['Badanos', 'Montica']) {
+  it('draws the districts after the houses: every invariant and every count kept, each district whole, a waterside district at the water', () => {
+    // Pombal's harbour once ended 140 m from the river; Charoy's once lay in stripes across it; Montica's one bridge
+    // ends at a landmark's block.
+    for (const name of ['Badanos', 'Montica', 'Pombal', 'Charoy']) {
       const brief = lomiaWorld().settlements.find((settlement) => settlement.name === name)!;
-      const city = generateCity(brief, grownPack);
-      const layout = generateStagedLayout(city, brief, grownPack, { check: false });
-      expect(checkLayout(layout, city, brief, grownPack), name).toEqual([]);
-      const plan = planTown(brief, townInput(city, grownPack), grownPack);
-      expect(plan.grown, name).toBeDefined();
-      // Every kept house has exactly one district, and every district exactly the houses selection kept for it.
-      const kept = plan.houses.filter((_, index) => plan.selection.district[index] !== undefined).length;
-      expect(plan.grown!.district.filter((district) => district !== undefined).length, name).toBe(kept);
-      expect(plan.selection.fallback, name).toBe(0);
-      expect(measureDistrictGround(layout).lotsOutside, name).toBe(0);
+      const city = generateCity(brief, pack);
+      const layout = generateStagedLayout(city, brief, pack, { check: false });
+      expect(checkLayout(layout, city, brief, pack), name).toEqual([]);
+      const plan = planTown(brief, townInput(city, pack), pack);
+      // Every kept house has exactly one district, and every district exactly its count.
+      expect(plan.drawn.district.filter((district) => district !== undefined).length, name).toBe(plan.selection.chosen.length);
+      expect(plan.drawn.kept, name).toEqual(plan.drawn.targets);
+      expect(plan.drawn.inPieces, name).toBe(0);
+      // Few lots stand outside their own district's ground.
+      const ground = measureDistrictGround(layout);
+      expect(ground.lotsOutside / ground.lots, name).toBeLessThan(0.05);
+      // Every landmark with ground of its own stands in the ground of the district its lot names.
       const areas = new Map(layout.districtAreas.map((area) => [area.districtId, area.polygons]));
       const lotOf = new Map(layout.lots.map((lot) => [lot.buildingId, lot]));
       for (const landmark of plan.landmarks) {
