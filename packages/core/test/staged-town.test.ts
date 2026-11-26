@@ -255,7 +255,7 @@ describe('reservations', () => {
   it('block landmarks stand apart from each other', () => {
     for (const { brief, plan } of everyPlan()) {
       const blocks = plan.landmarks.filter((landmark) => landmark.block !== undefined).map((landmark) => ({ district: landmark.district, polygon: (plan.blocks[landmark.block as number] as TownPlan['blocks'][number]).polygon }));
-      blocks.forEach((one, at) => blocks.slice(at + 1).forEach((other) => expect(distanceBetweenPolygons(one.polygon, other.polygon), brief.name).toBeGreaterThanOrEqual(marksRules.block.apart)));
+      blocks.forEach((one, at) => blocks.slice(at + 1).forEach((other) => expect(distanceBetweenPolygons(one.polygon, other.polygon), brief.name).toBeGreaterThanOrEqual(one.district !== undefined && one.district === other.district ? marksRules.block.apartWithin : marksRules.block.apart)));
     }
   });
 

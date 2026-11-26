@@ -91,7 +91,7 @@ describe('versions', () => {
   it('raises the layout and life versions for open ground and courtyards, and leaves the city generator alone', () => {
     expect(LIFE_VERSION).toBe(6);
     expect(GENERATOR_VERSION).toBe(6);
-    expect(LAYOUT_VERSION).toBe(13);
+    expect(LAYOUT_VERSION).toBe(12);
   });
 });
 

@@ -196,9 +196,9 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     const forecast = forecastDistricts({ ...(square !== undefined && { plazaDistrict: square }), settings, districts: input.districts, variation, placementOf: (kind) => placements.get(kind) ?? 'middle', buildings: input.buildings, wards: wards.wards, mesh: wards.mesh, roads: site, streets: wards.streets, ...(site.river && { river: site.river }), ...(site.coast && { coast: site.coast }), ...(site.wall && { wall: site.wall }) });
     const characters = wards.wards.map((_, index) => characterOf(settings, forecast.of[index] === undefined ? undefined : input.districts[forecast.of[index] as number]?.kind));
     const { blocks, lanes } = cutBlocks(wards.wards, settings, seed, (_, index) => characters[index] as Character);
-    // Reservations first: ordinary houses fill only the blocks that are left. A block is reserved by its kind of
-    // site, for no district.
+    // Reservations first: ordinary houses fill only the blocks that are left. A landmark stands in its own district.
     const roads = [...wards.highways.map((highway) => highway.points), ...wards.streets.map((street) => street.points)];
+    const wardsIn = input.districts.map((_, district) => new Set(forecast.of.flatMap((of, ward) => (of === district ? [ward] : []))));
     // A landmark stands where the town will be built up: among the innermost blocks that have room for most of
     // its buildings, never out in the fringe where few houses are kept.
     const inFar = blocks.map(() => false);
@@ -216,7 +216,8 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
       blocks,
       roads,
       ...(wards.harbour && { quay: wards.harbour.quay }),
-      blockOk: (block) => !inFar[block],
+      wardsOf: (landmark) => (landmark.district === undefined || (wardsIn[landmark.district]?.size ?? 0) === 0 ? undefined : wardsIn[landmark.district]),
+      blockOk: (_, block) => !inFar[block],
     });
     const reserved = new Set(placed.flatMap((landmark) => (landmark.block === undefined ? [] : [landmark.block])));
     const { houses, passages } = layRows(blocks, wards.wards, settings, seed, reserved, (_, index) => characters[index] as Character);

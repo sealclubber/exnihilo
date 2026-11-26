@@ -7,11 +7,6 @@
  * down until it fits whole inside. It is never clipped. Ordinary houses fill
  * only the blocks that are left. Slots and gates are reserved by later
  * stages.
- *
- * A block is reserved by the kind of site it is, not for a district: its
- * footprint's template and the place it looks for (the plaza, the harbour or
- * a road). Which landmark stands on which site of its kind is settled after
- * the districts are drawn (phase 6G).
  */
 import type { Rng } from '../../city/random.ts';
 import type { StagedSettings } from '../../pack/schema.ts';
@@ -32,18 +27,10 @@ export interface LandmarkBuilding {
   district?: number;
 }
 
-/** The kind of site a block landmark stands on: any landmark of the same kind may stand on it instead. */
-export interface SiteKind {
-  template: string;
-  place: 'plaza' | 'harbour' | 'road';
-}
-
 export interface PlacedLandmark {
   building: string;
   type: string;
   reservation: 'ward' | 'block';
-  /** For a block, the kind of site it is. */
-  site?: SiteKind;
   /** Its district in the city, if it was given one. */
   district?: number;
   /** The ward it stands in, and for a block landmark its block, by their places in the plan. */
@@ -65,10 +52,12 @@ export interface LandmarkInput {
   roads: ReadonlyArray<readonly Point[]>;
   /** Where a `harbour` landmark looks: the quay, if there is one. */
   quay?: readonly Point[];
+  /** The wards a landmark may stand in, where districts say: left out, the inner wards of the town. */
   /** Reservations a person made: a block pin gives the block at its place to a landmark of its type, before any rule chooses. */
   pins?: ReadonlyArray<{ reservation: 'ward' | 'block' | 'slot'; at: Point; buildingType?: string }>;
-  /** Whether a block is far enough in for a landmark: left out, any block of the town's inner wards. */
-  blockOk?: (block: number) => boolean;
+  wardsOf?: (landmark: LandmarkBuilding) => ReadonlySet<number> | undefined;
+  /** Whether a block is far enough in for a landmark: left out, any block of an allowed ward. */
+  blockOk?: (landmark: LandmarkBuilding, block: number) => boolean;
 }
 
 type Template = StagedSettings['landmarks']['templates'][string];
@@ -99,7 +88,7 @@ function fitted(template: Template, middle: Point, along: Point, long: number, n
   return { parts, outline: corners.map(([x, y]) => set(x, y)) };
 }
 
-export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, pins = [], blockOk }: LandmarkInput): { placed: PlacedLandmark[]; unplaced: LandmarkBuilding[] } {
+export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, pins = [], wardsOf, blockOk }: LandmarkInput): { placed: PlacedLandmark[]; unplaced: LandmarkBuilding[] } {
   const { types, templates, block: rules } = settings.landmarks;
   const placed: PlacedLandmark[] = [];
   const unplaced: LandmarkBuilding[] = [];
@@ -142,7 +131,8 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
   });
   const roomy = blocks.map((block, index) => block.area > rules.area.min && block.area < rules.area.max && (shapes[index] as { long: number }).long >= rules.long && (shapes[index] as { narrow: number }).narrow >= rules.short);
   const reserved = new Set<number>();
-  const siteOf = (landmark: LandmarkBuilding): SiteKind => ({ template: types[landmark.type]?.template as string, place: types[landmark.type]?.place ?? 'road' });
+  /** The district of the landmark each reserved block holds. */
+  const holds = new Map<number, number | undefined>();
   const lines = new LineIndex();
   for (const road of roads) lines.add(road);
   // Those that want the plaza choose first, then the harbour, then the rest; within each, in the city's order.
@@ -161,8 +151,9 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
     for (const scale of rules.scales) if ((found = fitted(template, shape.middle, shape.along, shape.long, shape.narrow, scale, rules.margin, outline) ?? fitted(template, polygonCentroid((blocks[index] as Block).polygon), shape.along, shape.long, shape.narrow, scale, rules.margin, outline))) break;
     if (!found) continue;
     reserved.add(index);
+    holds.set(index, landmark.district);
     pinned.add(landmark.id);
-    placed.push({ building: landmark.id, type: landmark.type, ...(landmark.district !== undefined && { district: landmark.district }), reservation: 'block', site: siteOf(landmark), ward: (blocks[index] as Block).ward, block: index, parts: found.parts, outline: found.outline, area: polygonArea(found.outline) });
+    placed.push({ building: landmark.id, type: landmark.type, ...(landmark.district !== undefined && { district: landmark.district }), reservation: 'block', ward: (blocks[index] as Block).ward, block: index, parts: found.parts, outline: found.outline, area: polygonArea(found.outline) });
   }
   const wanting = landmarks
     .filter((landmark) => !pinned.has(landmark.id))
@@ -171,6 +162,7 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
     .sort((a, b) => order[a.place] - order[b.place] || a.at - b.at);
   for (const { landmark, place } of wanting) {
     const template = templates[types[landmark.type]?.template as string] as Template;
+    const allowed = wardsOf?.(landmark);
     const away = (index: number): number => {
       const shape = shapes[index] as { middle: Point; narrow: number };
       if (place === 'plaza') return plaza ? distance(shape.middle, plaza.seed) : Math.hypot(...shape.middle);
@@ -181,7 +173,7 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
     const candidates: Array<{ index: number; away: number }> = [];
     blocks.forEach((block, index) => {
       if (!roomy[index] || reserved.has(index)) return;
-      if (blockOk ? !blockOk(index) : (wards[block.ward] as Ward).growthRank > innermost) return;
+      if (allowed ? !allowed.has(block.ward) || (blockOk !== undefined && !blockOk(landmark, index)) : (wards[block.ward] as Ward).growthRank > innermost) return;
       candidates.push({ index, away: away(index) + rng.next() * rules.jitter });
     });
     candidates.sort((a, b) => a.away - b.away || a.index - b.index);
@@ -191,8 +183,9 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
     search: for (const scales of [larger, rules.scales]) {
       for (const { index } of candidates) {
         const block = blocks[index] as Block;
-        // Landmarks stand apart from each other.
-        if ([...reserved].some((other) => distance((shapes[other] as { middle: Point }).middle, (shapes[index] as { middle: Point }).middle) < 4 * rules.apart && distanceBetweenPolygons((blocks[other] as Block).polygon, block.polygon) < rules.apart)) continue;
+        // Landmarks stand apart from each other, though those of one district may stand nearer.
+        const apart = (other: number) => (landmark.district !== undefined && holds.get(other) === landmark.district ? rules.apartWithin : rules.apart);
+        if ([...reserved].some((other) => distance((shapes[other] as { middle: Point }).middle, (shapes[index] as { middle: Point }).middle) < 4 * rules.apart && distanceBetweenPolygons((blocks[other] as Block).polygon, block.polygon) < apart(other))) continue;
         const shape = shapes[index] as { long: number; narrow: number; along: Point; middle: Point };
         const outline = outlineOf(block.polygon);
         let found: Fitted | undefined;
@@ -206,7 +199,8 @@ export function reserve({ settings, rng, landmarks, wards, blocks, roads, quay, 
         // Where a template's rectangles overlap, as a nave and a transept do, the outline's area is the footprint's.
         if (!found || polygonArea(found.outline) < rules.leastArea) continue;
         reserved.add(index);
-        placed.push({ building: landmark.id, type: landmark.type, ...(landmark.district !== undefined && { district: landmark.district }), reservation: 'block', site: siteOf(landmark), ward: block.ward, block: index, parts: found.parts, outline: found.outline, area: polygonArea(found.outline) });
+        holds.set(index, landmark.district);
+        placed.push({ building: landmark.id, type: landmark.type, ...(landmark.district !== undefined && { district: landmark.district }), reservation: 'block', ward: block.ward, block: index, parts: found.parts, outline: found.outline, area: polygonArea(found.outline) });
         done = true;
         break search;
       }
