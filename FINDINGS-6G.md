@@ -154,7 +154,7 @@ On eight towns run through the reference itself (Karlen, Ruha, Haurinen, Pombal,
 
 Both fall-back towns come out exact by growth.
 
-**Renders.** `docs/renders/<town>-districts-6g.svg` are redrawn with cells: Karlen, Pombal, Badanos and Cevilefon, each district in its own colour, its ground outlined.
+**Renders (since deleted; in git history at `c2ce7c2`).** `docs/renders/<town>-districts-6g.svg` were redrawn with cells: Karlen, Pombal, Badanos and Cevilefon, each district in its own colour, its ground outlined.
 - They look like the "after" side of the pictures in `docs/prototypes/`: open country left out, compact districts, the same layout of districts on each bank.
 - Mine are drawn with y to the south, so they are mirrored top to bottom against those pictures.
 - A landmark lot drawn in its own district's colour inside another district's ground is one of the 21% outside their ground.
@@ -176,6 +176,7 @@ Both fall-back towns come out exact by growth.
 **Stop 2: 7 town districts drawn in pieces.**
 - 6 span a river: Tiorpanki, Forviroria, Rochambery, Klovsvaatas, Charoy and Puerda. These are probably the census's nearest-middle guess at which piece a bridge joins.
 - 1 is on one bank: Mihivesavo's centre (`district-623-001`). Both of its pieces are ordinary blocks that the stage counts as joined, but they are drawn apart. I have not traced it.
+- Renders of all seven: `docs/renders/<town>-pieces.svg`, the district in pieces outlined in red. In Charoy and Forviroria the district's part on the far bank is broken up among its neighbours' blocks, which is more than a bridge being guessed wrong.
 
 ## Not yet run
 

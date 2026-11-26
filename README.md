@@ -771,9 +771,10 @@ town that is not exact so is drawn again without them. Its numbers are
 outside their district's ground (`--plain`: without the landmarks leading).
 `FINDINGS-6G.md` has the figures and what is open. The renders of earlier
 phases named below were cleared out of `docs/renders/` in phase 6G (they are
-in git history); it now holds `<town>-districts-6g.svg` and
-`<town>-districts-main.svg` for Karlen, Pombal, Badanos and Cevilefon, each
-district in its own colour, this branch beside main.
+in git history); it now holds `<town>-pieces.svg` for the seven towns with a
+district drawn in pieces after Amendment 2 (Tiorpanki, Forviroria,
+Rochambery, Klovsvaatas, Charoy, Puerda, Mihivesavo), each district in its
+own colour and the district in pieces outlined in red.
 
 **The village generator (phase 6E, Villages).** A settlement under
 `village.below` residents (1,000; 136 of Lomia's 682) is laid out by
