@@ -488,11 +488,14 @@ staged:
       keep: {length: 60, width: 60, lengthShare: 0.5, widthShare: 0.5, parts: [[-0.5, -0.27, 0.5, 0.27], [-0.2, -0.5, 0.2, 0.5]]}
 
     # Which blocks can be reserved: of an area within `area` square metres, at
-    # least `long` by `short` metres, in a ward whose growth rank is within
-    # the inner `inner` of the town's wards, and `apart` metres from any other
-    # own district instead, among the innermost blocks that have room for
-    # `within` of the district's buildings: never out in the empty fringe. Up to `jitter` metres of chance is added to the distance
-    # that ranks them. A footprint is tried at each of `scales` in turn until
+    # least `long` by `short` metres, among the town's innermost blocks that
+    # have room for `within` of its buildings, never out in the empty fringe
+    # (`inner`: where room is not measured, in a ward whose growth rank is
+    # within the inner `inner` of the town's wards), and `apart` metres from
+    # any other reserved block. A block is reserved by the kind of site it
+    # is, its template and its place, not for a district: which landmark
+    # stands on it is settled once the districts are drawn. Up to `jitter`
+    # metres of chance is added to the distance that ranks them. A footprint is tried at each of `scales` in turn until
     # it fits whole, `margin` metres inside the block, and is not built under
     # `leastArea` square metres.
     block:
@@ -502,7 +505,6 @@ staged:
       inner: 0.45
       within: 0.9
       apart: 90
-      apartWithin: 30
       jitter: 12
       scales: [1, 0.88, 0.76, 0.64, 0.52]
       margin: 1

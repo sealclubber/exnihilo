@@ -601,10 +601,9 @@ const StagedSettingsSchema = z.strictObject({
    * rectangles, each written [x0, y0, x1, y1] in a frame that runs from -0.5 to 0.5 along the footprint's length
    * and across its width; a footprint is at most `length` by `width` metres and at most `lengthShare` and
    * `widthShare` of its block's long and narrow sides. `block` says which blocks can be reserved: of an area in
-   * `area`, at least `long` by `short` metres, in a ward whose growth rank is within the inner `inner` of the
-   * town's (or, where the town has districts, among the innermost blocks of the landmark's own district that have
-   * room for `within` of its buildings), and `apart` metres from any other reserved block, or `apartWithin` from
-   * one of its own district; `jitter` metres of chance are added to the
+   * `area`, at least `long` by `short` metres, among the town's innermost blocks that have room for `within` of
+   * its buildings (where the generator measures room; otherwise in a ward whose growth rank is within the inner
+   * `inner` of the town's), and `apart` metres from any other reserved block; `jitter` metres of chance are added to the
    * distance that ranks them. A footprint is tried at each of `scales` in turn until it fits whole, `margin`
    * metres inside its block, and is not built under `leastArea` square metres.
    */
@@ -637,7 +636,6 @@ const StagedSettingsSchema = z.strictObject({
       inner: probability,
       within: z.number().positive(),
       apart: z.number().nonnegative(),
-      apartWithin: z.number().nonnegative(),
       jitter: z.number().nonnegative(),
       scales: z.array(z.number().positive().max(1)).min(1),
       margin: z.number().nonnegative(),
