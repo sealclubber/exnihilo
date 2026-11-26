@@ -780,7 +780,10 @@ houses), every layout invariant on:
 | Landmarks that took the district they stand in, not the one the city made them for | 1,008 of 4,339 (23.2%) |
 
 `docs/renders/districts-*.png` show twelve towns, each lot in its
-building's district's colour over the districts' ground.
+building's district's colour over the districts' ground, two towns to a
+picture. `docs/renders/districts-<town>-6g.png` are Badanos, Pombal, Karlen,
+Cevilefon and Charoy drawn from `main` at `b273658`, one town each, every
+district in its own colour with its ground outlined (y to the south).
 
 **The village generator (phase 6E, Villages).** A settlement under
 `village.below` residents (1,000; 136 of Lomia's 682) is laid out by
