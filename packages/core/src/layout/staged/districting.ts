@@ -490,8 +490,8 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
   const unclaimed = keptB.reduce((sum, value, block) => sum + (g[block] === undefined ? value : 0), 0);
 
   // ---- 4. Pass surplus along chains ----------------------------------------------------------------------------
-  /** How many pieces some blocks make, counting only pieces with kept houses. */
-  const pieces = (nodes: number[], beside: (node: number) => number[]) => {
+  /** How many pieces some blocks make, counting only pieces with kept houses, or with a block `counts` says. */
+  const pieces = (nodes: number[], beside: (node: number) => number[], counts: (node: number) => boolean = () => false) => {
     const left = new Set(nodes);
     let count = 0;
     while (left.size > 0) {
@@ -500,7 +500,7 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
       let houses = false;
       while (stack.length > 0) {
         const node = stack.pop() as number;
-        if ((keptB[node] as number) > 0) houses = true;
+        if ((keptB[node] as number) > 0 || counts(node)) houses = true;
         for (const next of beside(node)) {
           if (!left.has(next)) continue;
           left.delete(next);
@@ -513,7 +513,8 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
   };
   const blocksOf = (at: number) => g.flatMap((of, block) => (of === at ? [block] : []));
   const besideIn = (at: number) => (node: number) => (badj[node] as number[]).filter((next) => g[next] === at && bank[next] === bank[node]);
-  const unitPieces = (at: number) => pieces(blocksOf(at), besideIn(at));
+  // A unit's own landmark blocks count as pieces too, so that no chain cuts one off.
+  const unitPieces = (at: number) => pieces(blocksOf(at), besideIn(at), (node) => (marks[at] as number[]).includes(node));
   /** A giver hands the receiver one border block; it says how many houses went. */
   const give = (from: number, to: number, want: number): number => {
     const giver = units[from] as DistrictUnit;
@@ -600,13 +601,16 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     if (!moved) break;
   }
 
-  // A district is whole if its blocks join, a bridge counting as a join.
+  // A district is whole if its blocks join, a bridge counting as a join; a piece counts if it has houses or one of
+  // the district's own landmarks.
   const blockDistrict = g.map((at) => (at === undefined ? undefined : (units[at] as DistrictUnit).district));
+  const ownMark = new Set(landmarks.flatMap((landmark) => (landmark.district === undefined || landmark.block === undefined ? [] : [`${landmark.district}:${landmark.block}`])));
   const inPieces = order.filter(
     (district) =>
       pieces(
         blockDistrict.flatMap((of, block) => (of === district ? [block] : [])),
         (node) => (badj[node] as number[]).filter((next) => blockDistrict[next] === district),
+        (node) => ownMark.has(`${district}:${node}`),
       ) > 1,
   ).length;
   const afterChains: number[] = new Array<number>(D).fill(0);

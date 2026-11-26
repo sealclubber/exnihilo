@@ -2,7 +2,7 @@
 
 Nov 26, 2026. Branch `6g-districts`, from `main` at `1ebf85f`.
 
-**Status.** Step 1 is done. Step 2 (unowned sites) was reverted after its landmark rule failed; the amended Landmarks section of `sim-6g.md` replaces it, and is ported and measured. Step 3, the switch-over, is built but **stopped**: 19 districts end with a landmark block cut off on its own (the amended rule stops at any district in pieces). The step 3 commit is work in progress: the old selection and Part B tests are not yet rewritten, so `npm run check` does not pass on it.
+**Status.** Step 1 is done. Step 2 (unowned sites) was reverted after its landmark rule failed; the amended Landmarks section of `sim-6g.md` replaces it, and is ported and measured. Step 3, the switch-over, is built. The 19 districts whose landmark blocks were cut off are fixed by counting landmark blocks in the chains' check. It is **stopped for review** on 15 districts whose plaza or castle ground is drawn apart from their blocks. The step 3 commit is work in progress: the old selection and Part B tests are not yet rewritten, so `npm run check` does not pass on it.
 
 ## Step 1: the districts stage, ported (`staged/districting.ts`)
 
@@ -94,6 +94,36 @@ Most of the 3.76% of lots outside their ground across all settlements are in vil
 2. **Accept these pieces.** The landmark keeps its district and the census counts a piece, which needs the threshold changed.
 
 I'd take option 1, and trace the 20 drawn-only pieces as part of the same step.
+
+## Step 3, continued: landmark blocks in the chains' check; the drawn-only pieces
+
+**The chains' check.** A piece now counts in the chains' piece check if it holds houses or one of the unit's own landmark blocks (option 1 above). The stage's own count of districts in pieces counts a district's landmark blocks the same way.
+
+Stage census, all 546 towns, sandbox targets:
+
+| Measure | Sandbox | Port |
+| --- | --- | --- |
+| Districts in pieces | 0 | 0 |
+| Towns drawn again without landmarks | Meunglain, Borfino, Nobla, Tuvaaki | the same four |
+| Shared blocks | 1,307 | 1,307 |
+
+The port's shared-block figure is counted as the sandbox counted, before any redraw and once per name. Counted my usual way (all 546 towns, after the redraws) it is 1,319.
+
+**The 20 pieces seen only in the drawn ground. Not all span a river: 5 do and 15 do not.** Of the 15, 14 are a town's **centre** district. Karlen and both of Pombal's affected districts show the same thing:
+
+| Town | District | The stray piece |
+| --- | --- | --- |
+| Karlen | `district-8-001` | the castle ward, drawn for the citadel's district |
+| Pombal | `district-5-001` | the castle ward, drawn for the citadel's district |
+| Pombal | `district-5-003` | the plaza, drawn for the market square's district |
+
+The rest of each district's ground is one piece of blocks.
+
+**Why.** The plaza and the castle are not blocks, so the districts stage leaves them alone, as the gameplan says ("whatever stands in them stays as it is"). Their ground is still drawn for the district of the landmark standing there. Nothing makes that district's blocks reach the special ward, so its tile is drawn apart from the rest. The 5 river-spanning districts are probably the census's nearest-middle bridge guess, but I have not traced them, because the instruction was to stop if the 20 were not all river-spanning.
+
+**Renders**, with district ground coloured: `docs/renders/karlen-6g-step3.svg` and `docs/renders/pombal-6g-step3.svg`. In Karlen the castle, in the middle of the walled town, carries the tint of a district whose ground lies north of the wall.
+
+**For your decision.** One option is that the district of the landmark on the plaza or in the castle claims a block beside that ward when seeded, as it claims its landmark blocks. Another is that the special ward's ground goes to the district of most of the blocks around it, while the landmark keeps its district; that would count as a landmark outside its ground.
 
 ## Not yet run
 
