@@ -613,30 +613,29 @@ and each stage draws on streams named `staged-…`. The stages:
     houses as it has buildings, chosen as one town: the innermost 62%
     always, everything inside the wall first, and beyond that by a score
     that luck inflates with distance, so the centre is solid and the town
-    thins toward its edge. A kept house belongs to the district of its
-    block. Wards are coarse, so each district's count is then made exact at
-    its borders, and no house is dropped or added in doing so. A district's
-    body is the largest piece of its blocks that touch; a block apart from
-    it, but for a landmark's own, first goes to the district whose body it
-    touches. A block then changes district only where its ground touches
-    the taker's body (or a bridge link joins the two), and never where
-    its loss would part the district that gives it; a district that is
-    short first takes the unbuilt blocks between it and the nearest houses,
-    and is then supplied from the nearest district with houses to spare
-    through the districts between, a block changing hands across each
-    shared border on the way. A thin district, every block of which holds
-    it together, can give nothing: it is passed through like any district
-    between, taking first a block that frees one of its own at the border
-    beyond, or one that lies behind that border, and the chain is tried
-    again with the district thicker. What blocks cannot settle is settled
-    the same way by single houses, which cross a bridge link as blocks do:
-    the house of a border block nearest the neighbour's ground, first only from a block that could go itself,
-    since a block that has given houses no longer holds its district
-    together, and then, for a district still short, from any border block
-    so long as most of its houses stay its district's.
-    Where a short district has no neighbour across a border with houses to
-    spare it takes the nearest kept houses of any district that has: the
-    last resort, counted in the selection's `fallback`. If the whole
+    thins toward its edge. Selection decides which houses exist and
+    nothing else.
+
+    **Districts** (`staged/districting.ts`, phase 6G). The districts are
+    drawn over the kept houses afterwards, block by block, for their
+    shape. Large runs of empty blocks, and empty blocks at the town's
+    edge, are open country: nobody's ground, and not drawn. Each district
+    is seeded at the block nearest its forecast ward (a waterside district
+    at the water). Where a bank's districts want more houses than it
+    holds, one crosses a bridge, its two parts seeded on the bridgeheads;
+    a part at a bridgehead takes the blocks nearest it up to its count.
+    The rest of each bank is cut into cells, one per district: a block
+    goes to the district whose centre is nearest once each district's
+    weight is taken off, and the weights are moved until each cell holds
+    about its count. A cell that a wall or the water cuts in two keeps
+    its larger part, and the cells are cut again with that allowed for.
+    The ground so drawn misses the counts by about half a house in a
+    hundred. `houseDistricts` then makes every count exact house by
+    house: a district that is short takes the houses nearest its ground
+    from the neighbour beside it, hop by hop from the nearest district
+    with houses to spare, so those few houses stand in a neighbour's
+    ground. No block changes hands to settle a count, which is what keeps
+    the districts compact. If the whole
     town has too few houses, ground is taken again half as large again, at
     most three times: the generator's only loop, which no settlement of
     Lomia needs.
@@ -754,27 +753,29 @@ kind of building in them and not by district. `docs/renders/*-6e-step1.svg`,
 workplace, landmark in a row), and `badanos-6e-step<n>-as-walled.svg` are Badanos, which the world gave no wall, drawn with one for comparison with
 the prototype.
 
-`node scripts/staged-census.ts [every] [--towns]` lays out every settlement
-(or every nth) with the staged generator and counts which invariants are
-broken and how often the non-touching fallback is used.
-`PROBLEM-6E-districts.md` describes what is still open.
+`node scripts/staged-census.ts [every] [--offset k] [--towns]` lays out
+every settlement (or every nth; `--offset` runs it in parts side by side)
+with the pack's generator and counts which invariants are broken, how
+district ground falls, and the districts stage's own figures.
 
-**Districts drawn after houses (phase 6G, in progress; `sim-6g.md`).**
-`staged/districting.ts` draws the districts over the kept houses block by
-block (seed, share among the banks, grow in turns, chains, single houses);
-each district claims its own landmarks' blocks and grows toward them, and a
-town that is not exact so is drawn again without them. Its numbers are
-`districts.drawn` in `layout.yaml`. It is not wired in yet.
-`node scripts/districting-census.ts [--generator] [--plain] [--towns a,b]
-[--every n] [--out file]` runs it beside the generator on every town of
-1,000 people or more and prints the gameplan's census, with landmarks
-outside their district's ground (`--plain`: without the landmarks leading).
-`FINDINGS-6G.md` has the figures and what is open. The renders of earlier
-phases named below were cleared out of `docs/renders/` in phase 6G (they are
-in git history); it now holds `<town>-pieces.svg` for the seven towns with a
-district drawn in pieces after Amendment 2 (Tiorpanki, Forviroria,
-Rochambery, Klovsvaatas, Charoy, Puerda, Mihivesavo), each district in its
-own colour and the district in pieces outlined in red.
+**Districts drawn after houses (phase 6G; `sim-6g.md`, `FINDINGS-6G.md`).**
+Measured on 2026-11-25 over all 682 settlements (546 towns, 518,468 kept
+houses), every layout invariant on:
+
+| Measure | Result |
+| --- | --- |
+| Settlements keeping every invariant | 682 of 682 |
+| Districts in more than one piece of blocks | 0 |
+| Districts drawn in pieces, bridge links counted as joins | 2 of 2,078 (Mihivesavo, Rochambery) |
+| Houses the districts' ground misses their counts by | 2,888 (0.56%) |
+| Houses standing in a neighbour's ground, each hop counted | 3,954 (0.76%) |
+| Town lots outside their own district's ground | 5,229 of 523,259 (1.00%) |
+| Towns whose ground misses by over 2% of their houses | 9; the worst Orteres, 43 of 538, and Ririm, 113 of 3,151 |
+| Districts spanning a river | 157 |
+| Landmarks whose block ended in another district's ground | 1,008 of 4,339 (23.2%) |
+
+`docs/renders/districts-*.png` show twelve towns, each lot in its
+building's district's colour over the districts' ground.
 
 **The village generator (phase 6E, Villages).** A settlement under
 `village.below` residents (1,000; 136 of Lomia's 682) is laid out by

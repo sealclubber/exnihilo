@@ -1,22 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { generateCity } from '../src/index.ts';
-import { type DistrictingInput, drawDistricts } from '../src/layout/staged/districting.ts';
+import { type DistrictingInput, drawDistricts, houseDistricts } from '../src/layout/staged/districting.ts';
 import { planTown, stagedSettings, townInput } from '../src/layout/staged/plan.ts';
 import type { Point } from '../src/schema.ts';
 import { lomiaWorld, medievalPack } from './pack.ts';
 
 const rules = stagedSettings(medievalPack()).districts.drawn as NonNullable<ReturnType<typeof stagedSettings>['districts']['drawn']>;
 
+type House = { block: number; ward: number; centre: Point };
+
 /** A grid of square blocks, each its own ward, with so many kept houses in each; blocks beside each other touch. */
-function grid(columns: number, rows: number, housesIn: (column: number, row: number) => number) {
+function grid(columns: number, rows: number, housesIn: (column: number, row: number) => number, shift = 0) {
   const blocks: Array<{ polygon: Point[] }> = [];
-  const houses: Array<{ block: number; ward: number }> = [];
+  const houses: House[] = [];
   const tilesBeside: number[][] = [];
   for (let row = 0; row < rows; row++) {
     for (let column = 0; column < columns; column++) {
       const block = blocks.length;
-      blocks.push({ polygon: [[column * 10, row * 10], [column * 10 + 9, row * 10], [column * 10 + 9, row * 10 + 9], [column * 10, row * 10 + 9]] });
-      for (let house = 0; house < housesIn(column, row); house++) houses.push({ block, ward: block });
+      const x = column * 10 + shift;
+      blocks.push({ polygon: [[x, row * 10], [x + 9, row * 10], [x + 9, row * 10 + 9], [x, row * 10 + 9]] });
+      for (let house = 0; house < housesIn(column, row); house++) houses.push({ block, ward: block, centre: [x + 1 + house, row * 10 + 4.5] });
       tilesBeside.push(
         [
           [column - 1, row],
@@ -32,73 +35,82 @@ function grid(columns: number, rows: number, housesIn: (column: number, row: num
   return { blocks, wards: blocks, houses, kept: houses.map((_, index) => index), tilesBeside };
 }
 
-/** Every kept house in exactly one district, by its block, or lent from it. */
-function housesBy(input: DistrictingInput, drawn: ReturnType<typeof drawDistricts>): number[] {
-  const count = input.targets.map(() => 0);
-  const inBlock = input.blocks.map(() => 0);
-  for (const house of input.kept) {
-    const block = (input.houses[house] as { block: number }).block;
-    inBlock[block] = (inBlock[block] as number) + 1;
-  }
-  inBlock.forEach((houses, block) => {
-    if (houses === 0) return;
-    const of = drawn.blockDistrict[block];
-    expect(of).toBeDefined();
-    const lent = drawn.lent.get(block);
-    count[of as number] = (count[of as number] as number) + houses - (lent?.houses ?? 0);
-    if (lent) {
-      expect(lent.houses).toBeLessThan(houses);
-      count[lent.to] = (count[lent.to] as number) + lent.houses;
+/** How many pieces a district's blocks make, blocks beside each other or joined by a bridge counting as touching. */
+function piecesOf(input: DistrictingInput, blockDistrict: ReadonlyArray<number | undefined>, district: number): number {
+  const mine = new Set(blockDistrict.flatMap((of, block) => (of === district ? [block] : [])));
+  const beside = (block: number) => [...(input.tilesBeside[block] ?? []), ...input.links.flatMap((link) => (link.a === block ? [link.b] : link.b === block ? [link.a] : []))];
+  let pieces = 0;
+  while (mine.size > 0) {
+    pieces++;
+    const stack = [mine.values().next().value as number];
+    mine.delete(stack[0] as number);
+    while (stack.length > 0) {
+      for (const next of beside(stack.pop() as number)) {
+        if (!mine.has(next)) continue;
+        mine.delete(next);
+        stack.push(next);
+      }
     }
-  });
-  return count;
+  }
+  return pieces;
 }
 
 describe('the districts stage', () => {
-  it('draws districts of exactly their counts, each in one piece, on one bank', () => {
-    const town = grid(6, 6, (column, row) => 1 + ((column * 7 + row * 3) % 4));
+  it('cuts one bank into districts near their counts, each in one piece, and every house gets exactly one district', () => {
+    const town = grid(8, 8, (column, row) => 1 + ((column * 7 + row * 3) % 4));
     const total = town.kept.length;
-    const input: DistrictingInput = { rules, ...town, links: [], seeds: [0, 35, 5], targets: [Math.floor(total / 2), Math.floor(total / 3), total - Math.floor(total / 2) - Math.floor(total / 3)] };
+    const targets = [Math.floor(total / 2), Math.floor(total / 3), total - Math.floor(total / 2) - Math.floor(total / 3)];
+    const input = { rules, ...town, links: [], seeds: [0, 63, 7], targets };
     const drawn = drawDistricts(input);
-    expect(drawn.off).toBe(0);
     expect(drawn.inPieces).toBe(0);
-    expect(housesBy(input, drawn)).toEqual(input.targets);
-    expect(drawn.have).toEqual(input.targets);
+    expect(drawn.islands).toBe(0);
+    for (let district = 0; district < targets.length; district++) expect(piecesOf(input, drawn.blockDistrict, district)).toBe(1);
+    // Every block with houses has a district.
+    town.houses.forEach((house) => expect(drawn.blockDistrict[house.block]).toBeDefined());
+    // The ground is near the counts; the houses are exactly at them.
+    expect(drawn.off).toBeLessThanOrEqual(Math.ceil(total * 0.05));
+    const settled = houseDistricts(drawn, input);
+    expect(settled.kept).toEqual(targets);
+    expect(settled.district.every((of) => of !== undefined)).toBe(true);
   });
 
   it('carries a district too large for its bank over a bridge, its two parts joined there', () => {
     // Two banks of 3 by 3 blocks, five houses each, a bridge from the right edge of one to the left edge of the other.
     const left = grid(3, 3, () => 5);
-    const right = grid(3, 3, () => 5);
+    const right = grid(3, 3, () => 5, 100);
     const offset = left.blocks.length;
-    const blocks = [...left.blocks, ...right.blocks.map((block) => ({ polygon: block.polygon.map(([x, y]) => [x + 100, y] as Point) }))];
-    const houses = [...left.houses, ...right.houses.map((house) => ({ block: house.block + offset, ward: house.ward + offset }))];
+    const blocks = [...left.blocks, ...right.blocks];
+    const houses = [...left.houses, ...right.houses.map((house) => ({ ...house, block: house.block + offset, ward: house.ward + offset }))];
     const tilesBeside = [...left.tilesBeside, ...right.tilesBeside.map((list) => list.map((block) => block + offset))];
     // Both districts start on the left bank; the larger wants more than that bank holds.
-    const input: DistrictingInput = { rules, blocks, wards: blocks, houses, kept: houses.map((_, index) => index), tilesBeside, links: [{ a: 5, b: offset + 3 }], seeds: [0, 3], targets: [60, 30] };
+    const input = { rules, blocks, wards: blocks, houses, kept: houses.map((_, index) => index), tilesBeside, links: [{ a: 5, b: offset + 3 }], seeds: [0, 3], targets: [60, 30] };
     const drawn = drawDistricts(input);
     expect(drawn.spans).toBe(1);
     expect(drawn.inPieces).toBe(0);
-    expect(drawn.off).toBe(0);
-    expect(housesBy(input, drawn)).toEqual([60, 30]);
-    // The bridgeheads are the crossing district's.
+    // The bridgeheads are the crossing district's, and the bridge is what joins its two parts.
     expect(drawn.blockDistrict[5]).toBe(drawn.blockDistrict[offset + 3]);
+    expect(piecesOf(input, drawn.blockDistrict, drawn.blockDistrict[5] as number)).toBe(1);
+    expect(houseDistricts(drawn, input).kept).toEqual([60, 30]);
   });
 
-  it("claims a district's landmark block and grows toward it", () => {
-    // A row of blocks, four houses in each but the sixth, which holds district 0's landmark. District 0 is seeded
-    // at the right end, district 1 at the left.
-    const town = grid(9, 1, (column) => (column === 5 ? 0 : 4));
-    const input: DistrictingInput = { rules, ...town, links: [], seeds: [8, 0], targets: [12, 20], landmarks: [{ district: 0, block: 5 }] };
+  it('leaves open country to nobody', () => {
+    // Four columns of houses, then eleven empty columns.
+    const town = grid(15, 3, (column) => (column < 4 ? 4 : 0));
+    const input = { rules, ...town, links: [], seeds: [0, 3], targets: [24, 24] };
     const drawn = drawDistricts(input);
-    expect(drawn.withoutLandmarks).toBe(false);
-    expect(drawn.blockDistrict[5]).toBe(0);
-    expect(drawn.landmarksOutside).toBe(0);
+    expect(drawn.openCountry).toBeGreaterThan(20);
+    for (let row = 0; row < 3; row++) expect(drawn.blockDistrict[row * 15 + 14]).toBeUndefined();
+    expect(houseDistricts(drawn, input).kept).toEqual([24, 24]);
+  });
+
+  it('brings a waterside district to the water', () => {
+    // The water lies along the left edge; the waterside district's forecast seed is at the far right.
+    const town = grid(8, 4, () => 3);
+    const water = town.blocks.map((_, block) => (block % 8) * 10);
+    const input = { rules, ...town, links: [], seeds: [31, 16], targets: [48, 48], waterside: [true, false], water, waterReach: 5 };
+    const drawn = drawDistricts(input);
+    expect(drawn.blockDistrict.some((of, block) => of === 0 && (water[block] as number) <= 5)).toBe(true);
     expect(drawn.inPieces).toBe(0);
-    expect(housesBy(input, drawn)).toEqual([12, 20]);
-    // Without the claim, the empty block is left over and joins the other district.
-    const plain = drawDistricts({ ...input, landmarks: [] });
-    expect(plain.blockDistrict[5]).toBe(1);
   });
 
   it('gives the same districts for the same input', () => {
@@ -107,33 +119,23 @@ describe('the districts stage', () => {
     expect(drawDistricts(input)).toEqual(drawDistricts(input));
   });
 
-  // The regression towns of sim-6g.md, beside the current pipeline, with the reference's targets (each district's
-  // buildings scaled to the kept total): without landmarks each figure is the reference's own on main at 1ebf85f.
-  const expected: Record<string, { offAfterChains: number; off: number; lent: number; spans: number; reseeded: number }> = {
-    Karlen: { offAfterChains: 5, off: 0, lent: 4, spans: 1, reseeded: 0 },
-    Haurinen: { offAfterChains: 4, off: 0, lent: 7, spans: 2, reseeded: 1 },
-    Borfino: { offAfterChains: 73, off: 26, lent: 29, spans: 1, reseeded: 0 },
-  };
-  const withLandmarks: Record<string, { outside: number; again: boolean; off: number; inPieces: number }> = {
-    Karlen: { outside: 2, again: false, off: 0, inPieces: 0 },
-    Haurinen: { outside: 1, again: false, off: 0, inPieces: 0 },
-    Borfino: { outside: 10, again: true, off: 26, inPieces: 0 },
-  };
-  for (const [name, want] of Object.entries(expected)) {
-    it(`gives ${name} its pinned figures`, () => {
+  // Towns that each broke an earlier version of the stage: bank sharing (Karlen), a bank with no bridge (Haurinen),
+  // a far bank hemmed in at its bridgehead (Borfino), a district striped across the river (Charoy), a bridgehead
+  // inland of the plaza (Puerda), and a harbour that did not reach the water (Pombal, in `staged-town.test.ts`).
+  for (const name of ['Karlen', 'Haurinen', 'Borfino', 'Charoy', 'Puerda']) {
+    it(`draws ${name} whole, near its counts, and exact house by house`, () => {
       const pack = medievalPack();
       const brief = lomiaWorld().settlements.find((settlement) => settlement.name === name);
       if (!brief) throw new Error(`no settlement ${name}`);
       const plan = planTown(brief, townInput(generateCity(brief, pack), pack), pack);
-      const kept = plan.selection.chosen;
-      const all = plan.districts.reduce((sum, district) => sum + district.buildings, 0);
-      const drawn = drawDistricts({ rules, blocks: plan.blocks, wards: plan.wards, houses: plan.houses, kept, tilesBeside: plan.tilesBeside, links: plan.links, seeds: plan.forecast.seeds, targets: plan.districts.map((district) => (district.buildings * kept.length) / all) });
-      expect({ offAfterChains: drawn.offAfterChains, off: drawn.off, lent: drawn.lent.size, spans: drawn.spans, reseeded: drawn.reseeded }).toEqual(want);
+      const drawn = plan.drawn;
       expect(drawn.inPieces).toBe(0);
       expect(drawn.islands).toBe(0);
-      // With the landmarks leading the ground, as the generator draws it (Borfino is not exact so, and is drawn again without).
-      const led = drawDistricts({ rules, blocks: plan.blocks, wards: plan.wards, houses: plan.houses, kept, tilesBeside: plan.tilesBeside, links: plan.links, seeds: plan.forecast.seeds, targets: plan.districts.map((district) => (district.buildings * kept.length) / all), landmarks: plan.landmarks });
-      expect({ outside: led.landmarksOutside, again: led.withoutLandmarks, off: led.off, inPieces: led.inPieces }).toEqual(withLandmarks[name]);
+      expect(drawn.unclaimed).toBe(0);
+      // The ground misses the counts by under 2% of the town's houses.
+      expect(drawn.off / plan.selection.chosen.length).toBeLessThan(0.02);
+      // Every district has exactly its count of houses.
+      expect(drawn.kept).toEqual(drawn.targets);
     });
   }
 });

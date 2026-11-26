@@ -176,8 +176,55 @@ Both fall-back towns come out exact by growth.
 **Stop 2: 7 town districts drawn in pieces.**
 - 6 span a river: Tiorpanki, Forviroria, Rochambery, Klovsvaatas, Charoy and Puerda. These are probably the census's nearest-middle guess at which piece a bridge joins.
 - 1 is on one bank: Mihivesavo's centre (`district-623-001`). Both of its pieces are ordinary blocks that the stage counts as joined, but they are drawn apart. I have not traced it.
-- Renders of all seven: `docs/renders/<town>-pieces.svg`, the district in pieces outlined in red. In Charoy and Forviroria the district's part on the far bank is broken up among its neighbours' blocks, which is more than a bridge being guessed wrong.
+- Renders of all seven were at `docs/renders/<town>-pieces.svg` (now in git history), the district in pieces outlined in red. In Charoy and Forviroria the district's part on the far bank is broken up among its neighbours' blocks, which is more than a bridge being guessed wrong.
+
+## The stage simplified: cells only, counts settled house by house (final)
+
+Nov 25, 2026. Branch `6g-cells`, from `6g-districts` at `c8adcff`.
+
+**Why.** The stage was asked to do five things at once with district ground: hold exactly each district's count, stay in one piece, be compact, hold its own landmarks, and touch the water where it must. Each pass that forced one broke another. Charoy's stripes were the cells coming out clean and the redraw by growth and the chains then threading blocks between neighbours to make the counts exact.
+
+**What changed.** District ground is no longer made exact. The cells are cut near their counts and left alone; `houseDistricts` settles the remainder house by house, so every district still has exactly its count of houses and layout still never changes the city.
+
+- **Removed:** growth in turns, landmark claims, chains (step 4), lending through shared blocks (step 5), both redraws, `scripts/districting-census.ts`, and the pack keys `chainAt`, `chainOver`, `chainTries`, `chainSteps`, `exactSteps`, `landmarkPull`.
+- **Bridgeheads.** A part of a district at a bridgehead takes the blocks nearest the bridgehead, each touching the last, up to its count, before the cells are cut. Forcing the bridgehead block into a cell centred elsewhere is what left far-bank parts of 6 to 11 houses. The district that crosses is the one whose centre, landmarks included, is nearest the bridge.
+- **Water.** A waterside district is seeded on a block within reach of the water, keeps its piece at the water when it is cut in two, and failing all that is given the shortest way of blocks to the water. This is the Pombal failure: its harbour ended 140 m from the river.
+- **Open country.** An empty block with housed blocks on fewer than `fringeSides` of the eight sides about it (within `fringeRadius`) is open country too, so districts no longer trail empty blocks at the town's edge.
+- **Pieces.** A cell cut in two keeps its larger part; the part let go joins the district most of its neighbours are in. The cells are then cut again up to `cellTries` times, asking `cellCorrection` times the shortfall more of each part, and the try nearest the counts is kept.
+- **Leftover houses** pass hop by hop from the nearest district with houses to spare, each district handing the next the houses nearest that one's ground. A house only ever joins a district whose ground is beside it.
+
+Pack 0.20.0, `LAYOUT_VERSION` 13.
+
+**Census, all 682 settlements, every layout invariant on** (`node scripts/staged-census.ts`):
+
+| Measure | main (`1ebf85f`) | Now |
+| --- | --- | --- |
+| Settlements keeping every invariant | 682 | 682 |
+| Town districts in more than one piece of blocks, in the stage's terms | | 0 |
+| Town districts drawn in pieces, bridge links counted as joins | 108 of 2,229 | 2 of 2,078 (Mihivesavo, Rochambery) |
+| Houses the ground misses the counts by | | 2,888 of 518,468 (0.56%) |
+| Houses standing in a neighbour's ground, each hop counted | | 3,954 (0.76%) |
+| Town lots outside their own district's ground | 0.56% of all lots | 5,229 of 523,259 (1.00%) |
+| Houses placed by the non-touching fallback | 1,372 | none: there is no fallback |
+| Districts spanning a river | | 157 |
+| Islands | | 0 |
+| Landmarks whose block ended in another district | 0 | 1,008 of 4,339 (23.2%) |
+| Given a way of blocks to the water / to a bridgehead | | 1 (Pombal) / 0 |
+
+**What is not good yet.**
+- **Nine towns miss by over 2% of their houses**, all with a river and few districts: Orteres 43 of 538, Ririm 113 of 3,151, Jaszent 26 of 395, Tofiano 17 of 324, Jamsasarila 17 of 265, Feins 26 of 718, Zhisov 8 of 238, Meunglain 14 of 561, and the smaller Charoy 5 of 245. Where a bridge part sits in the middle of a bank it cuts the district around it in two, and no cell fits. Those houses stand in the neighbour's ground.
+- **Two districts are drawn in pieces.** Mihivesavo's centre has one house beyond a road at the far west, joined in the stage and drawn apart, because ground is not drawn across the widest roads. Rochambery's `lower` has a small part across the river that the census does not join by its bridge.
+- **Landmarks:** 23% stand in another district's ground. They keep their district.
+- **A small part across a river.** A district that must carry only a few houses over a bridge gets a small far part. It is correct and looks odd.
+
+**Tests.** `npm run typecheck` is clean. Where this was written the machine is too slow and too small for the whole suite, so `npm run check` still has to be run once on the development machine. What was run here:
+- Passed: `staged-districting` (rewritten for the new stage), `staged-layout`, `staged-mesh`, `staged-roads`, `staged-wall`, `layout`, `layout-invariants`, `walls`, `spacing`, `pack`, `coherence`, `city`, and the server's tests.
+- Not finished: `staged-town` plans all 682 settlements in one test and ran out of time and memory here. Its stale tests are rewritten for the new stage but have not been seen to pass.
+- Failed on time alone: the `cost` tests of `life`, `rounds` and `outsiders`, and `avatar`'s "answers quickly in Pombal too". They measure speed.
+- Failed, cause not traced: `rounds.test.ts`, "has, among the busiest streets around midday, one that the market stalls open onto" (Badanos). It may only reflect where Badanos's market now stands; it was not checked against the branch before this change.
+- Fixed after they failed: the layout version pinned at 12 in `life-places` and `districts`.
+- Not run: `npm run test:viewer`.
 
 ## Not yet run
 
-Steps 4 and 5, so no renders and no house-character figure yet; `scripts/landmark-sites.ts`, which measured the old rule, is removed. Branch `6f-ground-districts` is not deleted; that waits until the phase is in.
+Step 4's house-character figure (the share of buildings on a house smaller than their footprint needs, before and after). Branch `6f-ground-districts` is not deleted; that waits until the phase is in.

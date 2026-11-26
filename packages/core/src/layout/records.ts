@@ -31,8 +31,9 @@ import { BearingSchema, PointSchema, RouteIdSchema, RouteKindSchema, SettlementI
  * staged generator's: wards, a lot's front, a sea route's exit at the quay, and gates that no building keeps.
  * Version 11 gives the staged generator's open-air buildings open ground on their lots, and its blocks courtyards.
  * Version 12 lays a settlement under the pack's village size out with the village generator.
+ * Version 13 draws a town's districts over its houses after they are chosen, as compact cells (phase 6G).
  */
-export const LAYOUT_VERSION = 12;
+export const LAYOUT_VERSION = 13;
 
 const recordId = (kind: string, digits: number) =>
   z.string().regex(new RegExp(`^${kind}-(0|[1-9][0-9]*)-[0-9]{${digits}}$`), `must be a ${kind} ID`);

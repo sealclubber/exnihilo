@@ -250,7 +250,12 @@ export function planTown(brief: SettlementBrief, town: number | TownInput, pack:
     }
     // The districts, drawn over the kept houses block by block, each to exactly its count.
     const lines = { blocks, houses, kept: chosen.chosen, tilesBeside: tiles.beside, links };
-    const districting = drawDistricts({ rules: settings.districts.drawn, wards: wards.wards, seeds: forecast.seeds, targets: wanted, landmarks: placed, ...lines });
+    // How far each block's ground is from the water's edge, for the districts that must touch it.
+    const { river, coast } = site;
+    const gap = (point: Point) => Math.max(0, Math.min(river ? river.gap(point) : Infinity, coast ? coast.gap(point) : Infinity));
+    const fromWater = river || coast ? blocks.map((block, index) => Math.min(...[...block.polygon, ...((tiles.rings[index] ?? []) as Point[][]).flat()].map(gap))) : undefined;
+    const waterside = input.districts.map((district) => placements.get(district.kind) === 'waterside');
+    const districting = drawDistricts({ rules: settings.districts.drawn, wards: wards.wards, seeds: forecast.seeds, targets: wanted, landmarks: placed, waterside, ...(fromWater && { water: fromWater }), waterReach: pack.layout.watersideReach * 0.75, ...lines });
     const drawn = { ...districting, ...houseDistricts(districting, lines) };
     const fitting = input.list && fitBuildings({ pack, buildings: input.list, districtOf: (building) => place.get(building.districtId) as number, landmarks: placed, elsewhere: atGates, houses, kept: drawn.district, roads });
     return { ...wards, blocks, lanes, landmarks: placed, unplaced, houses, passages, districts: input.districts, forecast, characters, selection: chosen, drawn, moreGround: attempt, gatehouses, gateLanes: gateLanesChosen, tiles: tiles.rings, tilesBeside: tiles.beside, links, ...(fitting && { fitting }) };

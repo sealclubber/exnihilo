@@ -663,20 +663,16 @@ const StagedSettingsSchema = z.strictObject({
     roomDefault: z.number().min(1),
     barriers: z.strictObject({ highway: z.number().nonnegative(), mainStreet: z.number().nonnegative(), river: z.number().nonnegative(), wall: z.number().nonnegative() }),
     /**
-     * Districts drawn over the kept houses, block by block (phase 6G, `staged/districting.ts`). A run of more than
-     * `openRun` touching empty blocks is open country, nobody's ground. Each district is seeded at a block and
-     * shared among the banks: while a bank's districts want more than `over` houses beyond what it holds, one
-     * crosses a bridge, whole if its count is within `whole` of what must move, else split, and a district already
-     * crossing carries more unless that would leave under `nearLeast` houses on the near bank; at most `rounds`
-     * times. Each bank is then cut into cells, one per district part, weighted toward each part's count in at most
-     * `cellRounds` rounds, the weights moved `cellStep` times the miss for `cellStepRounds` rounds and
-     * `cellStepLate` times after. Blocks left over join a neighbour, in at most `fills` passes. A district short by
-     * `chainAt` or more is passed blocks along a chain of neighbours from one with that surplus: a block holding at
-     * most `chainOver` more houses than wanted, the `chainTries` largest tried, in at most `chainSteps` steps; then
-     * single houses make the counts exact, in at most `exactSteps`. A town not exact with cells is drawn again by
-     * growth in turns, each district claiming its own landmarks' blocks and growing toward them, a block's way from
-     * a landmark counting its own and `landmarkPull` times the landmark's way from the seed; and failing that by
-     * plain growth.
+     * Districts drawn over the kept houses, block by block (phase 6G, `staged/districting.ts`), for their shape:
+     * each comes out near its count, and the houses over or under are settled one by one afterwards. A run of more
+     * than `openRun` touching empty blocks is open country, nobody's ground, and so is an empty block with housed
+     * blocks on fewer than `fringeSides` of the eight sides about it within `fringeRadius` metres. Each district is
+     * seeded at a block and shared among the banks: while a bank's districts want more than `over` houses beyond
+     * what it holds, one crosses a bridge, whole if its count is within `whole` of what must move, else split, and
+     * a district already crossing carries more unless that would leave under `nearLeast` houses on the near bank;
+     * at most `rounds` times. Each bank is then cut into cells, one per district part, weighted toward each part's
+     * count in at most `cellRounds` rounds, the weights moved `cellStep` times the miss for `cellStepRounds` rounds
+     * and `cellStepLate` times after. Blocks left over join a neighbour, in at most `fills` passes.
      */
     drawn: z.strictObject({
       over: wholeNumber,
@@ -684,17 +680,16 @@ const StagedSettingsSchema = z.strictObject({
       nearLeast: wholeNumber,
       rounds: wholeNumber,
       fills: wholeNumber,
-      chainAt: wholeNumber.min(1),
-      chainOver: wholeNumber,
-      chainTries: wholeNumber.min(1),
-      chainSteps: wholeNumber,
-      exactSteps: wholeNumber,
-      landmarkPull: z.number().nonnegative(),
       openRun: wholeNumber,
+      fringeRadius: metres,
+      fringeSides: wholeNumber,
       cellRounds: wholeNumber.min(1),
       cellStep: z.number().positive(),
       cellStepLate: z.number().positive(),
       cellStepRounds: wholeNumber,
+      /** The cells are cut up to `cellTries` times, each try asking of a part `cellCorrection` times what it came out short by more. */
+      cellTries: wholeNumber.min(1),
+      cellCorrection: z.number().nonnegative(),
     }),
   }),
   /**

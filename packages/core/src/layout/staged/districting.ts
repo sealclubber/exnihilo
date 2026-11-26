@@ -2,56 +2,45 @@
  * The districts stage (phase 6G, `sim-6g.md`): districts drawn over the kept
  * houses, block by block, after selection has decided which houses exist.
  *
+ * The districts are cut for their shape. Each comes out near its count, not
+ * exactly at it; the few houses over or under are settled house by house
+ * afterwards (`houseDistricts`), so that every district has exactly its count
+ * of houses while its ground stays whole and compact.
+ *
  * A bank is a set of blocks joined without crossing a bridge; a unit is a
  * district, or the part of one on one bank; a bridgehead is the block at one
- * end of a bridge link. In five steps:
+ * end of a bridge link.
  *
- * 1. Seed. Each district is given one block with kept houses, the nearest to
- *    the centre of its forecast seed ward, the smallest districts first; no two
- *    share one.
- * 2. Share the districts among the banks. While a bank's units want more
+ * 1. Open country. A run of more than `openRun` touching empty blocks (no kept
+ *    house, no landmark, no bridgehead) is nobody's ground, and so is an empty
+ *    block with housed blocks on fewer than `fringeSides` of the eight sides
+ *    about it. A pocket of houses this would cut off keeps its shortest way
+ *    back to the town.
+ * 2. Seed. Each district is given one block with kept houses, the nearest to
+ *    the middle of its forecast seed ward, the smallest districts first; no two
+ *    share one. A waterside district is seeded on a block at the water.
+ * 3. Share the districts among the banks. While a bank's units want more
  *    houses than it holds, a district crosses a bridge to the bank with most
  *    room: one already crossing there carries more over; otherwise the unit
- *    nearest the bridge goes over whole if it nearly fits, or splits, both
- *    parts seeded on their bridgeheads, which are theirs from then on. A bank
- *    with no bridge sends its largest unit to the bank with most room.
- * 3. Cells (or, falling back, growth in turns: the unit furthest below its
- *    count claims the unclaimed block touching its ground on its own bank
- *    nearest its seed, empty blocks too); then blocks left over join the
- *    touching unit with the smallest surplus, and a block that touches none,
- *    the nearest unit.
- * 4. Pass surplus along chains. A unit short is handed border blocks along a
- *    path of touching units from the nearest with a surplus, each to the next,
- *    never a seed or a bridgehead and never leaving either side in more pieces.
- * 5. Make the counts exact. Single houses are lent along a path of touching
- *    districts through one border block per hop: the block stays its owner's
- *    ground, keeps at least one of its owner's houses, and lends to one
- *    neighbour only.
- *
- * Open country is nobody's: a run of more than `openRun` touching empty
- * blocks (no kept house, no landmark, no bridgehead) is never claimed, but a
- * pocket of houses it would cut off keeps its shortest way back to the town.
- *
- * Step 3 is cells, not growth (Amendment 2 of `sim-6g.md`): on each bank every
- * unit has a centre, its seed with its own landmarks' blocks on that bank, and
- * a weight; a block goes to the unit for which its squared distance from the
- * centre less the weight is least, and the weights are raised and lowered
- * until each unit holds about its count. A unit left in pieces keeps its piece
- * with its bridgehead, or else with most houses, and lets the rest go to its
- * neighbours.
- *
- * A town that does not come out exact with cells is drawn again with growth,
- * the landmarks leading: each district claims its own landmarks' blocks and
- * grows toward them, lets go of what it cannot reach, and never chains a
- * landmark's block away. One still not exact so is drawn with plain growth. A
- * landmark whose block ends in another district's ground stays there.
+ *    whose centre is nearest the bridge goes over whole if it nearly fits, or
+ *    splits, both parts seeded on their bridgeheads. A bank with no bridge
+ *    sends its largest unit to the bank with most room.
+ * 4. Cells. A unit on a bridgehead takes the blocks nearest its bridgehead,
+ *    each touching the last, up to its count. The rest of each bank is cut
+ *    into cells, one per unit: a unit has a centre (its seed with its own
+ *    landmarks' blocks on that bank) and a weight; a block goes to the unit for
+ *    which its squared distance from the centre less the weight is least, and
+ *    the weights are raised and lowered until each unit holds about its count.
+ * 5. Tidy. A unit left in pieces keeps the piece with most houses and lets
+ *    the rest go; a block let go joins the unit most of its neighbours are in.
+ *    A unit that crosses a bridge is given the shortest way of blocks to its
+ *    bridgehead if it lacks one, and a waterside district to the water.
  *
  * The stage reads no randomness. Ties go to the first in the order blocks,
  * units and districts are given.
  */
 import type { StagedSettings } from '../../pack/schema.ts';
 import type { Point } from '../../schema.ts';
-import { distanceToPolygonEdge } from '../geometry.ts';
 
 export type DistrictingSettings = NonNullable<StagedSettings['districts']['drawn']>;
 
@@ -75,6 +64,10 @@ export interface DistrictingInput {
   targets: readonly number[];
   /** The landmarks reserved, each with its district and its block, if it has them. */
   landmarks?: ReadonlyArray<{ district?: number; block?: number }>;
+  /** For each district, whether it must touch the water; for each block, how far its ground is from the water; and how near counts as touching. */
+  waterside?: readonly boolean[];
+  water?: readonly number[];
+  waterReach?: number;
 }
 
 /** One district, or its part on one bank. */
@@ -84,46 +77,42 @@ export interface DistrictUnit {
   seed: number;
   /** The bridgeheads that are this unit's, where its district crosses a bridge. */
   heads?: number[];
+  /** A waterside district's unit: its seed is a block at the water, and stays its own. */
+  anchored?: boolean;
 }
 
 export interface Districting {
   /** For each block, its district; nothing for an empty block that no district reached. */
   blockDistrict: Array<number | undefined>;
-  /** The blocks that lend some of their houses to a neighbouring district, and how many. */
-  lent: Map<number, { to: number; houses: number }>;
-  /** For each district, the whole number of houses it is to have, and how many it has at the end. */
+  /** For each district, the whole number of houses it is to have, and how many stand in its ground. */
   targets: number[];
   have: number[];
-  /** The bank of each block, the units, and each unit's houses after the chains. */
+  /** The bank of each block, the units, and the houses in each unit's ground. */
   bank: number[];
   units: DistrictUnit[];
   unitHave: number[];
-  /** How far the districts were from their counts after the chains, before single houses (half the sum of every miss). */
-  offAfterChains: number;
-  /** How far they are at the end. */
+  /** How far the districts' ground is from their counts: half the sum of every miss. `houseDistricts` settles it. */
   off: number;
   /** Districts in more than one piece of blocks with houses, a bridge counting as a join. */
   inPieces: number;
   /** Districts with ground on both sides of a bridge. */
   spans: number;
-  /** Units re-seeded on another bank for want of a bridge, units moved across whole, and blocks handed along chains. */
+  /** Units re-seeded on another bank for want of a bridge, and units moved across whole. */
   reseeded: number;
   relocated: number;
-  chainMoves: number;
   /** Kept houses in blocks that touched no unit on their bank, and so joined the nearest. */
   islands: number;
   /** Kept houses in blocks no unit claimed. */
   unclaimed: number;
-  /** Landmark blocks claimed by their districts, and blocks let go for being out of reach of their unit's seed. */
-  claimed: number;
-  released: number;
-  /** How the districts were drawn: with cells; with growth, the landmarks leading, because cells did not come out exact; or with plain growth, because neither did. */
-  method: 'cells' | 'growth' | 'plain';
   /** Blocks of open country, and blocks of it kept as a way to a pocket of houses. */
   openCountry: number;
   connectors: number;
   /** Landmarks with a district and a block whose block ends in another district's ground. */
   landmarksOutside: number;
+  /** Waterside districts that had to be given a way of blocks to the water. */
+  waterPaths: number;
+  /** Units that had to be given a way of blocks to their bridgehead. */
+  headPaths: number;
 }
 
 /** The mean of an outline's corners. */
@@ -132,15 +121,12 @@ const apart = (a: Point, b: Point) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const half = (have: readonly number[], want: readonly number[]) => Math.round(have.reduce((sum, value, at) => sum + Math.abs(value - (want[at] as number)), 0) / 2);
 
 export function drawDistricts(input: DistrictingInput): Districting {
-  let drawn = draw(input, 'cells');
-  if (drawn.off > 0) drawn = draw(input, 'growth');
-  if (drawn.off > 0) drawn = draw(input, 'plain');
+  const drawn = draw(input);
   drawn.landmarksOutside = (input.landmarks ?? []).filter((landmark) => landmark.district !== undefined && landmark.block !== undefined && landmark.block < input.blocks.length && drawn.blockDistrict[landmark.block] !== landmark.district).length;
   return drawn;
 }
 
-function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, targets, landmarks = [] }: DistrictingInput, method: Districting['method']): Districting {
-  const led = method === 'growth';
+function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, targets, landmarks = [], waterside = [], water, waterReach = 0 }: DistrictingInput): Districting {
   const B = blocks.length;
   const D = targets.length;
   const keptB: number[] = blocks.map(() => 0);
@@ -210,6 +196,19 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
       }
     }
     if (run.length > rules.openRun) for (const block of run) outside[block] = true;
+  }
+  // So is an empty block at the town's edge: one without housed blocks on enough sides of it.
+  const housed = blocks.flatMap((_, block) => ((keptB[block] as number) > 0 ? [block] : []));
+  for (let block = 0; block < B; block++) {
+    if (outside[block] || !empty(block)) continue;
+    const sides = new Set<number>();
+    const at = blockMiddle[block] as Point;
+    for (const other of housed) {
+      const to = blockMiddle[other] as Point;
+      if (apart(at, to) > rules.fringeRadius) continue;
+      sides.add(Math.floor(((Math.atan2(to[1] - at[1], to[0] - at[0]) + Math.PI) / (2 * Math.PI)) * 8) % 8);
+    }
+    if (sides.size < rules.fringeSides) outside[block] = true;
   }
   // A pocket of houses that open country cuts off from the town keeps the shortest way of blocks back to it.
   let connectors = 0;
@@ -292,11 +291,27 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
   });
   const taken = new Set<number>();
   /** The free block with kept houses nearest a point, on the bank given or any. */
-  const nearestKept = (from: Point, onBank: number | undefined): number => {
+  const atWater = (block: number) => water !== undefined && (water[block] ?? Infinity) <= waterReach;
+  /** The free block with kept houses nearest the water, on the bank given or any. */
+  const nearestWater = (onBank: number | undefined): number => {
+    let best = -1;
+    let least = Infinity;
+    for (let block = 0; block < B; block++) {
+      if (taken.has(block) || keptB[block] === 0 || (bank[block] as number) < 0 || (onBank !== undefined && bank[block] !== onBank)) continue;
+      const away = water?.[block] ?? Infinity;
+      if (away < least) {
+        least = away;
+        best = block;
+      }
+    }
+    return best;
+  };
+  const nearestKept = (from: Point, onBank: number | undefined, byWater = false): number => {
     let best = -1;
     let least = Infinity;
     for (let block = 0; block < B; block++) {
       if (taken.has(block) || keptB[block] === 0 || (onBank !== undefined && bank[block] !== onBank)) continue;
+      if (byWater && !atWater(block)) continue;
       const away = apart(blockMiddle[block] as Point, from);
       if (away < least) {
         least = away;
@@ -308,12 +323,35 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
   const units: DistrictUnit[] = [];
   for (const district of [...order].sort((a, b) => (T[a] as number) - (T[b] as number))) {
     const ward = seedWard[district] as number;
-    const block = nearestKept(ward >= 0 ? (wardMiddle[ward] as Point) : [0, 0], undefined);
+    const from: Point = ward >= 0 ? (wardMiddle[ward] as Point) : [0, 0];
+    // A waterside district starts on a block at the water: the nearest such to its ward, or failing any, the block
+    // nearest the water.
+    const anchored = waterside[district] === true && water !== undefined;
+    let block = anchored ? nearestKept(from, undefined, true) : nearestKept(from, undefined);
+    if (block < 0 && anchored) block = nearestWater(undefined);
     if (block < 0) continue;
     taken.add(block);
-    units.push({ district, target: T[district] as number, seed: block });
+    units.push({ district, target: T[district] as number, seed: block, ...(anchored && { anchored }) });
   }
 
+  /**
+   * A unit's centre: its seed's middle with those of its district's own landmarks' blocks on its bank. A unit on a
+   * bridgehead, or at the water, keeps its seed's.
+   */
+  const centreOf = (unit: DistrictUnit): Point => {
+    const from = blockMiddle[unit.seed] as Point;
+    if (unit.heads || unit.anchored) return [from[0], from[1]];
+    let x = from[0];
+    let y = from[1];
+    let count = 1;
+    for (const landmark of landmarks) {
+      if (landmark.district !== unit.district || landmark.block === undefined || landmark.block >= B || (bank[landmark.block] as number) < 0 || bank[landmark.block] !== bank[unit.seed]) continue;
+      x += (blockMiddle[landmark.block] as Point)[0];
+      y += (blockMiddle[landmark.block] as Point)[1];
+      count++;
+    }
+    return [x / count, y / count];
+  };
   // ---- 2. Share the districts among the banks ------------------------------------------------------------------
   const demand = () => {
     const wants: number[] = new Array<number>(banks).fill(0);
@@ -411,7 +449,7 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     }
     // Otherwise the unit on the crowded bank nearest the bridge that does not already cross goes over, whole if it
     // fits, else in part.
-    const toNear = (unit: DistrictUnit) => apart(blockMiddle[unit.seed] as Point, blockMiddle[near] as Point);
+    const toNear = (unit: DistrictUnit) => apart(centreOf(unit), blockMiddle[near] as Point);
     const unit = units
       .filter((one) => bank[one.seed] === over)
       .sort((a, b) => toNear(a) - toNear(b))
@@ -434,7 +472,18 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     }
   }
 
-  // ---- 3. Cells, or growth in turns ----------------------------------------------------------------------------
+  // A waterside unit that the sharing moved is put back at the water on the bank it went to.
+  for (const unit of units) {
+    if (!unit.anchored || unit.heads || atWater(unit.seed)) continue;
+    const onBank = bank[unit.seed] as number;
+    taken.delete(unit.seed);
+    let block = nearestKept(blockMiddle[unit.seed] as Point, onBank, true);
+    if (block < 0) block = nearestWater(onBank);
+    if (block >= 0) unit.seed = block;
+    taken.add(unit.seed);
+  }
+
+  // ---- 4. Cells ------------------------------------------------------------------------------------------------
   const U = units.length;
   const UT = units.map((unit) => unit.target);
   const g: Array<number | undefined> = blocks.map(() => undefined);
@@ -450,99 +499,48 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
       hv[at] = (hv[at] as number) + (keptB[block] as number);
     }
   });
-  // Each district claims its own landmarks' blocks, on any bank where it has a unit: the first of its units there.
-  const marks: number[][] = units.map(() => []);
-  let claimed = 0;
-  if (led) {
-    for (const landmark of landmarks) {
-      if (landmark.district === undefined || landmark.block === undefined || landmark.block >= B) continue;
-      const block = landmark.block;
-      const at = units.findIndex((unit) => unit.district === landmark.district && bank[unit.seed] === bank[block]);
-      if (at < 0) continue;
-      if (g[block] === undefined) {
-        g[block] = at;
-        hv[at] = (hv[at] as number) + (keptB[block] as number);
-      }
-      if (g[block] === at && !(marks[at] as number[]).includes(block)) {
-        (marks[at] as number[]).push(block);
-        claimed++;
-      }
-    }
-  }
-  const front = units.map(() => new Set<number>());
-  const reach = (at: number, block: number) => {
-    for (const next of badj[block] as number[]) if (g[next] === undefined && bank[next] === bank[(units[at] as DistrictUnit).seed]) (front[at] as Set<number>).add(next);
-  };
-  units.forEach((unit, at) => {
-    reach(at, unit.seed);
-    for (const block of unit.heads ?? []) if (g[block] === at) reach(at, block);
-    for (const block of marks[at] as number[]) reach(at, block);
-  });
-  if (method === 'cells') cells();
-  const stopped: boolean[] = units.map(() => false);
-  const furthestBelow = (a: number, b: number) => (hv[a] as number) / (UT[a] as number) - (hv[b] as number) / (UT[b] as number);
-  while (method !== 'cells') {
-    const turn = [...Array(U).keys()].filter((at) => !stopped[at] && (hv[at] as number) < (UT[at] as number)).sort(furthestBelow);
-    if (turn.length === 0) break;
-    let claimed = false;
-    for (const at of turn) {
-      const seedAt = blockMiddle[(units[at] as DistrictUnit).seed] as Point;
-      let best = -1;
-      let least = Infinity;
-      for (const block of front[at] as Set<number>) {
-        if (g[block] !== undefined) {
-          (front[at] as Set<number>).delete(block);
-          continue;
-        }
-        // Nearest the seed, or a landmark's block with part of that block's own way from the seed.
-        let away = apart(blockMiddle[block] as Point, seedAt);
-        for (const mark of marks[at] as number[]) away = Math.min(away, apart(blockMiddle[block] as Point, blockMiddle[mark] as Point) + apart(blockMiddle[mark] as Point, seedAt) * rules.landmarkPull);
-        if (away < least) {
-          least = away;
-          best = block;
-        }
-      }
-      if (best < 0) {
-        stopped[at] = true;
-        continue;
-      }
-      g[best] = at;
-      hv[at] = (hv[at] as number) + (keptB[best] as number);
-      (front[at] as Set<number>).delete(best);
-      reach(at, best);
-      claimed = true;
-      break;
-    }
-    if (!claimed) break;
-  }
   /**
    * Each bank cut into cells, one per unit: a block goes to the unit for which its squared distance from the unit's
    * centre less the unit's weight is least, and the weights are moved toward each unit's count.
    */
-  function cells() {
-    const centre: Point[] = units.map((unit) => [...(blockMiddle[unit.seed] as Point)] as Point);
-    // A unit's centre is its seed's with its own landmarks' blocks on its bank; a unit on a bridgehead keeps that.
-    const sums = units.map((_, at) => [(centre[at] as Point)[0], (centre[at] as Point)[1], 1] as [number, number, number]);
-    for (const landmark of landmarks) {
-      if (landmark.district === undefined || landmark.block === undefined || landmark.block >= B || (bank[landmark.block] as number) < 0) continue;
-      const block = landmark.block;
-      const at = units.findIndex((unit) => unit.district === landmark.district && bank[unit.seed] === bank[block] && !unit.heads);
-      if (at < 0) continue;
-      const sum = sums[at] as [number, number, number];
-      sum[0] += (blockMiddle[block] as Point)[0];
-      sum[1] += (blockMiddle[block] as Point)[1];
-      sum[2]++;
-    }
-    sums.forEach((sum, at) => (centre[at] = [sum[0] / sum[2], sum[1] / sum[2]]));
+  function cells(centre: readonly Point[], want: readonly number[]) {
     const weight: number[] = units.map(() => 0);
+    // A unit on a bridgehead first: it takes the blocks nearest its bridgehead, each touching the last, up to its
+    // count. Its ground is then about the bridge whatever stands beside it, and the cells are cut from the rest.
+    // (A waterside unit is not drawn so: the blocks along a quay seldom touch enough others to make its count.)
+    const atBridge = new Set<number>();
+    units.forEach((unit, at) => {
+      const head = unit.heads?.[0];
+      if (head === undefined || atBridge.has(head)) return;
+      const from = blockMiddle[head] as Point;
+      const edge = new Set<number>([head]);
+      let have = 0;
+      while (edge.size > 0) {
+        let next = -1;
+        let least = Infinity;
+        for (const block of edge) {
+          const away = apart(blockMiddle[block] as Point, from);
+          if (away < least) {
+            least = away;
+            next = block;
+          }
+        }
+        if (have + (keptB[next] as number) / 2 > (want[at] as number)) break;
+        edge.delete(next);
+        atBridge.add(next);
+        g[next] = at;
+        have += keptB[next] as number;
+        for (const other of badj[next] as number[]) if (!atBridge.has(other) && bank[other] === bank[head]) edge.add(other);
+      }
+    });
     for (let onBank = 0; onBank < banks; onBank++) {
-      const here = [...Array(U).keys()].filter((at) => bank[(units[at] as DistrictUnit).seed] === onBank);
-      const ground = blocks.flatMap((_, block) => (bank[block] === onBank ? [block] : []));
+      const here = [...Array(U).keys()].filter((at) => bank[(units[at] as DistrictUnit).seed] === onBank && !(units[at] as DistrictUnit).heads);
+      const ground = blocks.flatMap((_, block) => (bank[block] === onBank && !atBridge.has(block) ? [block] : []));
       if (here.length === 0 || ground.length === 0) continue;
       const mx = ground.reduce((sum, block) => sum + (blockMiddle[block] as Point)[0], 0) / ground.length;
       const my = ground.reduce((sum, block) => sum + (blockMiddle[block] as Point)[1], 0) / ground.length;
       const spread = ground.reduce((sum, block) => sum + ((blockMiddle[block] as Point)[0] - mx) ** 2 + ((blockMiddle[block] as Point)[1] - my) ** 2, 0) / ground.length;
-      const scale = spread / Math.max(1, cap[onBank] as number);
+      const scale = spread / Math.max(1, ground.reduce((sum, block) => sum + (keptB[block] as number), 0));
       const cell = new Map<number, number>();
       let bestMiss = Infinity;
       let best = new Map<number, number>();
@@ -561,22 +559,26 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
           cell.set(block, owner);
           held.set(owner, (held.get(owner) as number) + (keptB[block] as number));
         }
-        const miss = here.reduce((sum, at) => sum + Math.abs((held.get(at) as number) - (UT[at] as number)), 0);
+        const miss = here.reduce((sum, at) => sum + Math.abs((held.get(at) as number) - (want[at] as number)), 0);
         if (miss < bestMiss) {
           bestMiss = miss;
           best = new Map(cell);
         }
         if (miss <= here.length) break;
         const step = round < rules.cellStepRounds ? rules.cellStep : rules.cellStepLate;
-        for (const at of here) weight[at] = (weight[at] as number) + step * scale * ((UT[at] as number) - (held.get(at) as number));
+        for (const at of here) weight[at] = (weight[at] as number) + step * scale * ((want[at] as number) - (held.get(at) as number));
       }
       for (const block of ground) g[block] = best.get(block);
     }
-    units.forEach((unit, at) => {
-      for (const head of unit.heads ?? []) g[head] = at;
-    });
-    // A unit cut in pieces keeps the piece with its bridgehead, or else the one with most houses; the rest is let go.
-    // Its seed is then its housed block nearest its centre.
+    tidy(false);
+    hv.fill(0);
+    for (let block = 0; block < B; block++) if (g[block] !== undefined) hv[g[block] as number] = (hv[g[block] as number] as number) + (keptB[block] as number);
+  }
+  /**
+   * A unit cut in pieces keeps the one with most houses (a waterside unit, the one at the water with most), or,
+   * once its bridgeheads are joined to it, the one with a bridgehead; the rest is let go.
+   */
+  function tidy(byHead: boolean) {
     for (let at = 0; at < U; at++) {
       const unit = units[at] as DistrictUnit;
       const mine = blocks.flatMap((_, block) => (g[block] === at ? [block] : []));
@@ -589,40 +591,77 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
         seen.add(start);
         let count = 0;
         let head = false;
+        let wet = false;
         for (let i = 0; i < piece.length; i++) {
           const block = piece[i] as number;
           count += keptB[block] as number;
           if ((unit.heads ?? []).includes(block)) head = true;
+          if (unit.anchored === true && atWater(block)) wet = true;
           for (const next of badj[block] as number[]) {
             if (g[next] !== at || bank[next] !== bank[block] || seen.has(next)) continue;
             seen.add(next);
             piece.push(next);
           }
         }
-        const score = head ? Number.MAX_SAFE_INTEGER / 2 + count : count;
+        // A waterside unit keeps a piece at the water before a larger one away from it.
+        const score = (byHead && head ? Number.MAX_SAFE_INTEGER / 2 : 0) + (wet ? Number.MAX_SAFE_INTEGER / 8 : 0) + count;
         if (score > keepScore) {
           keepScore = score;
           keep = piece;
         }
       }
       const kept = new Set(keep);
-      for (const block of mine) if (!kept.has(block)) g[block] = undefined;
-      let seed = -1;
+      for (const block of mine) {
+        if (kept.has(block)) continue;
+        g[block] = undefined;
+        hv[at] = (hv[at] as number) - (keptB[block] as number);
+      }
+    }
+  }
+  /** A unit takes the shortest way of blocks on its bank from its ground to a block, and the block; false if there is none. */
+  const takeWayTo = (at: number, ends: (block: number) => boolean): boolean => {
+    const mine = blocks.flatMap((_, block) => (g[block] === at ? [block] : []));
+    if (mine.some(ends)) return true;
+    const onBank = bank[(units[at] as DistrictUnit).seed];
+    const before = new Map<number, number>(mine.map((block) => [block, -1]));
+    const queue = [...mine];
+    let found = -1;
+    if (mine.length === 0) {
+      // No ground at all: it starts from the nearest block on its bank that will do.
       let least = Infinity;
-      for (const block of keep) {
-        if ((keptB[block] as number) === 0) continue;
-        const away = ((blockMiddle[block] as Point)[0] - (centre[at] as Point)[0]) ** 2 + ((blockMiddle[block] as Point)[1] - (centre[at] as Point)[1]) ** 2;
+      for (let block = 0; block < B; block++) {
+        if (bank[block] !== onBank || !ends(block)) continue;
+        const away = apart(blockMiddle[block] as Point, blockMiddle[(units[at] as DistrictUnit).seed] as Point);
         if (away < least) {
           least = away;
-          seed = block;
+          found = block;
         }
       }
-      if (seed >= 0 && !unit.heads) unit.seed = seed;
+      if (found < 0) return false;
+      before.set(found, -1);
     }
-    hv.fill(0);
-    for (let block = 0; block < B; block++) if (g[block] !== undefined) hv[g[block] as number] = (hv[g[block] as number] as number) + (keptB[block] as number);
-  }
-  // Blocks left over join the touching unit on their bank with the smallest surplus.
+    for (let i = 0; i < queue.length && found < 0; i++) {
+      const block = queue[i] as number;
+      for (const next of badj[block] as number[]) {
+        if (before.has(next) || bank[next] !== onBank) continue;
+        before.set(next, block);
+        if (ends(next)) {
+          found = next;
+          break;
+        }
+        queue.push(next);
+      }
+    }
+    if (found < 0) return false;
+    for (let block = found; block !== -1 && g[block] !== at; block = before.get(block) as number) {
+      const was = g[block];
+      if (was !== undefined) hv[was] = (hv[was] as number) - (keptB[block] as number);
+      g[block] = at;
+      hv[at] = (hv[at] as number) + (keptB[block] as number);
+    }
+    return true;
+  };
+  // Blocks left over join a touching unit on their bank.
   const fillIn = () => {
     for (let pass = 0; pass < rules.fills; pass++) {
       let any = false;
@@ -630,10 +669,18 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
         if (g[block] !== undefined) continue;
         let best = -1;
         let least = Infinity;
+        // A block let go joins the unit most of its neighbours are in, the one with the smaller surplus where two are
+        // level: that keeps the cells' shapes.
+        const besideOf = new Map<number, number>();
         for (const next of badj[block] as number[]) {
           const at = g[next];
-          if (at === undefined || bank[next] !== bank[block] || (hv[at] as number) - (UT[at] as number) >= least) continue;
-          least = (hv[at] as number) - (UT[at] as number);
+          if (at === undefined || bank[next] !== bank[block]) continue;
+          besideOf.set(at, (besideOf.get(at) ?? 0) + 1);
+        }
+        for (const [at, count] of besideOf) {
+          const value = -count * 1e6 + (hv[at] as number) - (UT[at] as number);
+          if (value >= least) continue;
+          least = value;
           best = at;
         }
         if (best < 0) continue;
@@ -644,7 +691,44 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
       if (!any) break;
     }
   };
-  fillIn();
+  // The cells are cut, tidied and filled in up to `cellTries` times. A cell that a wall or the water cuts in two
+  // loses its smaller part to its neighbours, and so comes out under its count: the next try asks more of it, and
+  // less of those that came out over. The try nearest the counts is kept.
+  const centre = units.map(centreOf);
+  const want = [...UT];
+  let nearest: Array<number | undefined> = [];
+  let leastMiss = Infinity;
+  for (let attempt = 0; attempt < rules.cellTries; attempt++) {
+    g.fill(undefined);
+    cells(centre, want);
+    fillIn();
+    const miss = units.reduce((sum, _, at) => sum + Math.abs((hv[at] as number) - (UT[at] as number)), 0);
+    if (miss < leastMiss) {
+      leastMiss = miss;
+      nearest = [...g];
+    }
+    if (miss <= U) break;
+    units.forEach((_, at) => (want[at] = Math.max(1, (want[at] as number) + rules.cellCorrection * ((UT[at] as number) - (hv[at] as number)))));
+  }
+  nearest.forEach((at, block) => (g[block] = at));
+  hv.fill(0);
+  for (let block = 0; block < B; block++) if (g[block] !== undefined) hv[g[block] as number] = (hv[g[block] as number] as number) + (keptB[block] as number);
+  // Its seed is then its housed block nearest its centre.
+  for (let at = 0; at < U; at++) {
+    const unit = units[at] as DistrictUnit;
+    if (unit.heads || unit.anchored) continue;
+    let seed = -1;
+    let least = Infinity;
+    for (let block = 0; block < B; block++) {
+      if (g[block] !== at || (keptB[block] as number) === 0) continue;
+      const away = ((blockMiddle[block] as Point)[0] - (centre[at] as Point)[0]) ** 2 + ((blockMiddle[block] as Point)[1] - (centre[at] as Point)[1]) ** 2;
+      if (away < least) {
+        least = away;
+        seed = block;
+      }
+    }
+    if (seed >= 0) unit.seed = seed;
+  }
   // Houses that touch no unit on their bank join the nearest, as an island.
   let islands = 0;
   for (let block = 0; block < B; block++) {
@@ -663,38 +747,37 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     hv[best] = (hv[best] as number) + (keptB[block] as number);
     islands += keptB[block] as number;
   }
-  // A block its unit cannot reach from its seed or its bridgeheads is let go, and joins a neighbour as leftovers do.
-  let released = 0;
-  if (led) {
+  let waterPaths = 0;
+  let headPaths = 0;
+  {
+    // A unit that crosses a bridge reaches its bridgehead: the bridge is what joins its two parts.
     units.forEach((unit, at) => {
-      const seen = new Set<number>([unit.seed]);
-      const stack = [unit.seed];
       for (const head of unit.heads ?? []) {
-        if (g[head] !== at || seen.has(head)) continue;
-        seen.add(head);
-        stack.push(head);
-      }
-      while (stack.length > 0) {
-        const block = stack.pop() as number;
-        for (const next of badj[block] as number[]) {
-          if (g[next] !== at || bank[next] !== bank[block] || seen.has(next)) continue;
-          seen.add(next);
-          stack.push(next);
-        }
-      }
-      for (let block = 0; block < B; block++) {
-        if (g[block] !== at || seen.has(block)) continue;
-        g[block] = undefined;
-        hv[at] = (hv[at] as number) - (keptB[block] as number);
-        released++;
-        marks[at] = (marks[at] as number[]).filter((mark) => mark !== block);
+        if (g[head] !== at) headPaths++;
+        takeWayTo(at, (block) => block === head);
       }
     });
+    tidy(true);
     fillIn();
+    // A waterside district whose ground does not come to the water is given the shortest way of blocks to it.
+    if (water !== undefined) {
+      for (let district = 0; district < D; district++) {
+        if (waterside[district] !== true) continue;
+        const parts = units.flatMap((unit, at) => (unit.district === district ? [at] : []));
+        if (parts.length === 0 || blocks.some((_, block) => g[block] !== undefined && parts.includes(g[block] as number) && atWater(block))) continue;
+        // Its largest part goes to the water.
+        const most = [...parts].sort((a, b) => (hv[b] as number) - (hv[a] as number) || a - b)[0] as number;
+        if (takeWayTo(most, atWater)) waterPaths++;
+      }
+    }
+    // A way taken through another unit may have cut it in two: it keeps its larger part.
+    if (waterPaths > 0 || headPaths > 0) {
+      tidy(true);
+      fillIn();
+    }
   }
   const unclaimed = keptB.reduce((sum, value, block) => sum + (g[block] === undefined ? value : 0), 0);
 
-  // ---- 4. Pass surplus along chains ----------------------------------------------------------------------------
   /** How many pieces some blocks make, counting only pieces with kept houses, or with a block `counts` says. */
   const pieces = (nodes: number[], beside: (node: number) => number[], counts: (node: number) => boolean = () => false) => {
     const left = new Set(nodes);
@@ -716,96 +799,6 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     }
     return count;
   };
-  const blocksOf = (at: number) => g.flatMap((of, block) => (of === at ? [block] : []));
-  const besideIn = (at: number) => (node: number) => (badj[node] as number[]).filter((next) => g[next] === at && bank[next] === bank[node]);
-  // A unit's own landmark blocks count as pieces too, so that no chain cuts one off.
-  const unitPieces = (at: number) => pieces(blocksOf(at), besideIn(at), (node) => (marks[at] as number[]).includes(node));
-  /** A giver hands the receiver one border block; it says how many houses went. */
-  const give = (from: number, to: number, want: number): number => {
-    const giver = units[from] as DistrictUnit;
-    const choices: number[] = [];
-    for (let block = 0; block < B; block++) {
-      if (g[block] !== from || keptB[block] === 0 || block === giver.seed || (giver.heads ?? []).includes(block) || (marks[from] as number[]).includes(block)) continue;
-      if ((badj[block] as number[]).some((next) => g[next] === to && bank[next] === bank[block])) choices.push(block);
-    }
-    const fitting = choices.filter((block) => (keptB[block] as number) <= want + rules.chainOver).sort((a, b) => (keptB[b] as number) - (keptB[a] as number));
-    const before = unitPieces(from);
-    const beforeTo = unitPieces(to);
-    for (const block of fitting.slice(0, rules.chainTries)) {
-      g[block] = to;
-      if (unitPieces(from) <= before && unitPieces(to) <= beforeTo) {
-        hv[from] = (hv[from] as number) - (keptB[block] as number);
-        hv[to] = (hv[to] as number) + (keptB[block] as number);
-        return keptB[block] as number;
-      }
-      g[block] = from;
-    }
-    return 0;
-  };
-  /** For each unit (or district), those whose blocks touch its own; on the same bank where asked. */
-  const touching = (of: ReadonlyArray<number | undefined>, sameBank: boolean) => {
-    const beside = new Map<number, Set<number>>();
-    for (let block = 0; block < B; block++) {
-      const x = of[block];
-      if (x === undefined) continue;
-      for (const next of badj[block] as number[]) {
-        const y = of[next];
-        if (y === undefined || y === x || (sameBank && bank[next] !== bank[block])) continue;
-        let set = beside.get(x);
-        if (!set) beside.set(x, (set = new Set()));
-        set.add(y);
-      }
-    }
-    return beside;
-  };
-  /** The nearest by touching to `from` with enough surplus, and the path from it back to `from`, the giver first. */
-  const pathTo = (from: number, beside: Map<number, Set<number>>, dead: Set<string>, rich: (at: number) => boolean): number[] | undefined => {
-    const previous = new Map<number, number>();
-    const queue = [from];
-    const seen = new Set([from]);
-    let source = -1;
-    while (queue.length > 0 && source < 0) {
-      const x = queue.shift() as number;
-      for (const y of beside.get(x) ?? []) {
-        if (seen.has(y) || dead.has(`${y}>${x}`)) continue;
-        seen.add(y);
-        previous.set(y, x);
-        if (rich(y)) {
-          source = y;
-          break;
-        }
-        queue.push(y);
-      }
-    }
-    if (source < 0) return undefined;
-    const path = [source];
-    for (let x = source; x !== from; ) path.push((x = previous.get(x) as number));
-    return path;
-  };
-  let chainMoves = 0;
-  const dead = new Set<string>();
-  for (let step = 0; step < rules.chainSteps; step++) {
-    const short = [...Array(U).keys()].filter((at) => (UT[at] as number) - (hv[at] as number) >= rules.chainAt).sort((x, y) => (UT[y] as number) - (hv[y] as number) - ((UT[x] as number) - (hv[x] as number)));
-    let moved = false;
-    const beside = touching(g, true);
-    for (const at of short) {
-      const path = pathTo(at, beside, dead, (y) => (hv[y] as number) - (UT[y] as number) >= rules.chainAt);
-      if (!path) continue;
-      const source = path[0] as number;
-      const want = Math.min((hv[source] as number) - (UT[source] as number), (UT[at] as number) - (hv[at] as number));
-      for (let hop = 0; hop < path.length - 1; hop++) {
-        if (!give(path[hop] as number, path[hop + 1] as number, want)) {
-          dead.add(`${path[hop]}>${path[hop + 1]}`);
-          break;
-        }
-        chainMoves++;
-      }
-      moved = true;
-      break;
-    }
-    if (!moved) break;
-  }
-
   // A district is whole if its blocks join, a bridge counting as a join; a piece counts if it has houses or one of
   // the district's own landmarks.
   const blockDistrict = g.map((at) => (at === undefined ? undefined : (units[at] as DistrictUnit).district));
@@ -818,10 +811,9 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
         (node) => ownMark.has(`${district}:${node}`),
       ) > 1,
   ).length;
-  const afterChains: number[] = new Array<number>(D).fill(0);
-  units.forEach((unit, at) => (afterChains[unit.district] = (afterChains[unit.district] as number) + (hv[at] as number)));
+  const have: number[] = new Array<number>(D).fill(0);
+  units.forEach((unit, at) => (have[unit.district] = (have[unit.district] as number) + (hv[at] as number)));
 
-  // ---- 5. Make the counts exact --------------------------------------------------------------------------------
   // Whole-number counts, the remainders given largest first.
   const IT = T.map((value) => Math.floor(value));
   const remainder = total - IT.reduce((sum, value) => sum + value, 0);
@@ -830,82 +822,8 @@ function draw({ rules, blocks, wards, houses, kept, tilesBeside, links, seeds, t
     const district = (fractions[at % D] as readonly [number, number])[1];
     IT[district] = (IT[district] as number) + 1;
   }
-  const hX = [...afterChains];
-  const lent = new Map<number, { to: number; houses: number }>();
-  const deadX = new Set<string>();
-  const offAfterChains = half(hX, IT);
-  for (let step = 0; step < rules.exactSteps; step++) {
-    const short = order.filter((district) => (IT[district] as number) - (hX[district] as number) >= 1).sort((x, y) => (IT[y] as number) - (hX[y] as number) - ((IT[x] as number) - (hX[x] as number)));
-    let moved = false;
-    const beside = touching(blockDistrict, false);
-    for (const at of short) {
-      const path = pathTo(at, beside, deadX, (y) => (hX[y] as number) - (IT[y] as number) >= 1);
-      if (!path) continue;
-      const source = path[0] as number;
-      let amount = Math.min((hX[source] as number) - (IT[source] as number), (IT[at] as number) - (hX[at] as number));
-      const picks: number[] = [];
-      let ok = true;
-      for (let hop = 0; hop < path.length - 1 && ok; hop++) {
-        const a = path[hop] as number;
-        const b = path[hop + 1] as number;
-        let best = -1;
-        let room = 0;
-        for (let block = 0; block < B; block++) {
-          if (blockDistrict[block] !== a || (keptB[block] as number) <= 1 || !(badj[block] as number[]).some((next) => blockDistrict[next] === b)) continue;
-          const already = lent.get(block);
-          if (already && already.to !== b) continue;
-          const free = (keptB[block] as number) - 1 - (already?.houses ?? 0);
-          if (free > room) {
-            room = free;
-            best = block;
-          }
-        }
-        if (best < 0) {
-          deadX.add(`${a}>${b}`);
-          ok = false;
-        } else {
-          amount = Math.min(amount, room);
-          picks.push(best);
-        }
-      }
-      moved = true;
-      if (!ok) break;
-      picks.forEach((block, hop) => {
-        const entry = lent.get(block) ?? { to: path[hop + 1] as number, houses: 0 };
-        entry.houses += amount;
-        lent.set(block, entry);
-      });
-      hX[source] = (hX[source] as number) - amount;
-      hX[at] = (hX[at] as number) + amount;
-      break;
-    }
-    if (!moved) break;
-  }
 
-  return {
-    blockDistrict,
-    lent,
-    targets: IT,
-    have: hX,
-    bank,
-    units,
-    unitHave: hv,
-    offAfterChains,
-    off: half(hX, IT),
-    inPieces,
-    spans,
-    reseeded,
-    relocated,
-    chainMoves,
-    islands,
-    unclaimed,
-    claimed,
-    released,
-    method,
-    openCountry,
-    connectors,
-    landmarksOutside: 0,
-  };
+  return { blockDistrict, targets: IT, have, bank, units, unitHave: hv, off: half(have, IT), inPieces, spans, reseeded, relocated, islands, unclaimed, openCountry, connectors, landmarksOutside: 0, waterPaths, headPaths };
 }
 
 export interface HouseDistricts {
@@ -939,12 +857,6 @@ export function houseDistricts(drawn: Districting, { blocks, houses, kept, tiles
     if (list.length === 0) return;
     if (of === undefined) throw new Error(`block ${block} has ${list.length} kept houses and no district`);
     for (const house of list) district[house] = of;
-    const lent = drawn.lent.get(block);
-    if (!lent) return;
-    const theirs = (badj[block] as number[]).filter((other) => drawn.blockDistrict[other] === lent.to);
-    const away = (house: number) => Math.min(...theirs.map((other) => distanceToPolygonEdge((houses[house] as { centre: Point }).centre, (blocks[other] as { polygon: readonly Point[] }).polygon)));
-    const nearest = [...list].sort((a, b) => away(a) - away(b) || a - b).slice(0, lent.houses);
-    for (const house of nearest) district[house] = lent.to;
   });
   const count = drawn.targets.map(() => 0);
   for (const of of district) if (of !== undefined) count[of] = (count[of] as number) + 1;
@@ -965,24 +877,42 @@ export function houseDistricts(drawn: Districting, { blocks, houses, kept, tiles
         }
       }
       const spare = (of: number) => (count[of] as number) > (drawn.targets[of] as number);
+      // The nearest district by touching with houses to spare, and the way back from it.
       let giver = -1;
-      const seen = new Set([short]);
+      const before = new Map<number, number>([[short, -1]]);
       for (let queue = [short]; queue.length > 0 && giver < 0; ) {
         const next: number[] = [];
-        for (const x of queue) for (const y of [...(touching.get(x) ?? [])].sort((a, b) => a - b)) if (!seen.has(y)) (seen.add(y), next.push(y));
+        for (const x of queue) {
+          for (const y of [...(touching.get(x) ?? [])].sort((a, b) => a - b)) {
+            if (before.has(y)) continue;
+            before.set(y, x);
+            next.push(y);
+          }
+        }
         giver = next.find(spare) ?? -1;
         queue = next;
       }
-      if (giver < 0) giver = count.findIndex((_, of) => spare(of));
-      if (giver < 0) throw new Error(`district ${short} is short of houses and no district has any to spare`);
-      const own = drawn.blockDistrict.flatMap((of, block) => (of === short ? [block] : []));
-      const away = (house: number) => Math.min(...own.map((block) => Math.hypot((houses[house] as { centre: Point }).centre[0] - (middle[block] as Point)[0], (houses[house] as { centre: Point }).centre[1] - (middle[block] as Point)[1])));
+      // None by touching: any district with houses to spare gives straight to it.
+      if (giver < 0) {
+        giver = count.findIndex((_, of) => spare(of));
+        if (giver < 0) throw new Error(`district ${short} is short of houses and no district has any to spare`);
+        before.clear();
+        before.set(short, -1);
+        before.set(giver, short);
+      }
       const amount = Math.min((drawn.targets[short] as number) - (count[short] as number), (count[giver] as number) - (drawn.targets[giver] as number));
-      const theirs = district.flatMap((of, house) => (of === giver ? [house] : [])).sort((a, b) => away(a) - away(b) || a - b);
-      for (const house of theirs.slice(0, amount)) district[house] = short;
+      // Hop by hop from the giver: each district on the way hands the next the houses nearest that one's ground, so
+      // a house only ever joins a district whose ground is next to it.
+      for (let from = giver; before.get(from) !== -1; from = before.get(from) as number) {
+        const to = before.get(from) as number;
+        const own = drawn.blockDistrict.flatMap((of, block) => (of === to ? [block] : []));
+        const away = (house: number) => Math.min(...own.map((block) => Math.hypot((houses[house] as { centre: Point }).centre[0] - (middle[block] as Point)[0], (houses[house] as { centre: Point }).centre[1] - (middle[block] as Point)[1])));
+        const theirs = district.flatMap((of, house) => (of === from ? [house] : [])).map((house) => [away(house), house] as const).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+        for (const [, house] of theirs.slice(0, amount)) district[house] = to;
+        leftovers += amount;
+      }
       count[short] = (count[short] as number) + amount;
       count[giver] = (count[giver] as number) - amount;
-      leftovers += amount;
     }
   }
   return { district, kept: count, leftovers };

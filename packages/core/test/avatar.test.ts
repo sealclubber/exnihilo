@@ -545,7 +545,7 @@ describe('unchanged', () => {
 
   it('keeps the city generator version, and the layout and life versions phase 6F raised', () => {
     expect(LIFE_VERSION).toBe(6);
-    expect(LAYOUT_VERSION).toBe(12);
+    expect(LAYOUT_VERSION).toBe(13);
     expect(GENERATOR_VERSION).toBe(6);
   });
 });
