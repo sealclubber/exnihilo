@@ -769,7 +769,11 @@ town that is not exact so is drawn again without them. Its numbers are
 [--every n] [--out file]` runs it beside the generator on every town of
 1,000 people or more and prints the gameplan's census, with landmarks
 outside their district's ground (`--plain`: without the landmarks leading).
-`FINDINGS-6G.md` has the figures and what is open.
+`FINDINGS-6G.md` has the figures and what is open. The renders of earlier
+phases named below were cleared out of `docs/renders/` in phase 6G (they are
+in git history); it now holds `<town>-districts-6g.svg` and
+`<town>-districts-main.svg` for Karlen, Pombal, Badanos and Cevilefon, each
+district in its own colour, this branch beside main.
 
 **The village generator (phase 6E, Villages).** A settlement under
 `village.below` residents (1,000; 136 of Lomia's 682) is laid out by

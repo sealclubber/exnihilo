@@ -121,7 +121,13 @@ The rest of each district's ground is one piece of blocks.
 
 **Why.** The plaza and the castle are not blocks, so the districts stage leaves them alone, as the gameplan says ("whatever stands in them stays as it is"). Their ground is still drawn for the district of the landmark standing there. Nothing makes that district's blocks reach the special ward, so its tile is drawn apart from the rest. The 5 river-spanning districts are probably the census's nearest-middle bridge guess, but I have not traced them, because the instruction was to stop if the 20 were not all river-spanning.
 
-**Renders**, with district ground coloured: `docs/renders/karlen-6g-step3.svg` and `docs/renders/pombal-6g-step3.svg`. In Karlen the castle, in the middle of the walled town, carries the tint of a district whose ground lies north of the wall.
+**Renders.** `docs/renders/<town>-districts-6g.svg` (this branch) and `<town>-districts-main.svg` (main at `1ebf85f`), for Karlen, Pombal, Badanos and Cevilefon. Every district has its own colour, its ground outlined and its number written in it. In Karlen the castle (labelled 001), in the middle of the walled town, belongs to a district whose blocks lie elsewhere.
+
+They show two more things the census does not measure:
+- **Empty fringe.** The leftover pass gives every empty block to a touching district, so a few outer districts take a ring of empty ground round the whole town.
+- **Ragged borders.** Growth in turns and the chains leave interlocking, saw-toothed borders.
+
+Main's districts are worse: ribbons one block wide, and a district strung round another.
 
 **For your decision.** One option is that the district of the landmark on the plaza or in the castle claims a block beside that ward when seeded, as it claims its landmark blocks. Another is that the special ward's ground goes to the district of most of the blocks around it, while the landmark keeps its district; that would count as a landmark outside its ground.
 
