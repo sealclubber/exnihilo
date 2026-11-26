@@ -226,6 +226,12 @@ Pack 0.20.0, `LAYOUT_VERSION` 13.
 - Fixed after they failed: the layout version pinned at 12 in `life-places` and `districts`.
 - Not run: `npm run test:viewer`.
 
+**Run on the development machine** (Nov 26, 2026, `main` at `9a404ad`):
+- `node scripts/staged-census.ts`: 682 of 682 settlements keep every invariant. Town lots outside their own ground 4,186 of 523,259 (0.80%); every other figure as in the table above.
+- `npm run check`: exit 1, one test failing of 1,093, in about 615 s (CLAUDE.md lists about 5 minutes).
+- **`staged-town`** timed out: its first test paid for planning all 682 settlements, 303 s against the 300 s limit (277 s for the whole file alone). Fixed in the test: the planning now runs in a `beforeAll` with a limit of its own. It passes.
+- **`rounds.test.ts`, "busiest streets around midday"** still fails. It passes at `1ebf85f`, `53f3643`, `d972907` and `84a5752`, and fails from `c2ce7c2` (Amendment 2, the cells) on, `c8adcff` included. The busiest streets of Badanos are almost the same; what changed is the market. Before, one stall's entrance was on `segment-641-000004`, a main street ranked 4th at midday. Now no stall fronts a main street, and the busiest market street ranks 22nd (214 walks; 10th place has 259). The stalls are fitted to other houses because the districts changed. Left failing: making it pass would mean relaxing the emergence check or moving the market.
+
 ## Not yet run
 
 Step 4's house-character figure (the share of buildings on a house smaller than their footprint needs, before and after). Branch `6f-ground-districts` is not deleted; that waits until the phase is in.

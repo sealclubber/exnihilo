@@ -4,7 +4,7 @@
  * and selection, checked for every settlement of Lomia. Every settlement is
  * planned once, for its own city, and every test reads those plans.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { generateCity, parsePack } from '../src/index.ts';
 import { smallestRectangle } from '../src/layout/cutting.ts';
 import { distanceBetweenPolygons, distanceToPiece, distanceToPolygonEdge, pointInPolygon, polygonArea, polygonCentroid } from '../src/layout/geometry.ts';
@@ -34,6 +34,10 @@ function everyPlan(): Planned[] {
     return { brief, input, marks: input.landmarks, plan: planTown(brief, input, pack) };
   }));
 }
+// Planning all 682 settlements takes most of the default limit on its own (about 280 s on the development
+// machine since the districts stage draws cells), so it is done here, under a limit of its own, and not
+// charged to whichever test happens to run first.
+beforeAll(() => void everyPlan(), 900_000);
 const named = (name: string) => everyPlan().find(({ brief }) => brief.name === name) as Planned;
 const TEST_TOWNS = ['Badanos', 'Pombal', 'Cevilefon', 'Vereceldo', 'Flupines'];
 const quantile = (values: number[], share: number) => [...values].sort((a, b) => a - b)[Math.floor(share * (values.length - 1))] as number;
