@@ -14,11 +14,9 @@
     "alea": "1.0.1",
     "d3": "7.9.0",
     "delaunator": "5.1.0",
+    "esbuild": "^0.27.0",
     "lineclip": "2.0.0",
     "polylabel": "2.1.0",
     "zod": "4.6.7"
-  },
-  "devDependencies": {
-    "esbuild": "^0.27.0"
   }
 }

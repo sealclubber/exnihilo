@@ -6,6 +6,7 @@
   "dependencies": {
     "@fastify/websocket": "^11.3.7",
     "@worldsim/core": "0.1.0",
+    "@worldsim/worldgen": "0.1.0",
     "better-sqlite3": "^13.2.0",
     "fastify": "^5.12.8",
     "yaml": "^2.9.1"

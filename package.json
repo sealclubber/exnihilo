@@ -14,6 +14,7 @@
     "typecheck": "tsc -p packages/core && tsc -p packages/server && tsc -p packages/client && tsc -p packages/worldgen && tsc -p tsconfig.test.json",
     "check": "npm run typecheck && npm test",
     "import": "node packages/server/src/cli.ts",
+    "world": "node packages/server/src/world-cli.ts",
     "server": "node packages/server/src/main.ts",
     "client": "npm run dev -w @worldsim/client",
     "client:build": "npm run build -w @worldsim/client",

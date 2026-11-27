@@ -17,6 +17,7 @@ current phase before starting, and the README for how things run today.
 | Tests only | `npm test` |
 | Type-check only | `npm run typecheck` |
 | Import an AFMG export | `npm run import -- fixtures/afmg/lomia.json` |
+| Make a world from a seed | `npm run world -- --seed <seed> --template <id> --points <number>` |
 | Start the API server | `npm run server` |
 | Start the viewer | `npm run client` |
 | Generate one city | `npm run generate -- <settlement id>` |

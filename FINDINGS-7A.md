@@ -146,6 +146,16 @@ generator and laid out by the pack's generator with every invariant checked
 
 Castil is Lomia's second-largest size (Pombal has 47,603, Ruha 35,699) and was laid out in about 6 s.
 
+## Step 6: a command (done)
+
+`npm run world -- --seed <seed> --template <id> --points <number> [--db <file>]`
+(`packages/server/src/world-cli.ts`, `world-command.ts`) makes a world with `newWorldOptions` and stores it as the
+import command stores an export. `--seed 1127 --template continents --points 20000` made Graia, 1,080
+settlements, in 2.0 s. `packages/server/test/world-command.test.ts` stores one and reads it back;
+`packages/client/e2e/new-world.e2e.ts` (run by `npm run test:viewer`) opens a world made so in the viewer, with its
+name and settlement count, and enters its largest town until its people are walking. Graia and its capital,
+Castil (42,167 residents, 31 districts), were also looked at by eye in the viewer.
+
 ## A note on the project's rules
 
 CLAUDE.md rule 2 has only `packages/core/src/afmg` know AFMG's structures. `packages/worldgen` is AFMG, and its

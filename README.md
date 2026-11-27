@@ -65,6 +65,29 @@ A world imported before phase 6C must be imported again: briefs now say where
 each of their routes leads, and travellers are told apart by where they came
 from. The server says so if it finds an old file.
 
+## Make a world from a seed
+
+```sh
+npm run world -- --seed 1127 --template continents --points 20000
+```
+
+Makes a new world with Azgaar's Fantasy Map Generator, run inside this
+project (`packages/worldgen`, phase 7A), and stores it as `npm run import`
+stores an export: in `data/world.sqlite`, or `--db`, or `WORLDSIM_DB`,
+replacing the world held there. The seed is any text; the template is one of
+AFMG's 14 procedural heightmaps (`npm run world -- --help` lists them; image
+heightmaps are not supported); points is the size of the grid (Lomia has
+10,000). The world is what AFMG would make as a new map from that seed, with
+the pins a browser keeps ignored, so the same three choices always make the
+same world. It takes about 2 s at 20,000 points. The first run builds AFMG's
+bundle (`packages/worldgen/dist/afmg.mjs`, built, not committed).
+
+AFMG's history layer (wars, regiments, zones, journeys) and coats of arms are
+made but not read: the importer reads the terrain, the settlements, the
+states, provinces, cultures, religions, rivers and routes. A state of a world
+made this way has no wars, as AFMG 1.159 keeps them where the importer does
+not look.
+
 ## Start the server
 
 ```sh
