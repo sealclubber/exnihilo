@@ -189,9 +189,27 @@ and the pack's `modifiers.sizeGroups` that the city generator reads, which this 
 it needs a decision on whether a hamlet, a monastery, a caravanserai and a trading post are new size groups for
 the city generator or are mapped to existing ones.
 
+**Decision (Nov 27, 2026): mapped, not added.** AFMG's towns, states and cultures stand in until the history
+simulation makes population centres, and worlds are not meant to stay compatible with AFMG's exports; AFMG is
+where the terrain comes from. So the four groups are taken in as villages (`SMALL_PLACES` in the importer, a test
+in `importer.test.ts`), with no change to the world format; any other group is still refused. All 28 worlds of
+the 14 templates now import.
+
+## Where this is going
+
+Generate a world, then its history; the history makes the population centres, decoupled from world generation
+as the town viewer is. AFMG's pipeline is terrain first (`grid`, `heightmap`, `markupGrid`, lakes, `mapSize`,
+`temperatures`, `precipitation`, `regraph`, `markupPack`, `rivers`, `biomes`, `featureGroups`, `ice`), then a
+bridge (`goods`, and `rankCells`, each cell's habitability, a likely input to history), then people (`cultures`
+onward). Nothing in the terrain steps reads what comes after them, so cutting the pipeline there gives the same
+terrain. AFMG's pipeline has no option to stop early, but the wrapper can call the terrain steps itself without
+editing AFMG. A later phase would do that, with a world format that holds a world before its history (today it
+requires settlements, states, cultures, religions, provinces and routes) and with the naming of rivers and
+features, which AFMG takes from the cultures nearby, moved to history.
+
 ## Checks
 
-- `npm run check`: exit 1; 1,116 of 1,117 tests pass. The one failure is `rounds.test.ts`, "busiest streets around
+- `npm run check`: exit 1; 1,117 of 1,118 tests pass. The one failure is `rounds.test.ts`, "busiest streets around
   midday", which fails on `main` too since phase 6G's cells (`FINDINGS-6G.md`) and is under review.
 - `npm run test:viewer`: exit 1; 24 of 27 pass, `new-world.e2e.ts` among them. The three failures are in
   `viewer.e2e.ts` and expect Lomia's towns to be laid out by the grid (`summary.generator` `grid`) and

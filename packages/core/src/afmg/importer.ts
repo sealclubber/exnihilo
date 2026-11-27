@@ -46,6 +46,9 @@ const VERIFIED_VERSION = /^1\.158\./;
 const WATER_BELOW_HEIGHT = 20;
 const COASTAL_LAND = 1;
 
+/** AFMG's burg groups that are not our size groups: small places, taken in as villages. */
+const SMALL_PLACES = new Set(['hamlet', 'monastery', 'caravanserai', 'trading_post']);
+
 const TOP_LEVEL_SECTIONS_READ = ['info', 'settings', 'pack', 'grid', 'nameBases'];
 const PACK_SECTIONS_READ = [
   'cells',
@@ -420,7 +423,8 @@ export function importAfmg(source: unknown): ImportResult {
       bearing: bearing(centre, neighbour.cell.center),
     });
 
-    const group = rec.string('group');
+    // AFMG's small places outside our size groups count as villages: its towns stand in until history makes them.
+    const group = SMALL_PLACES.has(rec.string('group')) ? 'village' : rec.string('group');
     const sizeGroup = SizeGroupSchema.safeParse(group);
     if (!sizeGroup.success) {
       throw rec.error('group', `must be one of ${SizeGroupSchema.options.join(', ')}, but is "${group}"`);

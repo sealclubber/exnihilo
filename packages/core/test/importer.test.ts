@@ -275,6 +275,16 @@ describe('the world beyond the briefs', () => {
     expect(() => importAfmg(source)).toThrow(/cells\[1\]" refers to cell -1/);
   });
 
+  it("takes AFMG's hamlets, monasteries, caravanserais and trading posts in as villages, and no other group", () => {
+    const source = loadLomia();
+    const groups = ['hamlet', 'monastery', 'caravanserai', 'trading_post'];
+    groups.forEach((group, index) => (source.pack.burgs[index + 1].group = group));
+    const { world: mapped } = importAfmg(source);
+    expect(mapped.settlements.slice(0, 4).map((brief) => brief.sizeGroup)).toEqual(['village', 'village', 'village', 'village']);
+    source.pack.burgs[1].group = 'metropolis';
+    expect(() => importAfmg(source)).toThrow(/group" must be one of village, town, city, fort, capital, but is "metropolis"/);
+  });
+
   it('imports the placeholder state with nothing invented', () => {
     expect(world.states[0]).toEqual({
       id: 'state-0',
@@ -439,7 +449,7 @@ describe('an export the importer cannot rely on', () => {
   const mistyped: Array<[string, (source: any) => void, string]> = [
     ['a population given as text', (s) => (s.pack.burgs[641].population = '9.607'), 'population'],
     ['a name given as a number', (s) => (s.pack.burgs[641].name = 7), 'name'],
-    ['a size group the format does not know', (s) => (s.pack.burgs[641].group = 'hamlet'), 'group'],
+    ['a size group the format does not know', (s) => (s.pack.burgs[641].group = 'metropolis'), 'group'],
     ['a route group the format does not know', (s) => (s.pack.routes[0].group = 'canals'), 'group'],
     ['a settlement on a cell that does not exist', (s) => (s.pack.burgs[641].cell = 99999), 'cell'],
     ['a cell in a state that does not exist', (s) => (s.pack.cells[2134].state = 77), 'state'],
