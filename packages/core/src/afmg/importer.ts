@@ -370,6 +370,9 @@ export function importAfmg(source: unknown): ImportResult {
   const riverCells = new Map<number, number[]>();
   const rivers: River[] = riverEntities.map(({ number, rec }) => {
     const cells = rec.integers('cells');
+    // AFMG ends the course of a river that pours off the edge of the map with -1: its course here ends at the
+    // last cell on the map.
+    if (cells.at(-1) === -1) cells.pop();
     cells.forEach((cell, index) => mustExist(cellNumbers, cell, rec, `cells[${index}]`, 'cell'));
     riverCells.set(number, cells);
     const parent = rec.integer('parent');

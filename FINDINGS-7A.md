@@ -156,6 +156,39 @@ settlements, in 2.0 s. `packages/server/test/world-command.test.ts` stores one a
 name and settlement count, and enters its largest town until its people are walking. Graia and its capital,
 Castil (42,167 residents, 31 districts), were also looked at by eye in the viewer.
 
+## Step 7: timings, the bundle, and two more findings
+
+**Timings** (`continents`, seed `1127`, made as a new map; each size in a fresh process, the bundle already
+built; development machine, Nov 27, 2026):
+
+| Points | Grid cells | Refined cells | Settlements | Generate | Export | Import | Peak memory |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10,000 | 9,954 | 6,190 | 848 | 0.9 s | 8.1 MB | 0.1 s | 365 MB |
+| 20,000 | 20,048 | 13,665 | 1,080 | 1.5 s | 16.3 MB | 0.2 s | 514 MB |
+| 100,000 | 100,000 | 62,477 | 1,395 | 8.4 s | 74.5 MB | 0.5 s | 1.4 GB |
+
+Lomia (10,000 points, from its saved settings) takes 0.7 s. Nothing near the stop condition of two minutes.
+
+**The bundle:** `dist/afmg.mjs`, 2.75 MB, built in about a second. The vendored source is all of AFMG's `src/`
+(1,432 files, 26 MB, most of it locales and images the bundle leaves out).
+
+**Rivers that pour off the map (fixed in the importer).** AFMG ends the course of a river that runs off the edge
+of the map with cell `-1` (`model/physical/river-generator.ts`). Lomia has none, so the importer had never met
+one and refused it (`river 652: field "cells[4]" refers to cell -1`): the 100,000-point world failed, and so does
+any world whose land reaches the edge. Over all 14 templates, two seeds each at 20,000 points, 14 of the 28 worlds
+had such rivers (`mediterranean`, `peninsula`, `pangea`, `isthmus`, `taklamakan`, `oldWorld`, `fractious`, 2 to
+42 rivers each), always as the last cell. The importer now drops a final `-1`, so the river's course ends at its
+last cell on the map; a `-1` anywhere else is still refused (`importer.test.ts`). The world format is unchanged.
+
+**Stop: settlement size groups the world format does not have.** After that fix, 26 of the 28 worlds import.
+Both `taklamakan` worlds fail: `burg 1120: field "group" must be one of village, town, city, fort, capital, but
+is "hamlet"`. AFMG's burg groups are `capital`, `city`, `fort`, `monastery`, `caravanserai`, `trading_post`,
+`village`, `hamlet` and `town`; Lomia's own settings list all nine, but no burg of Lomia is in the four our
+format lacks, so the importer never met one. Taking them in means adding to `SizeGroupSchema` in the world format,
+and the pack's `modifiers.sizeGroups` that the city generator reads, which this phase is not to change. Not done;
+it needs a decision on whether a hamlet, a monastery, a caravanserai and a trading post are new size groups for
+the city generator or are mapped to existing ones.
+
 ## A note on the project's rules
 
 CLAUDE.md rule 2 has only `packages/core/src/afmg` know AFMG's structures. `packages/worldgen` is AFMG, and its

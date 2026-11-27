@@ -262,6 +262,19 @@ describe('the world beyond the briefs', () => {
     expect(without.states.map((state) => ({ ...state, wars: [] }))).toEqual(world.states.map((state) => ({ ...state, wars: [] })));
   });
 
+  it('ends the course of a river that pours off the map at its last cell on the map', () => {
+    const source = loadLomia();
+    const river = source.pack.rivers[0];
+    const course = [...river.cells];
+    river.cells.push(-1);
+    const { world: edged } = importAfmg(source);
+    expect(edged).toEqual(world);
+    expect(course.length).toBeGreaterThan(1);
+    // Anywhere but at the end, -1 is no cell.
+    river.cells = [course[0], -1, ...course.slice(1)];
+    expect(() => importAfmg(source)).toThrow(/cells\[1\]" refers to cell -1/);
+  });
+
   it('imports the placeholder state with nothing invented', () => {
     expect(world.states[0]).toEqual({
       id: 'state-0',
