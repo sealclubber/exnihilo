@@ -254,6 +254,14 @@ describe('the world beyond the briefs', () => {
     expect('endYear' in war).toBe(false);
   });
 
+  it('gives a state no wars when its export has no campaigns, as AFMG 1.159 writes them', () => {
+    const source = loadLomia();
+    for (const state of source.pack.states) delete state.campaigns;
+    const { world: without } = importAfmg(source);
+    expect(without.states.every((state) => state.wars.length === 0)).toBe(true);
+    expect(without.states.map((state) => ({ ...state, wars: [] }))).toEqual(world.states.map((state) => ({ ...state, wars: [] })));
+  });
+
   it('imports the placeholder state with nothing invented', () => {
     expect(world.states[0]).toEqual({
       id: 'state-0',

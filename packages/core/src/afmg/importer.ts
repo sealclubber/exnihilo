@@ -271,7 +271,8 @@ export function importAfmg(source: unknown): ImportResult {
         }
         diplomacy[makeId('state', other)] = value;
       });
-      for (const war of rec.records('campaigns')) {
+      // AFMG 1.159 keeps wars in `pack.events` and gives states no `campaigns`: such a state has no wars here.
+      for (const war of rec.has('campaigns') ? rec.records('campaigns') : []) {
         const endYear = war.optionalInteger('end');
         const attacker = war.integer('attacker');
         const defender = war.integer('defender');

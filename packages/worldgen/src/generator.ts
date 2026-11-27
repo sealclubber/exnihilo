@@ -20,19 +20,26 @@ export type AfmgOptions = { [key: string]: unknown };
 
 export type GenerateWorld = (options?: AfmgOptions) => Promise<Generated>;
 
-let loading: Promise<GenerateWorld> | undefined;
+export interface Generator {
+  /** Makes one world. A call made while another runs waits for it: AFMG's state is global. */
+  generate: GenerateWorld;
+  /** The ids of AFMG's 14 procedural heightmap templates. */
+  templateIds: () => Promise<string[]>;
+}
+
+let loading: Promise<Generator> | undefined;
 
 const stale = () => {
   if (!existsSync(bundlePath)) return true;
   const built = statSync(bundlePath).mtimeMs;
-  return [`${root}src/entry.ts`, `${root}scripts/build.ts`].some((source) => statSync(source).mtimeMs > built);
+  return [`${root}src/entry.ts`, `${root}src/headless/dialog.ts`, `${root}scripts/build.ts`].some((source) => statSync(source).mtimeMs > built);
 };
 
-/** AFMG's generator, one world at a time (a call made while another runs waits for it). */
-export function loadGenerator(): Promise<GenerateWorld> {
+/** AFMG's generator, loaded once. */
+export function loadGenerator(): Promise<Generator> {
   return (loading ??= (async () => {
     if (stale()) await buildBundle();
-    const bundle = (await import(pathToFileURL(bundlePath).href)) as { generateWorld: GenerateWorld };
-    return bundle.generateWorld;
+    const bundle = (await import(pathToFileURL(bundlePath).href)) as { generateWorld: GenerateWorld; templateIds: () => Promise<string[]> };
+    return { generate: bundle.generateWorld, templateIds: bundle.templateIds };
   })());
 }

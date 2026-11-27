@@ -53,8 +53,20 @@ async function run(given: PartialOptions): Promise<Generated> {
     log.enabled.info = false;
     // 3. Fresh defaults for every world, or one world's settings leak into the next.
     g.options = Options.getDefaultOptions();
-    // 4. The caller's options.
+    // 4. The caller's options. AFMG's interface fills in the seed and the template; without it both are empty, and
+    // a template that is not one of the procedural ones is taken for an image heightmap, which needs a canvas.
     mergeInto(g.options as Record<string, unknown>, given);
+    const { heightmapTemplates } = await import('@/data/heightmap-templates');
+    const chosen = g.options as { map: { seed: unknown }; generation: { template: unknown } };
+    if (typeof chosen.generation.template !== 'string' || !(chosen.generation.template in heightmapTemplates)) {
+      throw new Error(
+        `AFMG options: generation.template must be one of ${Object.keys(heightmapTemplates).join(', ')}, but is ${JSON.stringify(chosen.generation.template)} (image heightmaps are not supported)`,
+      );
+    }
+    if (chosen.map.seed === '' || chosen.map.seed === undefined) throw new Error('AFMG options: map.seed is missing');
+    // AFMG never finishes with no points at all.
+    const points = (g.options as { map: { graph: { points?: unknown } } }).map.graph?.points;
+    if (typeof points === 'number' && points <= 0) throw new Error(`AFMG options: map.graph.points must be above 0, but is ${points}`);
     // 5. The whole pipeline.
     await GenerationPipeline.run({});
     // 6. What it made, and the same as AFMG's export, built while the generator's globals are still this world's.
@@ -63,6 +75,12 @@ async function run(given: PartialOptions): Promise<Generated> {
     // 7. The seeded generator must not outlive the call.
     Math.random = original;
   }
+}
+
+/** The ids of AFMG's procedural heightmap templates. */
+export async function templateIds(): Promise<string[]> {
+  const { heightmapTemplates } = await import('@/data/heightmap-templates');
+  return Object.keys(heightmapTemplates);
 }
 
 let queue: Promise<unknown> = Promise.resolve();

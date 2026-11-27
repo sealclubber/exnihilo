@@ -30,7 +30,7 @@ With Lomia's saved `map` and `generation` options, in 0.7 s
 
 The same as the gameplan's summary in every figure.
 
-## Step 2: the export built in memory (stopped)
+## Step 2: the export built in memory (stopped, then accepted)
 
 **How it is built.** The builders in AFMG's `services/io/export-json.ts` (`getMapInfo`, `getSettings`,
 `getPackCellsData`, `getGridCellsData`) are not exported; the module exports only `exportToJson`, which needs a
@@ -72,12 +72,39 @@ I have not traced which change between 1.158.0 and 1.159.0 did it.
 fixture. The importer reads none of `coa`, `events`, `military`, `markers`, `zones`, `journeys` or
 `settings.options.app`. Step 3 has not been started.
 
-**Decisions needed.** Some ways forward, none taken:
-- Accept `events` in place of `campaigns` and teach the importer to read wars from either; the step 3 test then
-  compares everything but the states' wars.
-- Compare step 3 without the states' wars, and leave reading `events` to a later phase.
-- Re-export `fixtures/afmg/lomia.json` from AFMG 1.159.0, so that the outside reference and the pin agree. The
-  existing Lomia tests would then run on the new export.
+**Decision (Nov 27, 2026).** Wars, campaigns and coats of arms are not wanted; what matters is the terrain. The
+differences above are accepted. `packages/worldgen/test/world.test.ts` allows exactly those paths and fails on any
+other difference; it also checks that the grid, the cells, vertices, features, rivers, routes and name bases are
+equal.
+
+## Step 3: through the importer (done)
+
+- **The importer had to change by one line.** It required each state's `campaigns`, and threw on the generated
+  export (`state 1: field "campaigns" is missing`). A state without `campaigns` now has no wars, as the project's
+  rule has an absent value stay absent (`packages/core/src/afmg/importer.ts`; a test in `importer.test.ts`). The
+  world format is unchanged. The importer still reads no `pack.events`.
+- `createWorld(lomiaOptions)` equals `importAfmg(fixture).world` in everything but two things:
+  - `info.source.version`: `1.159.0`, against `1.158.0`.
+  - every state's `wars`: none, against the fixture's (23 states).
+- The import report differs as expected: an `unverified-version` warning (the importer was verified against
+  1.158), and `pack.events` among the sections not read.
+
+**The wrapper, beyond the reference.**
+- **Template and seed.** AFMG's defaults leave `generation.template` and `map.seed` empty; its interface fills
+  them in. Headless, an empty or unknown template is taken for an image heightmap and fails for want of a canvas
+  (`document.createElement is not a function`). The wrapper now requires one of the 14 procedural templates
+  (read from AFMG's `data/heightmap-templates.ts`) and a seed, and refuses with a message naming the choices.
+- **Points.** With `map.graph.points` at 0, AFMG never returns. The wrapper refuses 0 and below.
+- **Dialogs.** A small or cold world has too few populated cells for the cultures asked for. AFMG then logs a
+  warning and opens a dialog saying the same ("Extreme climate warning", `model/society/cultures-generator.ts`),
+  which fails without a page and stops the whole run. The bundle replaces AFMG's `ui/dialog/dialog.ts`
+  with a stand-in whose every call does nothing (`src/headless/dialog.ts`, an esbuild plugin in
+  `scripts/build.ts`). Nothing under `vendor/afmg/` is changed, and nothing a dialog does feeds the world; Lomia
+  is reproduced the same with it.
+
+The tests of the gameplan's table that this covers all pass: same input, same world; no leak (Lomia after a
+small archipelago equals Lomia first); `Math.random` restored after a run and after one AFMG fails inside
+(`climate: null` fails at the temperatures step); overlapping calls each correct.
 
 ## A note on the project's rules
 

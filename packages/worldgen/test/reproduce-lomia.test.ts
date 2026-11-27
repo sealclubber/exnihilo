@@ -17,7 +17,7 @@ let made: Generated;
 
 beforeAll(async () => {
   await buildBundle();
-  made = await (await loadGenerator())(lomiaOptions);
+  made = await (await loadGenerator()).generate(lomiaOptions);
 });
 
 /** For each field, how many cells of the fixture's list the generated column matches. */
