@@ -130,6 +130,22 @@ Each gave the same fingerprint on two runs and imports without error (warnings: 
 provinces without a seat, 11 and 8, as Lomia has some). Saved in `fixtures/worlds/` as the options and the
 fingerprint; `packages/worldgen/test/new-worlds.test.ts` holds them.
 
+## Step 5: cities on a new world (done)
+
+On the `continents` world (seed `1127`, 20,000 points), the largest settlement of each kind, made by the city
+generator and laid out by the pack's generator with every invariant checked
+(`packages/worldgen/test/cities.test.ts`, about 20 s):
+
+| Kind | Settlement | People | Size group | Generator | Lots | Problems |
+| --- | --- | --- | --- | --- | --- | --- |
+| Capital (also a port on a river) | Castil, `settlement-1` | 42,167 | capital | staged | 7,652 | 0 |
+| Port | Causfield, `settlement-803` | 23,094 | city | staged | 4,443 | 0 |
+| River town | Duntef, `settlement-63` | 23,098 | city | staged | 4,286 | 0 |
+| Village | Biverton, `settlement-953` | 999 | fort | village | 163 | 0 |
+| Walled town | Amkarou, `settlement-1010` | 22,900 | city | staged | 4,208 | 0 |
+
+Castil is larger than any town of Lomia and was laid out in about 6 s.
+
 ## A note on the project's rules
 
 CLAUDE.md rule 2 has only `packages/core/src/afmg` know AFMG's structures. `packages/worldgen` is AFMG, and its
