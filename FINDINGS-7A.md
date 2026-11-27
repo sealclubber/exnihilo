@@ -144,7 +144,7 @@ generator and laid out by the pack's generator with every invariant checked
 | Village | Biverton, `settlement-953` | 999 | fort | village | 163 | 0 |
 | Walled town | Amkarou, `settlement-1010` | 22,900 | city | staged | 4,208 | 0 |
 
-Castil is larger than any town of Lomia and was laid out in about 6 s.
+Castil is Lomia's second-largest size (Pombal has 47,603, Ruha 35,699) and was laid out in about 6 s.
 
 ## A note on the project's rules
 
