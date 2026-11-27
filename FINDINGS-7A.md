@@ -189,6 +189,15 @@ and the pack's `modifiers.sizeGroups` that the city generator reads, which this 
 it needs a decision on whether a hamlet, a monastery, a caravanserai and a trading post are new size groups for
 the city generator or are mapped to existing ones.
 
+## Checks
+
+- `npm run check`: exit 1; 1,116 of 1,117 tests pass. The one failure is `rounds.test.ts`, "busiest streets around
+  midday", which fails on `main` too since phase 6G's cells (`FINDINGS-6G.md`) and is under review.
+- `npm run test:viewer`: exit 1; 24 of 27 pass, `new-world.e2e.ts` among them. The three failures are in
+  `viewer.e2e.ts` and expect Lomia's towns to be laid out by the grid (`summary.generator` `grid`) and
+  `settlement-455` to have gates. Nothing of this phase touches them, `viewer.e2e.ts` or the layout code; they
+  look stale since the staged generator became the pack's. Not run on `main` to confirm.
+
 ## A note on the project's rules
 
 CLAUDE.md rule 2 has only `packages/core/src/afmg` know AFMG's structures. `packages/worldgen` is AFMG, and its
