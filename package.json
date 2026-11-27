@@ -11,7 +11,7 @@
   "scripts": {
     "test": "vitest run",
     "test:viewer": "vitest run --config vitest.viewer.config.ts",
-    "typecheck": "tsc -p packages/core && tsc -p packages/server && tsc -p packages/client && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p packages/core && tsc -p packages/server && tsc -p packages/client && tsc -p packages/worldgen && tsc -p tsconfig.test.json",
     "check": "npm run typecheck && npm test",
     "import": "node packages/server/src/cli.ts",
     "server": "node packages/server/src/main.ts",

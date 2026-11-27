@@ -34,6 +34,7 @@ town people who do not live there.
 | `packages/core` | The world format, the AFMG importer, the setting pack format, the city generator, the layout format, generator and path function, daily life (calendar, day plans, whereabouts), outsiders (a town's draw, travellers and vagrants), and the avatar (its state and the pure functions on it). Pure code: no disk, network, clock or unseeded randomness. |
 | `packages/server` | SQLite storage, the pack loader, the import, generate and day commands, the world clock, the avatar's state, and the HTTP API. |
 | `packages/client` | The browser viewer, city inspector and living town map. Uses `core` for types only. |
+| `packages/worldgen` | AFMG's generator, vendored untouched in `vendor/afmg/` (`VENDORED.md` names the commit), a headless wrapper (`src/entry.ts`) and the build that bundles them into `dist/afmg.mjs` (built, not committed). Makes a world from a seed and options (phase 7A, [sim-7a.md](sim-7a.md)). |
 | `packs/medieval` | The first setting pack: every occupation, building and number the generator uses. |
 | `fixtures/afmg` | The Lomia export, used by the tests. |
 
@@ -1499,3 +1500,8 @@ Headless Chromium draws no faster than 60.
 At 03:00 at least 95% of residents are asleep at home in every one of the 682
 settlements, the forts included, now that the night watch is a third of the
 watch and not half. The test checks Badanos and Vereceldo.
+
+## Credits
+
+New worlds are made by [Azgaar's Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator)
+by Max Haniyeu (Azgaar), MIT licensed, vendored in `packages/worldgen/vendor/afmg/` with its `LICENSE`.
