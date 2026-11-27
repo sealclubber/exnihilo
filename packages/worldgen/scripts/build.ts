@@ -2,15 +2,24 @@
  * Bundles AFMG's generator (`vendor/afmg/`, untouched) with the headless wrapper (`src/entry.ts`) into one
  * module, `dist/afmg.mjs`. AFMG imports through an `@/` alias without file extensions, which Node does not
  * resolve on its own. Two of its modules (`utils/i18n.ts`, `model/icon-sets.ts`) call Vite's
- * `import.meta.glob` to load translations and icons; neither is wanted here, so it is stubbed.
+ * `import.meta.glob` to load translations and icons; neither is wanted here, so it is stubbed. AFMG's version
+ * is read from its source and put in as `AFMG_VERSION`.
  *
  * Usage: node packages/worldgen/scripts/build.ts   (or `npm run build -w @worldsim/worldgen`)
  */
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const bundlePath = `${root}dist/afmg.mjs`;
+
+/** AFMG's version, read from its `services/versioning.ts`: importing that module brings AFMG's whole interface. */
+export function afmgVersion(): string {
+  const found = /export const VERSION = "([^"]+)"/.exec(readFileSync(`${root}vendor/afmg/services/versioning.ts`, 'utf8'));
+  if (!found?.[1]) throw new Error('packages/worldgen: no `export const VERSION` in vendor/afmg/services/versioning.ts');
+  return found[1];
+}
 
 export async function buildBundle(): Promise<string> {
   await build({
@@ -20,7 +29,7 @@ export async function buildBundle(): Promise<string> {
     format: 'esm',
     alias: { '@': `${root}vendor/afmg` },
     loader: { '.json': 'json' },
-    define: { 'import.meta.glob': 'globStub' },
+    define: { 'import.meta.glob': 'globStub', AFMG_VERSION: JSON.stringify(afmgVersion()) },
     banner: { js: 'const globStub = () => ({});' },
     outfile: bundlePath,
     logLevel: 'warning',

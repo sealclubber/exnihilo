@@ -11,6 +11,8 @@ export interface Generated {
   grid: any;
   pack: any;
   options: any;
+  /** The world as AFMG's "Full" JSON export, the text a downloaded `.json` file holds. */
+  json: string;
 }
 
 /** AFMG's options, any part of them: objects merge over the defaults key by key; anything else replaces. */
