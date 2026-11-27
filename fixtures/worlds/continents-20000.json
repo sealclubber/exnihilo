@@ -1,0 +1,10 @@
+{
+  "options": { "seed": "1127", "template": "continents", "points": 20000 },
+  "fingerprint": {
+    "gridCells": 20048,
+    "packCells": 13665,
+    "heights": "687f27470eafc834219411231e2982fd0ac049e4b31e143c603cfe05047918a6",
+    "rivers": 187,
+    "burgs": 1080
+  }
+}

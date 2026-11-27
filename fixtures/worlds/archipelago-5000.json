@@ -1,0 +1,10 @@
+{
+  "options": { "seed": "5005", "template": "archipelago", "points": 5000 },
+  "fingerprint": {
+    "gridCells": 4984,
+    "packCells": 2545,
+    "heights": "bb3cda033eb5be705859a460c663dc6a47dc9cfe4189905cbe2dbdd057457faf",
+    "rivers": 96,
+    "burgs": 469
+  }
+}

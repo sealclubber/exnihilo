@@ -15,6 +15,9 @@ if (typeof g.Node === 'undefined')
     addEventListener() {}
     removeEventListener() {}
   };
+// AFMG reads its page's address: `?options=default` asks for the map a fresh browser would make, ignoring the
+// values a user pinned in `localStorage` (`model/options/pins.ts`).
+if (typeof g.location === 'undefined') g.location = { href: 'http://localhost/?options=default' };
 if (typeof g.document === 'undefined')
   g.document = { readyState: 'complete', addEventListener: () => {}, getElementById: () => null, querySelector: () => null };
 Object.assign(globalThis, { grid: undefined, pack: {} });
@@ -40,7 +43,17 @@ function mergeInto(target: Record<string, unknown>, source: Record<string, unkno
   }
 }
 
-async function run(given: PartialOptions): Promise<Generated> {
+/** How the options are made: AFMG's defaults, or what a new map in AFMG rolls from the seed. */
+export interface Settings {
+  /**
+   * Roll what AFMG rolls for a new map (`Options.randomize`: the template, cultures, states, climate, the map's
+   * name and more) from `map.seed` before the caller's options are merged over it. Without it the caller's
+   * options are merged over AFMG's bare defaults, which is right for saved settings, such as an export's.
+   */
+  roll?: boolean;
+}
+
+async function run(given: PartialOptions, { roll = false }: Settings): Promise<Generated> {
   const original = Math.random;
   try {
     // 2. Nothing of the last world is left.
@@ -53,6 +66,17 @@ async function run(given: PartialOptions): Promise<Generated> {
     log.enabled.info = false;
     // 3. Fresh defaults for every world, or one world's settings leak into the next.
     g.options = Options.getDefaultOptions();
+    if (roll) {
+      // As AFMG's `generate` in `app/lifecycle.ts` does for a new map with a given seed. `setSeed` (`app/seed.ts`)
+      // is its two lines for a given seed, copied: importing it brings the whole app.
+      const seed = (given.map as { seed?: unknown } | undefined)?.seed;
+      if (typeof seed !== 'string' || seed === '') throw new Error('AFMG options: map.seed is missing');
+      const { default: Alea } = await import('alea');
+      Options.setGraphSize();
+      (g.options as { map: { seed: string } }).map.seed = seed;
+      Math.random = Alea(seed);
+      Options.randomize();
+    }
     // 4. The caller's options. AFMG's interface fills in the seed and the template; without it both are empty, and
     // a template that is not one of the procedural ones is taken for an image heightmap, which needs a canvas.
     mergeInto(g.options as Record<string, unknown>, given);
@@ -86,8 +110,8 @@ export async function templateIds(): Promise<string[]> {
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Makes one world. A call made while another is running waits for it: the generator's state is global. */
-export function generateWorld(options: PartialOptions = {}): Promise<Generated> {
-  const result = queue.then(() => run(options));
+export function generateWorld(options: PartialOptions = {}, settings: Settings = {}): Promise<Generated> {
+  const result = queue.then(() => run(options, settings));
   queue = result.catch(() => undefined);
   return result;
 }

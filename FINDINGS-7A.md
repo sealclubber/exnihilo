@@ -106,6 +106,30 @@ The tests of the gameplan's table that this covers all pass: same input, same wo
 small archipelago equals Lomia first); `Math.random` restored after a run and after one AFMG fails inside
 (`climate: null` fails at the temperatures step); overlapping calls each correct.
 
+## Step 4: a second and third world (done)
+
+**A new world needs AFMG's new-map rolls.** With only a seed, a template and points merged over AFMG's defaults,
+the world has no name and the importer refuses it (`info.mapName must not be empty`). In AFMG, a new map first
+rolls its settings from the seed (`Options.randomize`: the map's name, culture set and count, states, provinces,
+religions, the climate, the distance scale, the year and era; `app/lifecycle.ts`, `generate`). Reproducing an
+export does not need that, because the export's options hold what was rolled. So the wrapper has two ways:
+- **Saved settings** (the default): the caller's options over AFMG's bare defaults. Lomia is made this way.
+- **`roll`**: as AFMG's `generate` does for a given seed: the graph size, the seed (`Math.random = Alea(seed)`,
+  the two lines of `app/seed.ts`'s `setSeed` for a given seed, copied because importing it brings the whole app),
+  `Options.randomize()`, then the caller's options over that. `newWorldOptions({ seed, template, points })` builds
+  this call.
+- The page address is stubbed as `?options=default`, AFMG's own way of asking for a fresh browser's map: pins a
+  user saved in `localStorage` are ignored, so nothing outside the call shapes the world.
+
+| World | Seed | Grid cells | Refined cells | Rivers | Burgs | Time |
+| --- | --- | --- | --- | --- | --- | --- |
+| `continents`, 20,000 points | `1127` | 20,048 | 13,665 | 187 | 1,080 | 1.5 to 1.7 s |
+| `archipelago`, 5,000 points | `5005` | 4,984 | 2,545 | 96 | 469 | 0.3 s |
+
+Each gave the same fingerprint on two runs and imports without error (warnings: the unverified version, and
+provinces without a seat, 11 and 8, as Lomia has some). Saved in `fixtures/worlds/` as the options and the
+fingerprint; `packages/worldgen/test/new-worlds.test.ts` holds them.
+
 ## A note on the project's rules
 
 CLAUDE.md rule 2 has only `packages/core/src/afmg` know AFMG's structures. `packages/worldgen` is AFMG, and its

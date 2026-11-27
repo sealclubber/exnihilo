@@ -18,7 +18,15 @@ export interface Generated {
 /** AFMG's options, any part of them: objects merge over the defaults key by key; anything else replaces. */
 export type AfmgOptions = { [key: string]: unknown };
 
-export type GenerateWorld = (options?: AfmgOptions) => Promise<Generated>;
+/**
+ * `roll`: roll what AFMG rolls for a new map from `map.seed` first (`Options.randomize`), then merge the options
+ * over that. Without it the options merge over AFMG's bare defaults, which suits saved settings such as an export's.
+ */
+export interface Settings {
+  roll?: boolean;
+}
+
+export type GenerateWorld = (options?: AfmgOptions, settings?: Settings) => Promise<Generated>;
 
 export interface Generator {
   /** Makes one world. A call made while another runs waits for it: AFMG's state is global. */
